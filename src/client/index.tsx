@@ -16,6 +16,7 @@ import { XaiSettings } from './XaiSettings.tsx'
 import type { XaiOAuthSettingsInjected } from './XaiSettings.tsx'
 import { en, zh } from './locales.ts'
 import type { XaiOAuthSettingsKey } from './locales.ts'
+import { decorateSettingsNavIcon } from './nav-icon.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -73,4 +74,6 @@ export function apply(ctx: Context): void {
       inject: (): XaiOAuthSettingsInjected => ({ t }),
     }, XaiSettings)
   })
+
+  decorateSettingsNavIcon(ctx)
 }
