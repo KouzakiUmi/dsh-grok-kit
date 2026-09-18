@@ -28,6 +28,14 @@ const MAX_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024
 const REQUEST_IMAGE_PIXEL_BUDGET = 2048 * 2048
 const REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
 
+/**
+ * Profile shape carrying the per-model failure map that dsh-llm-pi-ai
+ * 0.1.5-rc.2 bare-reads in `modelOf` (`profile.modelErrors.get(model)`,
+ * issue #1). The field does not exist on 0.1.2-rc.1 types, where an extra
+ * property is ignored; keep it typed here until the test matrix moves.
+ */
+type ResolvedProfile = ResolvedPiAiProviderProfile & { modelErrors?: ReadonlyMap<string, string> }
+
 /** Minimal pi-ai AuthContext over the host process environment and filesystem. */
 function hostAuthContext(): AuthContext {
   return {
@@ -56,17 +64,18 @@ export function createXaiOAuthAdapter(
   session: XaiOAuthSession,
   resolveAttachments: () => AttachmentStore | undefined,
 ): PiAiAdapter {
-  let cached: { provider: ReturnType<XaiOAuthSession['provider']>; map: Map<string, ResolvedPiAiProviderProfile> } | undefined
+  let cached: { provider: ReturnType<XaiOAuthSession['provider']>; map: Map<string, ResolvedProfile> } | undefined
   return new PiAiAdapter({
     profiles: () => {
       const piProvider = session.provider()
       if (cached?.provider === piProvider) return cached.map
-      const map = new Map<string, ResolvedPiAiProviderProfile>([[XAI_OAUTH_ROUTE, {
+      const map = new Map<string, ResolvedProfile>([[XAI_OAUTH_ROUTE, {
         provider: XAI_OAUTH_ROUTE,
         displayName: 'xAI Grok',
         streamIdleTimeoutMs: XAI_OAUTH_STREAM_IDLE_TIMEOUT_MS,
         retryPolicy: resolveRetryPolicy(undefined, 'dsh-grok-kit retryPolicy'),
         configuredMaxTokens: new Map(),
+        modelErrors: new Map(),
         piProvider,
         reasoning: 'high',
         maxRequestImageBytes: MAX_REQUEST_IMAGE_BYTES,

@@ -6,7 +6,7 @@
 
 ## 先决条件
 
-- PATH 上有 DeepSeek Harness 的 `dsh`（**0.1.2-rc.1**；本插件不声称支持 0.1.1）
+- PATH 上有 DeepSeek Harness 的 `dsh`（**0.1.2-rc.1** 为测试矩阵；**0.1.5-rc.2** 的模型解析路径已验证可用；不声称支持 0.1.1）
 - xAI 允许走 OAuth API 的 SuperGrok 或 X Premium 账号
 - 能打开浏览器完成 device-code 授权
 

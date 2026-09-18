@@ -1,7 +1,7 @@
 {
   "name": "dsh-grok-kit",
   "description": "Unofficial community plugin for DeepSeek Harness: use a SuperGrok / X Premium subscription via OAuth, with grok-4.6 chat, fused server-side web/X search, and Imagine",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "publishConfig": {
     "access": "public"
   },
@@ -36,7 +36,8 @@
     "build": "npm run typecheck && tsdown && node scripts/wrap-client.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
-    "check": "npm run typecheck && npm run test && npm run build"
+    "check": "npm run typecheck && npm run test && npm run build",
+    "verify:host-compat": "node scripts/verify-host-compat.mjs"
   },
   "exports": {
     ".": {
@@ -78,24 +79,24 @@
     }
   },
   "peerDependencies": {
-    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-ai": "^0.84.4 || ^0.85.1",
     "@deepseek-ai/cordis": "^4.0.2",
-    "@deepseek-ai/dsh-atomic-write": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-attachment": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-authorization": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-home-paths": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-fs": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-invariants": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-launch-environment": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-llm-pi-ai": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-scope": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-session": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1",
-    "@deepseek-ai/dsh-tools": "^0.1.2-rc.1",
+    "@deepseek-ai/dsh-atomic-write": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-attachment": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-authorization": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-home-paths": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-credentials": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-fs": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-launch-environment": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-scope": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-session": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-settings": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-system-prompt": "^0.1.2-rc.1 || ^0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "^0.1.2-rc.1 || ^0.1.5-rc.2",
     "@deepseek-ai/schemastery": "^3.18.2",
     "react": "^18.2.0"
   },

@@ -69,3 +69,9 @@ jobs:
         run: |
           npm install -g @deepseek-ai/dsh@0.1.2-rc.1
           node scripts/pack-install-smoke.mjs
+
+      - name: Host compat probe (dsh-llm-pi-ai 0.1.5-rc.2)
+        run: node scripts/verify-host-compat.mjs 0.1.5-rc.2
+
+      - name: Host compat probe (dsh-llm-pi-ai 0.1.2-rc.1)
+        run: node scripts/verify-host-compat.mjs 0.1.2-rc.1

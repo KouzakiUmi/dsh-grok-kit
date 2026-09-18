@@ -146,7 +146,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#2a945b9a20ef97216c675
 
 ## 兼容性与限制
 
-- 当前测试矩阵：DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4`（Node 22/24）。peer 范围按该矩阵声明，不声称支持 0.1.1
+- 当前测试矩阵：DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4`（Node 22/24）。peer 范围同时接受 `0.1.5-rc.2`（+ pi-ai `0.85.1`）宿主：模型目录与解析路径（issue #1 的崩溃点）由 CI 中的离线 host-compat 探针在该版本上验证；完整矩阵仍是 0.1.2-rc.1，不声称支持 0.1.1
 - 某些订阅档位可能允许浏览器登录，却对聊天或服务端搜索返回 HTTP 403；这是账户资格/服务策略问题，不等同于 token 过期
 - HTTP 401 会在串行刷新后重试一次；403 不会按 token 过期处理
 - 不支持与另一个注册相同 xAI OAuth 路由的 bundle 同时安装；请先按 [INSTALL.zh.md](INSTALL.zh.md) 的迁移步骤移除冲突 bundle
