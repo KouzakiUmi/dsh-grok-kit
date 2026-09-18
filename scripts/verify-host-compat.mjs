@@ -2,8 +2,9 @@
 /**
  * Offline host-compat probe: pack the plugin, install it into a scratch
  * project next to a *published* @deepseek-ai host set, then drive the
- * `resolveModel` path that issue #1 crashed on (`PiAiAdapter.modelOf`
- * bare-reads `profile.modelErrors` in dsh-llm-pi-ai 0.1.5-rc.2).
+ * `resolveModel` and `prepareCall` paths that issue #1 crashed on
+ * (`PiAiAdapter.modelOf` bare-reads `profile.modelErrors` in
+ * dsh-llm-pi-ai 0.1.5-rc.2).
  *
  * Needs no xAI credentials, no login state, and no active subscription:
  * model resolution reads static pi-ai registry data plus the plugin-built
@@ -87,7 +88,15 @@ const session = {
 const adapter = createXaiOAuthAdapter(session, () => undefined)
 const info = await adapter.resolveModel('${PROBE_ROUTE}', '${PROBE_MODEL}')
 if (!info || typeof info !== 'object') throw new Error('resolveModel returned no model info')
+if (typeof adapter.prepareCall !== 'function') throw new Error('adapter.prepareCall is not a function (mixed host/plugin version graph)')
+const prepared = await adapter.prepareCall('${PROBE_ROUTE}', '${PROBE_MODEL}')
+if (!prepared || typeof prepared !== 'object' || !prepared.model) throw new Error('prepareCall returned no prepared call info')
+if (prepared.model.provider !== '${PROBE_ROUTE}' || prepared.model.id !== '${PROBE_MODEL}') {
+  throw new Error('prepareCall resolved ' + prepared.model.provider + '/' + prepared.model.id + ', expected ${PROBE_ROUTE}/${PROBE_MODEL}')
+}
+if (typeof prepared.stream !== 'function') throw new Error('prepareCall stream is not a function (stream never invoked here)')
 console.log('resolveModel OK: ${PROBE_ROUTE}/${PROBE_MODEL}')
+console.log('prepareCall OK: ${PROBE_ROUTE}/${PROBE_MODEL} (stream seam present, never invoked)')
 `
 
 let tarball
