@@ -95,10 +95,10 @@ npx @deepseek-ai/dsh web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-For a reproducible Git install, pin a full commit (v0.1.8 code at `2a945b9`; `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin):
+For a reproducible Git install, pin a full commit (v0.1.11 code at `5515c44`; `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#2a945b9a20ef97216c6759c12c3a1f4dae13d231
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#5515c4496b5ab117ddc0ba15c72fe11043b7e00d
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
