@@ -32,10 +32,10 @@ dsh plugin --profile web add dsh-grok-kit@latest
 
 If the source does not switch, run `dsh plugin --profile web remove dsh-grok-kit`, then add it again.
 
-For a reproducible install, pin a full Git commit (v0.1.11 code at `5515c44`; this is not the rolling default branch):
+For a reproducible install, pin a full Git commit (v0.1.11 code at `31167bd`; this is not the rolling default branch):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#5515c4496b5ab117ddc0ba15c72fe11043b7e00d
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402e7f3b93d7ca3e92b3be
 ```
 
 `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is **not** a reproducible pin.
