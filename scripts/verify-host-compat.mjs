@@ -24,6 +24,39 @@ const HOST_SETS = {
   '0.1.5-rc.2': { dsh: '0.1.5-rc.2', piAi: '0.85.1' },
   '0.1.2-rc.1': { dsh: '0.1.2-rc.1', piAi: '0.84.4' },
 }
+// Test-fixture freeze: every @deepseek-ai host component the probe tree can
+// pull (explicit installs plus the required peers npm auto-installs) is
+// pinned to the exact same rc as its leg, so a later rc in the registry
+// (e.g. dsh-authorization@0.1.5-rc.3 peering dsh-llm ^0.1.5-rc.3) cannot
+// drift the fixture into an ERESOLVE. This freezes the probe only;
+// production peer ranges in package.json stay untouched.
+const DSH_FIXTURE_COMPONENTS = [
+  'dsh-agent',
+  'dsh-attachment',
+  'dsh-atomic-write',
+  'dsh-authorization',
+  'dsh-brand',
+  'dsh-code-runtime',
+  'dsh-credentials',
+  'dsh-fs',
+  'dsh-home-paths',
+  'dsh-invariants',
+  'dsh-launch-environment',
+  'dsh-llm',
+  'dsh-llm-pi-ai',
+  'dsh-sandbox',
+  'dsh-scope',
+  'dsh-session',
+  'dsh-session-projection',
+  'dsh-settings',
+  'dsh-system-prompt',
+  'dsh-timeout',
+  'dsh-tools',
+  'dsh-typert-protocol',
+  'dsh-user-approval',
+  'dsh-util-crypto',
+  'dsh-util-values',
+]
 const PROBE_MODEL = 'grok-4.6'
 const PROBE_ROUTE = 'xai-oauth'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -120,20 +153,21 @@ try {
     '--no-fund',
     '--loglevel=error',
     tarball,
-    `@deepseek-ai/dsh-llm@${set.dsh}`,
-    `@deepseek-ai/dsh-llm-pi-ai@${set.dsh}`,
-    `@deepseek-ai/dsh-tools@${set.dsh}`,
-    `@deepseek-ai/dsh-home-paths@${set.dsh}`,
-    `@deepseek-ai/dsh-atomic-write@${set.dsh}`,
+    ...DSH_FIXTURE_COMPONENTS.map(name => `@deepseek-ai/${name}@${set.dsh}`),
     '@deepseek-ai/schemastery@3.18.2',
     '@deepseek-ai/cordis@4.0.2',
     `@earendil-works/pi-ai@${set.piAi}`,
   ], { cwd: probeDir, env, stdio: 'inherit' })
 
-  const installedDsh = JSON.parse(readFileSync(join(probeDir, 'node_modules', '@deepseek-ai', 'dsh-llm-pi-ai', 'package.json'), 'utf8')).version
+  for (const name of DSH_FIXTURE_COMPONENTS) {
+    const installed = JSON.parse(readFileSync(join(probeDir, 'node_modules', '@deepseek-ai', name, 'package.json'), 'utf8')).version
+    if (installed !== set.dsh) {
+      throw new Error(`probe resolved @deepseek-ai/${name} ${installed}, expected frozen fixture version ${set.dsh}`)
+    }
+  }
   const installedPiAi = JSON.parse(readFileSync(join(probeDir, 'node_modules', '@earendil-works', 'pi-ai', 'package.json'), 'utf8')).version
-  if (installedDsh !== set.dsh || installedPiAi !== set.piAi) {
-    throw new Error(`probe resolved dsh-llm-pi-ai ${installedDsh} / pi-ai ${installedPiAi}, expected ${set.dsh} / ${set.piAi}`)
+  if (installedPiAi !== set.piAi) {
+    throw new Error(`probe resolved pi-ai ${installedPiAi}, expected ${set.piAi}`)
   }
 
   run('node', ['probe.mjs'], { cwd: probeDir, env, stdio: 'inherit' })
