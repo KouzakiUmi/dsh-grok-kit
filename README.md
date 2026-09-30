@@ -2,6 +2,12 @@
 
 **中文** · [English](README.en.md)
 
+> **维护状态公告（2026-09-30）**
+>
+> 维护者目前**没有有效的 SuperGrok 订阅**，无法持续实测聊天、搜索与 Imagine 的在线表现。本项目进入**有限维护**：暂停主动功能开发，不承诺对新版 DeepSeek Harness 或 xAI 上游变化及时适配。已发布版本与源码继续保留；在线可用性未经当前实测。
+>
+> 有限维护期间，离线可复现的问题、文档、打包与宿主兼容修复可按可用精力处理。在线行为的变化需要由拥有真实订阅的社区测试者验证后，再决定是否进入正式发布。欢迎按[实测反馈流程](#实测反馈流程)提交测试结果；有意长期协作的测试者可以在 issue 中说明。**任何情况下都不要分享账号、token 或 `auth.json`。**
+
 <p align="center">
   <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit：DeepSeek Harness 的 Grok OAuth 与融合搜索插件">
 </p>
@@ -163,6 +169,12 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402
 4. 重新启动。
 
 启动时的目录刷新失败（含上述锁超时）不会阻断聊天：插件先用缓存的模型列表，并在后台按 5s / 30s / 120s 退避重试。
+
+## 实测反馈流程
+
+有限维护期间，插件在线行为结论主要来自社区实测。拥有有效 SuperGrok / X Premium 订阅的用户可以按 [live-testing 模板](https://github.com/MaRi23333/dsh-grok-kit/issues/new?template=live-testing.md) 开 issue，逐项记录聊天、连续对话、工具调用、搜索与 Imagine 的通过 / 失败 / 未测状态，并附上插件版本、`dsh --version`、Node 版本、操作系统、订阅档位（按官方原文）、测试日期和最小复现步骤。提交前先脱敏：不要粘贴 token、`auth.json` 内容、账号邮箱、session id、私有路径或私密对话内容。
+
+提交前请先搜索[现有 issue](https://github.com/MaRi23333/dsh-grok-kit/issues)，有相同问题时把结果补充到原 issue，不要重复开帖。不要仅为测试续订订阅，也不必覆盖每一个可选功能；单次会话中一项或几项的真实结果同样有价值。
 
 ## 开发
 

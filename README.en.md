@@ -2,6 +2,12 @@
 
 [中文](README.md) · **English**
 
+> **Maintenance status notice (2026-09-30)**
+>
+> The maintainer currently has **no active SuperGrok subscription** and cannot keep verifying chat, search, and Imagine against the live service. This project is entering **limited maintenance**: active feature development is paused, and timely adaptation to new DeepSeek Harness versions or upstream xAI changes is not promised. Published releases and the source remain available; live availability has not been re-verified recently.
+>
+> During limited maintenance, offline-reproducible fixes, docs, packaging, and host-compatibility work may be addressed as time permits. Changes to online behavior need verification from community testers with a real subscription before any formal release. Live-testing feedback is welcome via the [feedback workflow](#feedback-workflow); testers interested in longer-term collaboration can say so in an issue. **Never share accounts, tokens, or `auth.json`.**
+
 <p align="center">
   <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit: Grok OAuth and fused search for DeepSeek Harness">
 </p>
@@ -163,6 +169,12 @@ The “Search & feature options” card on Settings → xAI Grok can also overri
 4. Start again.
 
 A failed startup catalog refresh (including the lock timeout above) never blocks chat: the plugin serves the cached model list and retries in the background with 5s / 30s / 120s backoff.
+
+## Feedback workflow
+
+During limited maintenance, conclusions about online behavior mostly come from community testing. Users with an active SuperGrok / X Premium subscription can open an issue with the [live-testing template](https://github.com/MaRi23333/dsh-grok-kit/issues/new?template=live-testing.md), recording pass / fail / untested for chat, follow-up chat, tools, search, and Imagine, plus the plugin version, `dsh --version`, Node version, OS, subscription tier (exact official wording), test date, and minimal reproduction steps. Redact before submitting: no tokens, no `auth.json` contents, no account email, no session ids, no private filesystem paths, no private conversation content.
+
+Search [existing issues](https://github.com/MaRi23333/dsh-grok-kit/issues) first; add results to a matching issue instead of opening a duplicate. Do not renew a subscription just to test, and partial results from a single session are still valuable.
 
 ## Development
 
