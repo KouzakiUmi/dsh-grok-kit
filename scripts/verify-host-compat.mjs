@@ -21,8 +21,14 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HOST_SETS = {
-  '0.1.5-rc.2': { dsh: '0.1.5-rc.2', piAi: '0.85.1' },
-  '0.1.2-rc.1': { dsh: '0.1.2-rc.1', piAi: '0.84.4' },
+  '0.2.0-rc.2': { dsh: '0.2.0-rc.2', piAi: '0.87.1', schemastery: '3.18.4', cordis: '4.0.4' },
+  '0.1.5-rc.2': { dsh: '0.1.5-rc.2', piAi: '0.85.1', schemastery: '3.18.2', cordis: '4.0.2' },
+  '0.1.2-rc.1': { dsh: '0.1.2-rc.1', piAi: '0.84.4', schemastery: '3.18.2', cordis: '4.0.2' },
+}
+// Components absent from a given host line (renamed/absorbed upstream) are
+// excluded from that leg's frozen fixture; everything else stays pinned.
+const FIXTURE_EXCLUSIONS = {
+  '0.2.0-rc.2': ['dsh-code-runtime'],
 }
 // Test-fixture freeze: every @deepseek-ai host component the probe tree can
 // pull (explicit installs plus the required peers npm auto-installs) is
@@ -72,6 +78,7 @@ if (set === undefined) {
   console.error(`verify-host-compat: unknown host set "${requested}" (known: ${Object.keys(HOST_SETS).join(', ')})`)
   process.exit(2)
 }
+const fixtureComponents = DSH_FIXTURE_COMPONENTS.filter(name => !(FIXTURE_EXCLUSIONS[requested] ?? []).includes(name))
 if (!existsSync(join(root, 'lib', 'index.js'))) {
   console.error('verify-host-compat: lib/index.js is missing — run `npm run build` first')
   process.exit(2)
@@ -153,13 +160,13 @@ try {
     '--no-fund',
     '--loglevel=error',
     tarball,
-    ...DSH_FIXTURE_COMPONENTS.map(name => `@deepseek-ai/${name}@${set.dsh}`),
-    '@deepseek-ai/schemastery@3.18.2',
-    '@deepseek-ai/cordis@4.0.2',
+    ...fixtureComponents.map(name => `@deepseek-ai/${name}@${set.dsh}`),
+    `@deepseek-ai/schemastery@${set.schemastery}`,
+    `@deepseek-ai/cordis@${set.cordis}`,
     `@earendil-works/pi-ai@${set.piAi}`,
   ], { cwd: probeDir, env, stdio: 'inherit' })
 
-  for (const name of DSH_FIXTURE_COMPONENTS) {
+  for (const name of fixtureComponents) {
     const installed = JSON.parse(readFileSync(join(probeDir, 'node_modules', '@deepseek-ai', name, 'package.json'), 'utf8')).version
     if (installed !== set.dsh) {
       throw new Error(`probe resolved @deepseek-ai/${name} ${installed}, expected frozen fixture version ${set.dsh}`)

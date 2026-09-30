@@ -6,7 +6,7 @@ Idempotent runbook for humans and automation agents.
 
 ## Prerequisites
 
-- DeepSeek Harness `dsh` on PATH (**0.1.2-rc.1** is the tested matrix; **0.1.5-rc.2** is verified for the model resolution path; 0.1.1 is not claimed); a source checkout that runs `pnpm dsh` works too
+- DeepSeek Harness `dsh` on PATH (**0.1.2-rc.1** is the tested matrix; **0.1.5-rc.2** and **0.2.0-rc.2** are verified for the model resolution seam, with the 0.2.0 settings page and streaming still to be confirmed on a live host; 0.1.1 is not claimed); a source checkout that runs `pnpm dsh` works too
 - A SuperGrok or X Premium account that xAI allows on the OAuth API
 - A browser you can use to approve the device-code login
 
