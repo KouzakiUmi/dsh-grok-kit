@@ -35,7 +35,7 @@ dsh plugin --profile web add dsh-grok-kit@latest
 需要可复现安装时，可固定到完整 Git 提交（v0.1.11 代码在 `31167bd`；这不是滚动默认分支）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402e7f3b93d7ca3e92b3be
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#dfa0ea112d655715e04c1ac2a3f1d8bdebc66222
 ```
 
 不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 会跟随 `main`，**不是**可复现锚点。
