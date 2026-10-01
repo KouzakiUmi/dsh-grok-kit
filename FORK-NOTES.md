@@ -67,6 +67,10 @@ pnpm 的 scoped override 管不到它。只有成为**真依赖者**，pnpm 才�
 
 `src/`、`lib/`、`scripts/`、CI 配置与上游**逐字节相同**。
 
+**未改动项**：`devDependencies` 保留上游的 `@earendil-works/pi-ai: 0.84.4` 与整套测试矩阵配置。
+本 fork **未重跑上游的 `npm run check`**（typecheck + 单测 + 打包检查），因此不对"源码在 0.87.1
+类型下 typecheck 通过"作声明。运行时依赖与 peer 范围是本次唯一改动，其正确性由下面的契约探针验证。
+
 ---
 
 ## 安装到 DSH profile（`file:` 本地插件）
