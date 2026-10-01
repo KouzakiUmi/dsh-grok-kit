@@ -149,3 +149,22 @@ git rebase upstream/main
 - 基线：上游 `v0.1.13`（`0f3e4b1`）。上游自 2026-09-30 起进入**有限维护**（维护者无有效订阅，暂停功能开发）。
 - 本 fork **未做在线行为实测**；持有订阅的使用者实测结果请开 issue 记录，并附插件版本、`dsh --version`、Node 版本、系统、订阅档位与最小复现步骤（**不要粘贴 token / `auth.json` / 账号邮箱 / session id**）。
 - 离线可复现的问题、打包与宿主兼容修复在本 fork 内维护。
+
+---
+
+## 2026-10-01 合并：吸收 dsh-grok-imagine-edit 与 dsh-grok-imagine-ui（本 fork v0.1.14）
+
+自本版本起，两个卫星插件并入本包，不再保持 "src/lib 与上游逐字节相同"：
+
+| 原插件 | 去向 |
+| --- | --- |
+| `dsh-grok-imagine-edit` 0.1.0 | Host 侧：`src/imagine-edit-core.ts`（纯逻辑，零依赖）+ `src/imagine-edit.ts`（工具注册）；配置字段 `editTool` / `editModel` / `editMaxSourceImages` / `editMaxImageBytes`；测试 `tests/imagine-edit.spec.ts` |
+| `dsh-grok-imagine-ui` 0.1.0 | client 侧：`src/client/imagine-view.tsx`（toolview + turnTail slot），入口 `src/client/index.tsx`；`dsh.client.inject` 增加 `@deepseek-ai/dsh-client-ui-slots` |
+
+行为改进（合并的自然收益）：
+
+- **消除了重复 OAuth session**：原 edit 插件自建第二个 `XaiOAuthSession` 读同一凭据文件；现在直接复用主 session 与 token 源。
+- 工具名不变（`grok_imagine` / `grok_imagine_edit`），会话与模型习惯无感。
+- imagine-ui 的两个生产修复已保留在移植代码中：save_path 文本回退（原 FIX-null-render-save-path.md）、双工具名渲染（原 REVERT-edit-tool-support.md）。
+
+安装方式变化：profile 的 bundles 列表与 dependencies 移除 `dsh-grok-imagine-edit`、`dsh-grok-imagine-ui` 两条，仅保留 `dsh-grok-kit`。上游若复活，rebase 时上述四个 src 文件与 client 改动需手工搬移。
