@@ -11,7 +11,7 @@
  * profile, so a logged-out stub session is enough. Network is used only by
  * the scratch `npm install` itself.
  *
- * Usage: node scripts/verify-host-compat.mjs [0.1.5-rc.2|0.1.2-rc.1]
+ * Usage: node scripts/verify-host-compat.mjs [0.2.0-rc.2|0.1.5-rc.2|0.1.2-rc.1]
  * Requires `npm run build` (or a committed lib/) first.
  */
 import { execFileSync } from 'node:child_process'
