@@ -6,7 +6,7 @@ Idempotent runbook for humans and automation agents.
 
 ## Prerequisites
 
-- DeepSeek Harness `dsh` on PATH (**0.1.2-rc.1** is the tested matrix; **0.1.5-rc.2** is verified for the model resolution path; 0.1.1 is not claimed); a source checkout that runs `pnpm dsh` works too
+- DeepSeek Harness `dsh` on PATH (**0.1.2-rc.1** is the tested matrix; **0.1.5-rc.2** and **0.2.0-rc.2** are verified for the model resolution seam, with the 0.2.0 settings page and streaming still to be confirmed on a live host; 0.1.1 is not claimed); a source checkout that runs `pnpm dsh` works too
 - A SuperGrok or X Premium account that xAI allows on the OAuth API
 - A browser you can use to approve the device-code login
 
@@ -35,7 +35,7 @@ If the source does not switch, run `dsh plugin --profile web remove dsh-grok-kit
 For a reproducible install, pin a full Git commit (v0.1.11 code at `31167bd`; this is not the rolling default branch):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402e7f3b93d7ca3e92b3be
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#dfa0ea112d655715e04c1ac2a3f1d8bdebc66222
 ```
 
 `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is **not** a reproducible pin.

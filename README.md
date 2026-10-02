@@ -109,10 +109,12 @@ npx @deepseek-ai/dsh web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-需要固定到可复现的 Git 提交时，可使用（v0.1.11 代码在 `31167bd`；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点）：
+DSH `0.2.0-rc.2` 用户需要包含新宿主 peer 修复的 `0.1.14`；已发布的 `0.1.13` 不含此修复，可能被宿主的 bundle 准入检查跳过。
+
+需要固定到可复现的 Git 提交时，可使用（`0.1.14` 兼容修复代码锚点 `dfa0ea1`；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402e7f3b93d7ca3e92b3be
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#dfa0ea112d655715e04c1ac2a3f1d8bdebc66222
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。
@@ -160,7 +162,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402
 
 ## 兼容性与限制
 
-- 当前测试矩阵：DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4`（Node 22/24）。peer 范围同时接受 `0.1.5-rc.2`（+ pi-ai `0.85.1`）宿主：模型目录与解析路径（issue #1 的崩溃点）由 CI 中的离线 host-compat 探针在该版本上验证；完整矩阵仍是 0.1.2-rc.1，不声称支持 0.1.1
+- 当前测试矩阵：DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4`（Node 22/24）。peer 范围同时接受 `0.1.5-rc.2`（pi-ai `0.85.1`）与 `0.2.0-rc.2`（pi-ai `0.87.1`）宿主：模型目录、模型解析与调用准备 seam 由 CI 中的离线 host-compat 探针在这两条线上验证（0.2.0-rc.2 线为 seam 级验证，设置页、client bundle 与流式路径的完整真机表现仍待确认）；完整矩阵仍是 0.1.2-rc.1，不声称支持 0.1.1
 - 某些订阅档位可能允许浏览器登录，却对聊天或服务端搜索返回 HTTP 403；这是账户资格/服务策略问题，不等同于 token 过期
 - HTTP 401 会在串行刷新后重试一次；403 不会按 token 过期处理
 - 不支持与另一个注册相同 xAI OAuth 路由的 bundle 同时安装；请先按 [INSTALL.zh.md](INSTALL.zh.md) 的迁移步骤移除冲突 bundle

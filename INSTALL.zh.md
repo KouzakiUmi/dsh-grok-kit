@@ -6,7 +6,7 @@
 
 ## 先决条件
 
-- PATH 上有 DeepSeek Harness 的 `dsh`（**0.1.2-rc.1** 为测试矩阵；**0.1.5-rc.2** 的模型解析路径已验证可用；不声称支持 0.1.1）
+- PATH 上有 DeepSeek Harness 的 `dsh`（**0.1.2-rc.1** 为测试矩阵；**0.1.5-rc.2** 与 **0.2.0-rc.2** 的模型解析 seam 已验证可用，0.2.0 线的设置页与流式路径待真机确认；不声称支持 0.1.1）
 - xAI 允许走 OAuth API 的 SuperGrok 或 X Premium 账号
 - 能打开浏览器完成 device-code 授权
 
@@ -35,7 +35,7 @@ dsh plugin --profile web add dsh-grok-kit@latest
 需要可复现安装时，可固定到完整 Git 提交（v0.1.11 代码在 `31167bd`；这不是滚动默认分支）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402e7f3b93d7ca3e92b3be
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#dfa0ea112d655715e04c1ac2a3f1d8bdebc66222
 ```
 
 不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 会跟随 `main`，**不是**可复现锚点。

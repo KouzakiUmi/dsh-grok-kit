@@ -101,10 +101,12 @@ npx @deepseek-ai/dsh web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-For a reproducible Git install, pin a full commit (v0.1.11 code at `31167bd`; `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin):
+DSH `0.2.0-rc.2` users need `0.1.14`, which includes the new host peer fix. The published `0.1.13` lacks it and may be skipped by the host's bundle admission check.
+
+For a reproducible Git install, pin a full commit (`0.1.14` compatibility code at `dfa0ea1`; `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#31167bd607b8b80410402e7f3b93d7ca3e92b3be
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#dfa0ea112d655715e04c1ac2a3f1d8bdebc66222
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
@@ -152,7 +154,7 @@ The “Search & feature options” card on Settings → xAI Grok can also overri
 
 ## Compatibility and limitations
 
-- Tested host matrix: DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4` (Node 22/24). peerDependencies also accept `0.1.5-rc.2` hosts (+ pi-ai `0.85.1`): the model catalog/resolution path (the crash site of issue #1) is verified against that version by the offline host-compat probe in CI; the full matrix remains 0.1.2-rc.1, and 0.1.1 is not claimed.
+- Tested host matrix: DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4` (Node 22/24). peerDependencies also accept `0.1.5-rc.2` (pi-ai `0.85.1`) and `0.2.0-rc.2` (pi-ai `0.87.1`) hosts: the model catalog, model resolution, and call-preparation seams are verified against both lines by the offline host-compat probe in CI (the 0.2.0-rc.2 line is seam-level; the settings page, client bundle, and streaming behavior on a live host are still to be confirmed); the full matrix remains 0.1.2-rc.1, and 0.1.1 is not claimed.
 - Some subscription tiers may allow browser sign-in but return HTTP 403 for chat or server-side search; this is an entitlement/service-policy result, not necessarily an expired token
 - HTTP 401 is retried once after serialized refresh; 403 is not treated as token expiry
 - Running this bundle alongside another bundle that registers the same xAI OAuth route is unsupported; follow the migration steps in [INSTALL.md](INSTALL.md) and remove the conflicting bundle first

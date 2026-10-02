@@ -140,7 +140,9 @@ git rebase upstream/main
 
 由于改动只落在 `package.json` 的两处与 `README.md` 顶部一行，冲突应当很小且局部。
 
-**若上游自行放宽了 peer 范围并把 pi-ai 升到 0.87+**，本 fork 即可废弃，直接切回上游发布版。
+~~若上游自行放宽了 peer 范围并把 pi-ai 升到 0.87+，本 fork 即可废弃，直接切回上游发布版。~~
+（2026-10-02：上游 v0.1.14 已放宽 peers 并接受 pi-ai `^0.87.1`，但 fork 已承载合并的
+edit/UI 功能与 pi-ai dependencies 分层，不再可废弃；见文末同步记录。）
 
 ---
 
@@ -168,3 +170,32 @@ git rebase upstream/main
 - imagine-ui 的两个生产修复已保留在移植代码中：save_path 文本回退（原 FIX-null-render-save-path.md）、双工具名渲染（原 REVERT-edit-tool-support.md）。
 
 安装方式变化：profile 的 bundles 列表与 dependencies 移除 `dsh-grok-imagine-edit`、`dsh-grok-imagine-ui` 两条，仅保留 `dsh-grok-kit`。上游若复活，rebase 时上述四个 src 文件与 client 改动需手工搬移。
+
+---
+
+## 2026-10-02 同步：合入上游 v0.1.14（335402a…15cf9c3，merge commit），fork 升至 v0.1.15
+
+上游在 2026-09-30 发布了同名 v0.1.14（与 fork 的合并版号撞号，内容不同），共 4 个提交。
+采用 `git merge upstream/main` 合入，冲突仅 `package.json` / `package-lock.json` 两处，
+均以 fork 侧为准。因上游 v0.1.14 已发布到 npm，fork 版号顺升为 **0.1.15**（package.json /
+package-lock / 三处 UA / smoke 断言同步），避免与上游发布混淆。
+
+**取上游的**：
+
+- `scripts/verify-host-compat.mjs`：新增 0.2.0-rc.2 宿主腿（冻结 fixture 按宿主钉
+  schemastery 3.18.4 / cordis 4.0.4，0.2 线排除已更名的 `dsh-code-runtime`）
+- `scripts/pack-install-smoke.mjs`：smoke 支持 0.2.0-rc.2 参数；安装版本断言升到 0.1.14
+- `.github/workflows/ci.yml`：接入 0.2.0-rc.2 host-compat 腿
+- `src/search.ts`：UA `dsh-grok-kit/0.1.13` → `0.1.14`（fork 升版号时漏改的）
+- README / README.en / INSTALL / INSTALL.zh：0.2.0-rc.2 兼容性说明与可复现锚点更新
+
+**保 fork 的**（冲突解决依据）：
+
+- `package.json`：description（含合并说明）、peers 更宽（保留 `^0.2.0-rc.1`）、
+  pi-ai 留在 `dependencies`（pi-ai 分层：scoped override 要求实体依赖才能落到 0.87.1，
+  上游改成 optional peer 的写法在本 profile 的 pnpm override 下会被顶层提升穿透）、
+  `dsh.client.inject` 的 `dsh-client-ui-slots`
+- `tests/composition.spec.ts` 的宽断言（pi-ai 在 peer 或 dependencies 均可）不受影响
+
+验证：`npm run check` 全绿（typecheck host+client、22 测试文件 197 通过、tsdown 构建）；
+`lib/` 由合并后源码重新构建。
