@@ -20,6 +20,6 @@
     "rewriteRelativeImportExtensions": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "include": ["src/**/*.ts"],
   "exclude": ["src/client", "tests/imagine-view.spec.ts"]
 }
