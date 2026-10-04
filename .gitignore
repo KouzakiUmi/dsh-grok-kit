@@ -22,3 +22,8 @@ docs/
 # Live OAuth probes (read local credentials; never commit output)
 scripts/probe-*.mjs
 scripts/probe-*.json
+
+# release pipeline artifacts
+dist/
+*.tgz
+pack.json
