@@ -9,8 +9,8 @@ import {
   type Api,
   type AssistantMessage,
   type AssistantMessageEvent,
-  type Context,
   type Model,
+  type TranscriptContext,
   type Provider,
   type SimpleStreamOptions,
   type StreamOptions,
@@ -354,7 +354,7 @@ export function wrapXaiResponsesProvider(
   const run = (
     fn: Provider['streamSimple'],
     model: Model<Api>,
-    context: Context,
+    context: TranscriptContext,
     streamOptions?: StreamOptions,
   ) => {
     const sessionId = typeof streamOptions?.sessionId === 'string' && streamOptions.sessionId.length > 0
