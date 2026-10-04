@@ -1,7 +1,7 @@
 {
   "name": "dsh-grok-kit",
   "description": "Limited maintenance; seeking volunteer testers. Unofficial DeepSeek Harness plugin: SuperGrok / X Premium via OAuth, grok-4.6 chat, fused server-side web/X search, and Imagine.",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "publishConfig": {
     "access": "public"
   },
@@ -50,6 +50,7 @@
     },
     "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
     "./package.json": "./package.json"
   },
   "files": [
@@ -60,6 +61,8 @@
     "INSTALL.zh.md",
     "README.md",
     "README.en.md",
+    "CHANGELOG.md",
+    "locale/*.json",
     "assets/readme",
     "LICENSE",
     "NOTICE"
