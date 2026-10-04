@@ -35,6 +35,7 @@ const REQUEST_IMAGE_MAX_BYTES = 1024 * 1024
  * property is ignored; keep it typed here until the test matrix moves.
  */
 type ResolvedProfile = ResolvedPiAiProviderProfile & { modelErrors?: ReadonlyMap<string, string> }
+type HostPiProvider = ResolvedPiAiProviderProfile['piProvider']
 
 /** Minimal pi-ai AuthContext over the host process environment and filesystem. */
 function hostAuthContext(): AuthContext {
@@ -76,7 +77,9 @@ export function createXaiOAuthAdapter(
         retryPolicy: resolveRetryPolicy(undefined, 'dsh-grok-kit retryPolicy'),
         configuredMaxTokens: new Map(),
         modelErrors: new Map(),
-        piProvider,
+        // dsh-llm-pi-ai 0.1.2's declarations resolve a private pi-ai 0.84
+        // copy; the host supplies this runtime-compatible pi-ai 0.87.1 provider.
+        piProvider: piProvider as unknown as HostPiProvider,
         reasoning: 'high',
         maxRequestImageBytes: MAX_REQUEST_IMAGE_BYTES,
         requestImagePixelBudget: REQUEST_IMAGE_PIXEL_BUDGET,

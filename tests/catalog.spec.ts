@@ -64,9 +64,23 @@ describe('mergeLiveCatalog', () => {
 })
 
 describe('materializeLiveModel', () => {
-  it('uses the build template for code-fast ids', () => {
-    const model = materializeLiveModel('grok-code-fast-1', catalog)
-    expect(model.api).toBe(catalog.find(entry => entry.id === 'grok-build-0.1')?.api)
+  it('uses an available build template for code-fast ids', () => {
+    const buildTemplate = {
+      ...GROK_46_MODEL,
+      id: 'grok-build-0.1',
+      name: 'Grok Build 0.1',
+      contextWindow: 131_072,
+      maxTokens: 16_384,
+    }
+    const fixture = [buildTemplate, ...catalog.filter(entry => entry.id !== buildTemplate.id)]
+    const model = materializeLiveModel('grok-code-fast-1', fixture)
+    expect(model).toMatchObject({
+      id: 'grok-code-fast-1',
+      name: 'Grok Code Fast 1',
+      api: buildTemplate.api,
+      contextWindow: buildTemplate.contextWindow,
+      maxTokens: buildTemplate.maxTokens,
+    })
   })
 
   it('keeps exact grok-4.5 on the pi-ai descriptor (no xhigh)', () => {

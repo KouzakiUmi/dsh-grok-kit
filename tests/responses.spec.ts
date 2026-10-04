@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
-import type { AssistantMessageEvent, Model, Provider } from '@earendil-works/pi-ai'
+import type { AssistantMessageEvent, Model, Provider, TranscriptContext } from '@earendil-works/pi-ai'
 import {
   applyXaiResponsesPayload,
   isPreviousResponseError,
@@ -170,7 +170,7 @@ describe('wrapXaiResponsesProvider 401', () => {
     }
     const wrapped = wrapXaiResponsesProvider(inner, { backendSearch: false, retry401: true, tokenSource: tokens })
     const events: AssistantMessageEvent[] = []
-    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] }, { apiKey: 'old' })) {
+    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] } as unknown as TranscriptContext, { apiKey: 'old' })) {
       events.push(event)
     }
     expect(refresh).toHaveBeenCalledOnce()
@@ -199,7 +199,7 @@ describe('wrapXaiResponsesProvider 401', () => {
     }
     const wrapped = wrapXaiResponsesProvider(inner, { backendSearch: true, retry401: true, tokenSource: tokens })
     const events: AssistantMessageEvent[] = []
-    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] }, { apiKey: 'old' })) {
+    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] } as unknown as TranscriptContext, { apiKey: 'old' })) {
       events.push(event)
     }
     expect(refresh).not.toHaveBeenCalled()
@@ -272,7 +272,7 @@ describe('stripRejectToolCalls', () => {
     }
     const wrapped = wrapXaiResponsesProvider(inner, { backendSearch: true, retry401: false })
     const events: AssistantMessageEvent[] = []
-    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] })) {
+    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] } as unknown as TranscriptContext)) {
       events.push(event)
     }
     expect(events.some(event => event.type === 'toolcall_start')).toBe(false)
@@ -318,7 +318,7 @@ describe('wrap drops reject-tool events so DSH does not start a reprint step', (
     }
     const wrapped = wrapXaiResponsesProvider(inner, { backendSearch: true, retry401: false })
     const events: AssistantMessageEvent[] = []
-    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] })) {
+    for await (const event of wrapped.streamSimple(GROK_46_MODEL as Model<'openai-responses'>, { messages: [] } as unknown as TranscriptContext)) {
       events.push(event)
     }
     expect(events.some(event => event.type === 'toolcall_end')).toBe(false)
@@ -370,7 +370,7 @@ describe('wrap drops reject-tool events so DSH does not start a reprint step', (
     const events: AssistantMessageEvent[] = []
     for await (const event of wrapped.streamSimple(
       GROK_46_MODEL as Model<'openai-responses'>,
-      { messages: [] },
+      { messages: [] } as unknown as TranscriptContext,
       { sessionId: 'sess-real-tool' },
     )) {
       events.push(event)
@@ -435,7 +435,7 @@ describe('stateful continuation wrap', () => {
     const consume = async () => {
       for await (const event of wrapped.streamSimple(
         GROK_46_MODEL as Model<'openai-responses'>,
-        { messages: [] },
+        { messages: [] } as unknown as TranscriptContext,
         { sessionId: 'sess-1' },
       )) {
         void event
@@ -493,7 +493,7 @@ describe('stateful continuation wrap', () => {
     for (let index = 0; index < 2; index += 1) {
       for await (const event of wrapped.streamSimple(
         GROK_46_MODEL as Model<'openai-responses'>,
-        { messages: [] },
+        { messages: [] } as unknown as TranscriptContext,
         { sessionId: 'sess-tool' },
       )) {
         void event
@@ -555,7 +555,7 @@ describe('stateful continuation wrap', () => {
     const events: AssistantMessageEvent[] = []
     for await (const event of wrapped.streamSimple(
       GROK_46_MODEL as Model<'openai-responses'>,
-      { messages: [] },
+      { messages: [] } as unknown as TranscriptContext,
       { sessionId: 'sess-1' },
     )) {
       events.push(event)
@@ -631,7 +631,7 @@ describe('stateful continuation wrap', () => {
     const events: AssistantMessageEvent[] = []
     for await (const event of wrapped.streamSimple(
       GROK_46_MODEL as Model<'openai-responses'>,
-      { messages: [] },
+      { messages: [] } as unknown as TranscriptContext,
       { apiKey: 'old', sessionId: 'sess-1' },
     )) {
       events.push(event)
