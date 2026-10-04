@@ -101,14 +101,14 @@ npx @deepseek-ai/dsh web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-DSH `0.2.0-rc.2` 用户需要包含新宿主 peer 修复的 `0.1.14`；已发布的 `0.1.13` 不含此修复，可能被宿主的 bundle 准入检查跳过。
+DSH `0.2.0-rc.2` 用户需要包含新宿主 peer 修复的 `0.1.14` 或更新版本；已发布的 `0.1.13` 不含此修复，可能被宿主的 bundle 准入检查跳过。
 
-当前源码候选 **0.1.15 尚未发布**：仅为插件管理页增加中英文名称与简介，未修改在线行为；已发布版本仍为 0.1.14。变更说明见 [CHANGELOG.md](CHANGELOG.md)。
+**0.1.15** 为插件管理页增加随客户端语言切换的中英文名称与简介，未修改在线行为；有限维护状态不变。变更说明见 [CHANGELOG.md](CHANGELOG.md)。
 
-需要固定到可复现的 Git 提交时，可使用（`0.1.14` 兼容修复代码锚点 `dfa0ea1`；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点）：
+需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#dfa0ea112d655715e04c1ac2a3f1d8bdebc66222
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c93b6921eb48f0d1a31b
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。

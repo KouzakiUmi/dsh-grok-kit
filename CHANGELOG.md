@@ -1,6 +1,6 @@
 # 更新记录 / Changelog
 
-## 0.1.15（2026-10-04，待发布 / Unreleased）
+## 0.1.15（2026-10-04）
 
 - 插件列表和详情页新增随 DeepSeek Harness 界面语言切换的中英文名称与简介。
 - Added localized English and Chinese names and descriptions for the plugin list and detail page.

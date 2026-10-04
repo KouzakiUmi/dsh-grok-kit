@@ -103,12 +103,12 @@ If this profile previously used the GitHub source, first try `dsh plugin --profi
 
 DSH `0.2.0-rc.2` users need `0.1.14`, which includes the new host peer fix. The published `0.1.13` lacks it and may be skipped by the host's bundle admission check.
 
-The current **0.1.15 source candidate is not published**. It only adds English and Chinese names and descriptions to the plugin manager; online behavior is unchanged. The published version remains 0.1.14. See [CHANGELOG.md](CHANGELOG.md) for update notes.
+**0.1.15** adds English and Chinese names and descriptions to the plugin manager, following the client language. Online behavior and the limited-maintenance status are unchanged. See [CHANGELOG.md](CHANGELOG.md) for update notes.
 
-For a reproducible Git install, pin a full commit (`0.1.14` compatibility code at `dfa0ea1`; `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin):
+For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#dfa0ea112d655715e04c1ac2a3f1d8bdebc66222
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c93b6921eb48f0d1a31b
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
