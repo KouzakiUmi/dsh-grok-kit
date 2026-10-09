@@ -1,13 +1,5 @@
 # dsh-grok-kit
 
-> **本仓库是 fork**（[KouzakiUmi/dsh-grok-kit](https://github.com/KouzakiUmi/dsh-grok-kit)），基线 v0.1.13。
-> 相对上游**只改了 `package.json` 的依赖与 peer 声明**，用来适配 DeepSeek Harness 0.2.0-rc.x 的顶层 pi-ai 0.87.1；
-> 源码与功能行为与上游一致。理由、安装、验证与同步上游的做法见 [FORK-NOTES.md](FORK-NOTES.md)。
->
-> **fork v0.1.14（2026-10-01）**：吸收了两个本地卫星插件 `dsh-grok-imagine-edit`（图生图工具
-> `grok_imagine_edit`）与 `dsh-grok-imagine-ui`（会话图片视图），自此无需单独安装二者；详见
-> [FORK-NOTES.md](FORK-NOTES.md) 的合并记录。
-
 **中文** · [English](README.en.md)
 
 > **维护状态公告（2026-09-30）**
@@ -24,7 +16,7 @@
   <a href="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml"><img src="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/dsh-grok-kit"><img src="https://img.shields.io/npm/v/dsh-grok-kit.svg" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-4d6bfe.svg" alt="Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.2--rc.1-4d6bfe" alt="DeepSeek Harness 0.1.2-rc.1">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2-4d6bfe" alt="DeepSeek Harness 0.2.0-rc.2">
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
@@ -44,7 +36,7 @@
 - **搜索融入主循环：** 网页与 X 检索发生在 grok-4.6 的同一轮 Think 中，推理可以直接使用刚搜到的材料
 - **多轮 reasoning 连续：** 默认使用 high effort，并保留 `reasoning.encrypted_content`，让后续回合能够带回加密推理上下文
 - **登录状态与 Grok CLI 同步：** 直接共用并回写 `~/.grok/auth.json`，不是只复制一次后各自轮换 refresh token
-- **Imagine 与干净的模型选择器：** `grok_imagine` 默认开启，非聊天模型不会混进对话模型列表；生成图通过 DSH 附件库保存，并在会话图片卡片中显示
+- **Imagine 文生图与图生图：** `grok_imagine` 与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启，非聊天模型不会混进对话模型列表；生成图与编辑图统一通过 DSH 附件库保存并保留归一化 metadata，在会话图片卡片中直观展示提示词、输入图与结果，并支持下载与再次生成/编辑
 
 此外还包括 xAI 专用代理、聊天 401 强制刷新重试、凭据原子写入与诊断脱敏等支撑能力。
 
@@ -100,18 +92,23 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-如果 PATH 中没有 `dsh`，可以使用同一个 CLI 包：
+也可以指定 0.2.0 准确锚点：
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add dsh-grok-kit
-npx @deepseek-ai/dsh web
+dsh plugin --profile web add dsh-grok-kit@0.2.0
+dsh web
+```
+
+如果 PATH 中没有 `dsh`，可以使用同一个 CLI 包（固定宿主版本）：
+
+```sh
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-DSH `0.2.0-rc.2` 用户需要包含新宿主 peer 修复的 `0.1.14` 或更新版本；已发布的 `0.1.13` 不含此修复，可能被宿主的 bundle 准入检查跳过。
-
-**0.1.15** 为插件管理页增加随客户端语言切换的中英文名称与简介，未修改在线行为；有限维护状态不变。变更说明见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.0** 面向 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不再支持旧 0.1 宿主线。新增图生图工具 `grok_imagine_edit` 与会话图片交互卡片，并完善登录刷新和异常处理；有限维护状态不变。变更说明见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
@@ -129,10 +126,19 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c
 
 - 模型选择器只展示主线 Grok 聊天模型；Imagine、video、embedding、build/code 变体会被隐藏
 - 默认 grok-4.6 描述符使用 high reasoning，并请求 `reasoning.encrypted_content`，以便后续回合带回加密推理上下文
-- `grok_imagine` 默认开启，图片保存到 DSH 附件库并在会话中显示。可通过卡片下载，或使用宿主文件工具导出；`grok_imagine_edit` 的 `save_path` 参数不再支持直接写盘
+- `grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启。图片保存到 DSH 附件库并在会话图片卡片中直接渲染。可从卡片下载，或使用宿主文件工具导出；两工具的 `save_path` 参数均不再支持直接写盘
 - dsh 原生 `web_search` 仍保留在宿主工具列表中，但会从启用 backend search 的 xAI payload 中移除，避免工具重名
 
 模型列表来自登录账号的 `GET /v1/models` 结果，并在本地缓存。服务端能力或模型要求发生变化时，仍可能需要更新插件；不会把“模型 id 可见”等同于“所有能力一定可用”。
+
+### 图片输入与再次编辑
+
+- 本地图片路径：通过宿主文件系统（fs）有界读取，按实际宿主环境文件权限读取文件，受单图体积上限约束。运行卡片显示文件路径和“打开输入图片”入口；前端无法直接读取任意本地路径。
+- 用户上传图片：DSH 将上传内容保存为会话附件。把宿主提供的完整 `attachment={...}` 引用传给 `grok_imagine_edit.image`；卡片通过会话 `readAttachment` 加载缩略图。
+- 生成图片再编辑：工具结果包含 ImageBlock 和完整 `attachment={...}` 文本。将完整引用作为下一次 `image` 参数，附件服务会读取并验证保存后的图片并保留其归一化 metadata。
+- 裸 `attachmentId=sha256:...` 仅在宿主附件库提供 `imageHostPath` 时支持；远程附件后端应使用完整引用。附件 ID 不是本地文件路径或 URL。
+- data URI 输入经过解码大小、base64、图片签名和 MIME 一致性校验；远程 URL 由上游获取，卡片显示链接，避免浏览器自动请求任意远程地址。
+- 会话卡片交互：运行卡片显示提示词和全部输入来源；图片完成后显示结果、下载入口与再次生成/编辑入口。再次编辑会保留全部输入图和原调用的渲染参数。
 
 ## 配置
 
@@ -145,7 +151,11 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c
 | `searchMaxResults` | `8` | 嵌套搜索返回来源的上限 |
 | `webSearchTimeoutMs` | `60000` | 嵌套网页搜索的协作式超时预算 |
 | `xSearchTimeoutMs` | `120000` | 嵌套 X 搜索的协作式超时预算 |
-| `imagineTool` | `true` | 注册 `grok_imagine` |
+| `imagineTool` | `true` | 注册 `grok_imagine`（文生图） |
+| `editTool` | `true` | 注册 `grok_imagine_edit`（图生图；独立于 `imagineTool`，复用主 OAuth session） |
+| `editModel` | `''` | 固定图生图模型；为空时跟随线上目录自动选择（优先 `grok-imagine-image-2.0`，fallback `grok-imagine-image`） |
+| `editMaxSourceImages` | `5` | `grok_imagine_edit` 单次请求源图片上限，插件最多接受 5 张 |
+| `editMaxImageBytes` | `20971520` | `grok_imagine_edit` 单张源图片体积上限（默认 20 MiB） |
 | `proxyUrl` | `''` | xAI 专用 HTTP/HTTPS 代理；设置页保存值优先 |
 
 本 bundle 的组合默认值来自 `cordis.patch.yml`。手工拆分或重组配置时，可用 `dsh --profile web --dump-config` 核对最终值。
@@ -160,11 +170,11 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
 - xAI 专用 fetch hook 会在插件卸载时恢复；它不会永久修改系统或进程环境变量
 - Windows 上的 Node mode bit 不等于 NTFS ACL；如果用户目录或 `$DSH_HOME` 位于共享位置，请自行收紧目录权限
-- 插件自己的写入锁（`$DSH_HOME/.xai-oauth-auth.json.lock`）**从不自动删除或改名**。路径上的检查-再-rename/rm 无法绑定已检查的文件代次，可能把活 writer 的锁移走。残留锁 fail-closed（写入超时），交由人工处理
+- 写入锁机制与安全边界：凭据写入委托官方 `@deepseek-ai/dsh-atomic-write`（`$DSH_HOME/.xai-oauth-auth.json.lock`）。在同机且同一 PID 命名空间下，争用者通过独占 claim 文件与二次记录/PID 检查自动接管并回收已确认退出的进程遗留锁；活进程 PID、权限不明、格式损坏或空锁继续保持等待并超时（fail-closed）。写入目录必须为本机文件系统且处于同一 PID 命名空间，禁止跨机器或跨容器挂载共用同一 auth 与锁目录（异构环境 PID 无法对齐，可能导致互斥失效发生并发双写）；路径级检查无法对抗任意手动外部文件替换，插件额外救援入口亦不擅自修改锁文件
 
 ## 兼容性与限制
 
-- 当前测试矩阵：DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4`（Node 22/24）。peer 范围同时接受 `0.1.5-rc.2`（pi-ai `0.85.1`）与 `0.2.0-rc.2`（pi-ai `0.87.1`）宿主：模型目录、模型解析与调用准备 seam 由 CI 中的离线 host-compat 探针在这两条线上验证（0.2.0-rc.2 线为 seam 级验证，设置页、client bundle 与流式路径的完整真机表现仍待确认）；完整矩阵仍是 0.1.2-rc.1，不声称支持 0.1.1
+- 当前支持矩阵冻结为：DeepSeek Harness `0.2.0-rc.2` + `@earendil-works/pi-ai@0.87.1`（Node 22/24）。不再宣称兼容旧 0.1 宿主线。
 - 某些订阅档位可能允许浏览器登录，却对聊天或服务端搜索返回 HTTP 403；这是账户资格/服务策略问题，不等同于 token 过期
 - HTTP 401 会在串行刷新后重试一次；403 不会按 token 过期处理
 - 不支持与另一个注册相同 xAI OAuth 路由的 bundle 同时安装；请先按 [INSTALL.zh.md](INSTALL.zh.md) 的迁移步骤移除冲突 bundle
@@ -173,11 +183,11 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c
 
 ## 故障排查
 
-**启动或聊天报 `timed out waiting for the writer lock`**：某次强杀/崩溃的写入进程遗留了 `*.lock` 文件。本插件 **不会自动清锁**（避免误移走活 writer 的锁）。请手动清理：
+**启动或聊天报 `timed out waiting for the writer lock`**：某次异常退出的写入进程遗留了未被自动回收的锁（如活进程占用、非规范锁、权限异常，或崩溃遗留的 `.takeover-*` claim 文件）。插件委托官方协议安全接管已退出进程的锁，但为避免误删活跃写入者的锁，活锁与无法验证的锁不会盲目清理。请按以下步骤手动排查：
 
-1. 关闭所有 DeepSeek Harness 与 Grok CLI 进程；
-2. 删除 `$DSH_HOME`（默认 `~/.dsh`）下的 `.xai-oauth-auth.json.lock`；
-3. `~/.grok/auth.json.lock` 属于 Grok CLI，仅确认 Grok CLI 未运行时删除；
+1. 关闭所有 DeepSeek Harness 与 Grok CLI 进程，并通过系统进程列表确认已无相关运行中的后台进程；
+2. 确认进程完全停止后，删除 `$DSH_HOME`（默认 `~/.dsh`）下的 `.xai-oauth-auth.json.lock` 以及可能残留的 `.xai-oauth-auth.json.lock.takeover-*` claim 文件；
+3. `~/.grok/auth.json.lock` 属于 Grok CLI，仅在确认 Grok CLI 完全退出后删除；
 4. 重新启动。
 
 启动时的目录刷新失败（含上述锁超时）不会阻断聊天：插件先用缓存的模型列表，并在后台按 5s / 30s / 120s 退避重试。
@@ -191,27 +201,15 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c
 ## 开发
 
 ```sh
-npm install
-node scripts/link-host-deps.mjs
+npm ci
 npm run check
 dsh plugin --profile web add ./dsh-grok-kit
 ```
 
-安装依赖后必须运行 `scripts/link-host-deps.mjs`，让插件开发环境继续使用宿主 DeepSeek Harness 的 `@deepseek-ai/*` 与 `@earendil-works/*` 版本。
+日常开发运行 `npm ci`（或 `npm install`）并使用 `npm run check` 即可完成类型检查、测试与构建。当需要在本地开发环境中链接真实宿主依赖进行调试时，可按需可选运行 `node scripts/link-host-deps.mjs`（非强制，避免误改用户本地 profile）。
 
 CI 在 Node.js 22 与 24 上执行 frozen install、typecheck、测试、构建，并确认提交的 `lib/` 与源码构建结果一致。
 
 ## 许可证与致谢
 
-[Apache-2.0](LICENSE)。部分代码源自 Apache-2.0 许可的 `dsh-xai`，详见 [NOTICE](NOTICE)。
-
-
-### 图片输入与再次编辑
-
-- 本地图片路径：由当前 Agent 的 DSH 文件服务读取，遵循执行环境、会话工作目录及大小限制。运行卡片显示文件路径和“打开输入图片”入口；浏览器无法直接读取任意本地路径。
-- 用户上传图片：DSH 将上传内容保存为会话附件。把宿主提供的完整 `attachment={...}` 引用传给 `grok_imagine_edit.image`；卡片通过会话 `readAttachment` 加载缩略图。
-- 生成图片再编辑：工具结果包含 ImageBlock 和完整 `attachment={...}` 文本。将完整引用作为下一次 `image` 参数，附件服务会读取并验证保存后的图片。保存过程可能改变格式和大小，必须沿用保存后的 metadata。
-- 裸 `attachmentId=sha256:...` 仅在宿主附件库提供 `imageHostPath` 时支持；远程附件后端应使用完整引用。附件 ID 不是本地文件路径或 URL。
-- data URI 输入经过解码大小、base64、图片签名和 MIME 一致性检查；远程 URL 交给上游获取，卡片显示链接，避免浏览器自动请求任意远程地址。
-
-运行卡片会显示提示词和全部输入来源；图片生成完成后显示结果、下载入口与再次生成入口。再次编辑会保留全部输入图和原调用的渲染参数。
+[Apache-2.0](LICENSE)。部分代码源自 Apache-2.0 许可的 `dsh-xai`，详见 [NOTICE](NOTICE)。特别感谢 [KouzakiUmi](https://github.com/KouzakiUmi) 在图生图（`grok_imagine_edit`）、会话图片交互卡片以及宿主依赖稳定性与兼容性修复方面的贡献。

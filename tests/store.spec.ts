@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -119,14 +120,30 @@ describe('XaiOAuthCredentialStore', () => {
     expect(await store.list()).toEqual([])
   })
 
-  it('times out on a leftover lock whose recorded owner is gone (fail-closed, no auto-rescue)', async () => {
+  it('takes over a leftover lock whose recorded owner is gone (official atomic-write protocol)', async () => {
     const store = await tempStore()
     const lockPath = `${store.lockFilename}.lock`
-    await writeFile(lockPath, `${await deadPid()}\n`, { mode: 0o600 })
+    const dead = await deadPid()
+    await writeFile(lockPath, `${dead}\n`, { mode: 0o600 })
+    try {
+      const written = await store.modify(XAI_PI_PROVIDER, async () => CREDENTIAL)
+      expect(written).toMatchObject({ type: 'oauth', access: 'access-token' })
+      expect(await store.read(XAI_PI_PROVIDER)).toMatchObject({ access: 'access-token' })
+      expect(await readFile(lockPath, 'utf8').catch(() => undefined)).toBeUndefined()
+    } finally {
+      await rm(lockPath, { force: true })
+    }
+  }, 10_000)
+
+  it('times out on a malformed or foreign lock and preserves its content (fail-closed)', async () => {
+    const store = await tempStore()
+    const lockPath = `${store.lockFilename}.lock`
+    const malformed = 'corrupt-not-a-pid\n'
+    await writeFile(lockPath, malformed, { mode: 0o600 })
     try {
       await expect(store.modify(XAI_PI_PROVIDER, async () => CREDENTIAL))
         .rejects.toThrow(/timed out waiting for the writer lock/)
-      expect(await readFile(lockPath, 'utf8')).toMatch(/^\d+\n$/)
+      expect(await readFile(lockPath, 'utf8')).toBe(malformed)
     } finally {
       await rm(lockPath, { force: true })
     }
@@ -156,6 +173,124 @@ describe('XaiOAuthCredentialStore', () => {
       await rm(lockPath, { force: true })
     }
   }, 10_000)
+
+  it('serializes concurrent child processes contending for a leftover dead-PID lock without overlap or lost updates', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-xai-concurrency-'))
+    const filename = join(dir, 'auth.json')
+    const store = new XaiOAuthCredentialStore(filename)
+    const initial = {
+      type: 'oauth' as const,
+      access: 'initial-access',
+      refresh: 'initial-refresh',
+      expires: 1_000,
+    }
+    await store.modify(XAI_PI_PROVIDER, async () => initial)
+
+    const dead = await deadPid()
+    const lockPath = `${store.lockFilename}.lock`
+    await writeFile(lockPath, `${dead}\n`, { mode: 0o600 })
+
+    const markerFile = join(dir, 'active.marker')
+    const startGateFile = join(dir, 'start.gate')
+    const workerScript = join(dir, 'worker.mjs')
+    const storeTsUrl = new URL('../src/store.ts', import.meta.url).href
+
+    const workerCode = [
+      "import { writeFile, rm } from 'node:fs/promises';",
+      "import { existsSync } from 'node:fs';",
+      "import { XaiOAuthCredentialStore } from " + JSON.stringify(storeTsUrl) + ";",
+      "",
+      "const [authFile, marker, readyFile, startGate] = process.argv.slice(2);",
+      "const store = new XaiOAuthCredentialStore(authFile);",
+      "",
+      "// Signal ready to parent",
+      "await writeFile(readyFile, String(process.pid) + '\\n');",
+      "",
+      "// Wait for parent start gate",
+      "const deadline = Date.now() + 10000;",
+      "while (!existsSync(startGate)) {",
+      "  if (Date.now() > deadline) throw new Error('Start gate timed out');",
+      "  await new Promise(r => setTimeout(r, 20));",
+      "}",
+      "",
+      "// Contend for store.modify under the lock",
+      "await store.modify('xai', async (current) => {",
+      "  if (!current) throw new Error('current credential missing');",
+      "  // Exclusive-create marker file to verify no overlap in critical section",
+      "  await writeFile(marker, String(process.pid) + '\\n', { flag: 'wx' });",
+      "  try {",
+      "    await new Promise(r => setTimeout(r, 80));",
+      "    return {",
+      "      ...current,",
+      "      access: 'token-' + process.pid,",
+      "      expires: (current.expires ?? 1000) + 1,",
+      "    };",
+      "  } finally {",
+      "    await rm(marker, { force: true });",
+      "  }",
+      "});",
+    ].join('\n') + '\n';
+    await writeFile(workerScript, workerCode, 'utf8')
+
+    const children: import('node:child_process').ChildProcess[] = []
+    const spawnWorker = (readyFile: string) => new Promise<void>((resolve, reject) => {
+      const child = spawn(process.execPath, ['--experimental-strip-types', workerScript, filename, markerFile, readyFile, startGateFile], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env },
+        timeout: 12_000,
+      })
+      children.push(child)
+      let stderr = ''
+      child.stderr.on('data', chunk => { stderr += String(chunk) })
+      child.on('error', reject)
+      let settled = false
+      child.on('close', (code, signal) => {
+        if (settled) return
+        settled = true
+        if (code === 0) resolve()
+        else reject(new Error(`Worker exited with code ${code} signal ${signal}: ${stderr}`))
+      })
+    })
+
+    const ready1 = join(dir, 'ready-1.marker')
+    const ready2 = join(dir, 'ready-2.marker')
+    // Attach handlers immediately, including while waiting for the ready barrier.
+    const resultsPromise = Promise.allSettled([spawnWorker(ready1), spawnWorker(ready2)])
+
+    try {
+      // Wait until both workers have booted and signaled readiness
+      const readyDeadline = Date.now() + 8000
+      while (!existsSync(ready1) || !existsSync(ready2)) {
+        if (Date.now() > readyDeadline) throw new Error('Worker ready synchronization timed out')
+        await new Promise(r => setTimeout(r, 20))
+      }
+
+      // Release start gate to trigger simultaneous contention
+      await writeFile(startGateFile, 'start\n', 'utf8')
+
+      const results = await resultsPromise
+      for (const res of results) {
+        if (res.status === 'rejected') throw res.reason
+      }
+
+      const finalCred = await store.read(XAI_PI_PROVIDER)
+      expect(finalCred).toMatchObject({
+        type: 'oauth',
+        expires: 1_002,
+      })
+      expect(await readFile(markerFile, 'utf8').catch(() => undefined)).toBeUndefined()
+      expect(await readFile(lockPath, 'utf8').catch(() => undefined)).toBeUndefined()
+    } finally {
+      for (const child of children) {
+        if (child.exitCode === null && child.signalCode === null) {
+          try { child.kill() } catch { /* ignore */ }
+        }
+      }
+      // Never remove the fixture while a child can still read or write it.
+      await resultsPromise
+      await rm(dir, { recursive: true, force: true })
+    }
+  }, 20_000)
 
   it('reads and writes a Grok CLI auth.json without dropping extra slot fields', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'dsh-xai-grok-store-'))

@@ -16,7 +16,7 @@
   <a href="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml"><img src="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/dsh-grok-kit"><img src="https://img.shields.io/npm/v/dsh-grok-kit.svg" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-4d6bfe.svg" alt="Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.1.2--rc.1-4d6bfe" alt="DeepSeek Harness 0.1.2-rc.1">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2-4d6bfe" alt="DeepSeek Harness 0.2.0-rc.2">
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
@@ -36,7 +36,7 @@
 - **Search in the main loop:** web and X lookup occurs inside grok-4.6's current Think turn, so reasoning can use newly found material immediately
 - **Continuous multi-turn reasoning:** high effort is the default, with `reasoning.encrypted_content` preserved for the next turn
 - **Sign-in stays in sync with Grok CLI:** the plugin shares and writes back `~/.grok/auth.json` instead of copying once and rotating refresh tokens separately
-- **Imagine with a clean model picker:** `grok_imagine` is enabled by default, while non-chat models stay out of the conversation picker; current DSH builds do not display the generated image directly in the conversation
+- **Imagine text-to-image and image-to-image:** `grok_imagine` and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are enabled by default, while non-chat models stay out of the conversation picker; generated and edited images are stored in the DSH attachment library preserving normalized metadata, rendered in session image cards with prompt and inputs, and support download and re-generation/editing
 
 Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, and diagnostic redaction.
 
@@ -92,18 +92,23 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-If `dsh` is not on PATH, run the same CLI package through `npx`:
+You can also pin the exact 0.2.0 release:
 
 ```sh
-npx @deepseek-ai/dsh plugin --profile web add dsh-grok-kit
-npx @deepseek-ai/dsh web
+dsh plugin --profile web add dsh-grok-kit@0.2.0
+dsh web
+```
+
+If `dsh` is not on PATH, run the same CLI package through `npx` (pinned to the supported host version):
+
+```sh
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-DSH `0.2.0-rc.2` users need `0.1.14`, which includes the new host peer fix. The published `0.1.13` lacks it and may be skipped by the host's bundle admission check.
-
-**0.1.15** adds English and Chinese names and descriptions to the plugin manager, following the client language. Online behavior and the limited-maintenance status are unchanged. See [CHANGELOG.md](CHANGELOG.md) for update notes.
+**0.2.0** freezes support for DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24), dropping compatibility with the legacy 0.1 host line. Adds the image-to-image tool `grok_imagine_edit` and session image interaction cards, and refines sign-in refresh and error handling; the limited-maintenance status remains in effect. See [CHANGELOG.md](CHANGELOG.md) for update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
@@ -121,10 +126,19 @@ See [INSTALL.md](INSTALL.md) for installation, migration, removal, and troublesh
 
 - The picker shows only mainline Grok chat models; Imagine, video, embedding, build, and code variants are hidden
 - The default grok-4.6 descriptor uses high reasoning and requests `reasoning.encrypted_content` so encrypted reasoning context can be carried into later turns
-- `grok_imagine` is enabled by default, but current DSH builds cannot display the generated image directly in the conversation. To obtain a normal file, ask the Agent in your prompt to save the result to a specific directory; without a specified directory, the image is stored in the DSH attachment library
+- `grok_imagine` (text-to-image) and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are enabled by default. Images are stored in the DSH attachment library and rendered directly in session image cards. Images can be downloaded from the card or exported with host file tools; direct disk writing via `save_path` is no longer supported for either tool
 - DSH's native `web_search` remains in the host tool list, but is removed from an xAI payload with backend search enabled to avoid duplicate tool names
 
 The model list comes from the signed-in account's `GET /v1/models` response and is cached locally. Service or model requirements may still require a plugin update; a visible model id does not imply that every capability is available to the account.
+
+### Image inputs and iterative editing
+
+- Local image paths: read boundedly via host filesystem (fs) services according to the host environment permissions, subject to single-image size caps. The execution card shows the path and an "open input image" entry; frontends cannot read arbitrary local paths directly.
+- User-uploaded images: saved by DSH as session attachments. Pass the full `attachment={...}` reference provided by the host to `grok_imagine_edit.image`; the card loads thumbnails via session `readAttachment`.
+- Iterative editing of generated images: tool results include an ImageBlock and the full `attachment={...}` payload. Pass the full reference as the next `image` parameter; the attachment service reads and verifies the saved image while preserving normalized metadata.
+- Bare `attachmentId=sha256:...` handles are supported only when the host attachment library provides `imageHostPath`; remote attachment backends must use the full reference. Attachment IDs are not local file paths or URLs.
+- Data URI inputs are validated for decoded byte size, base64 encoding, magic-byte signatures, and MIME consistency; remote URLs are fetched upstream, and the card displays links to avoid automatic browser requests to arbitrary addresses.
+- Session card interactions: cards display the prompt and all input sources; completed runs show the result, a download entry, and a regenerate/re-edit action. Re-editing retains all input images and original render parameters.
 
 ## Configuration
 
@@ -137,7 +151,11 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 | `searchMaxResults` | `8` | Maximum number of sources returned by nested search |
 | `webSearchTimeoutMs` | `60000` | Cooperative budget for nested web search |
 | `xSearchTimeoutMs` | `120000` | Cooperative budget for nested X search |
-| `imagineTool` | `true` | Register `grok_imagine` |
+| `imagineTool` | `true` | Register `grok_imagine` (text-to-image) |
+| `editTool` | `true` | Register `grok_imagine_edit` (image-to-image; independent of `imagineTool`, reusing the main OAuth session) |
+| `editModel` | `''` | Pin the image-edit model; empty string follows live catalog (prefers `grok-imagine-image-2.0`, fallback `grok-imagine-image`) |
+| `editMaxSourceImages` | `5` | Per-request source-image cap for `grok_imagine_edit` (plugin accepts up to 5) |
+| `editMaxImageBytes` | `20971520` | Per-source byte cap for `grok_imagine_edit` (default 20 MiB) |
 | `proxyUrl` | `''` | xAI-only HTTP/HTTPS proxy; the value saved in Settings wins |
 
 The bundle defaults come from `cordis.patch.yml`. For a manually reduced or recomposed setup, inspect the final values with `dsh --profile web --dump-config`.
@@ -152,11 +170,11 @@ The “Search & feature options” card on Settings → xAI Grok can also overri
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
 - The xAI-only fetch hook is restored when the plugin is disposed and does not permanently change system or process environment variables
 - On Windows, Node mode bits are not NTFS ACLs. Restrict the directory ACL yourself if the user profile or `$DSH_HOME` is stored in a shared location
-- The plugin's own writer lock (`$DSH_HOME/.xai-oauth-auth.json.lock`) is **never deleted or renamed automatically**. A path-based check-then-rename/rm cannot bind the inspected file generation and can move a live writer's lock. Leftover locks are fail-closed (writers time out) and left for the operator
+- Writer lock and safety boundaries: Credential writes delegate to official `@deepseek-ai/dsh-atomic-write` (`$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, contenders use an exclusive claim file and double-checked record/PID inspection to automatically take over and reclaim locks left by proven exited processes; locks held by live PIDs, unverified permissions, malformed records, or empty files continue to wait and time out (fail-closed). The credential and lock directory must reside on a local filesystem within the same PID namespace; sharing the directory across hosts or container boundaries is prohibited (mismatched PID spaces can cause mutex failures and data corruption). Path-based operations cannot guarantee absolute atomicity against arbitrary manual file replacement, and the plugin's supplementary rescue helper intentionally avoids modifying lock files
 
 ## Compatibility and limitations
 
-- Tested host matrix: DeepSeek Harness `0.1.2-rc.1` + `@earendil-works/pi-ai@0.84.4` (Node 22/24). peerDependencies also accept `0.1.5-rc.2` (pi-ai `0.85.1`) and `0.2.0-rc.2` (pi-ai `0.87.1`) hosts: the model catalog, model resolution, and call-preparation seams are verified against both lines by the offline host-compat probe in CI (the 0.2.0-rc.2 line is seam-level; the settings page, client bundle, and streaming behavior on a live host are still to be confirmed); the full matrix remains 0.1.2-rc.1, and 0.1.1 is not claimed.
+- Supported host matrix is frozen at: DeepSeek Harness `0.2.0-rc.2` + `@earendil-works/pi-ai@0.87.1` (Node 22/24). Compatibility with the legacy 0.1 host line is no longer claimed.
 - Some subscription tiers may allow browser sign-in but return HTTP 403 for chat or server-side search; this is an entitlement/service-policy result, not necessarily an expired token
 - HTTP 401 is retried once after serialized refresh; 403 is not treated as token expiry
 - Running this bundle alongside another bundle that registers the same xAI OAuth route is unsupported; follow the migration steps in [INSTALL.md](INSTALL.md) and remove the conflicting bundle first
@@ -165,12 +183,12 @@ The “Search & feature options” card on Settings → xAI Grok can also overri
 
 ## Troubleshooting
 
-**Startup or chat reports `timed out waiting for the writer lock`**: a force-killed or crashed writer process left a `*.lock` file behind. This plugin **does not auto-clear locks** (doing so can steal a live writer's lock). Clean up by hand:
+**Startup or chat reports `timed out waiting for the writer lock`**: An abnormally terminated write left a lock file that was not automatically reclaimed (such as a lock held by an active process, a malformed lock, permission issues, or a leftover `.takeover-*` claim file). The plugin relies on the official protocol for exited-process recovery, but active and unverified locks are never blindly removed to avoid stealing an active writer's lock. To resolve manually:
 
-1. Close all DeepSeek Harness and Grok CLI processes;
-2. Delete `.xai-oauth-auth.json.lock` under `$DSH_HOME` (default `~/.dsh`);
-3. `~/.grok/auth.json.lock` belongs to the Grok CLI — delete it only while the Grok CLI is not running;
-4. Start again.
+1. Stop all DeepSeek Harness and Grok CLI processes, and confirm via system process list that no relevant background processes remain;
+2. Once all processes are confirmed stopped, remove `.xai-oauth-auth.json.lock` and any leftover `.xai-oauth-auth.json.lock.takeover-*` claim files under `$DSH_HOME` (default `~/.dsh`);
+3. `~/.grok/auth.json.lock` belongs to Grok CLI; delete it only after confirming Grok CLI is completely stopped;
+4. Restart.
 
 A failed startup catalog refresh (including the lock timeout above) never blocks chat: the plugin serves the cached model list and retries in the background with 5s / 30s / 120s backoff.
 
@@ -183,16 +201,15 @@ Search [existing issues](https://github.com/MaRi23333/dsh-grok-kit/issues) first
 ## Development
 
 ```sh
-npm install
-node scripts/link-host-deps.mjs
+npm ci
 npm run check
 dsh plugin --profile web add ./dsh-grok-kit
 ```
 
-Run `scripts/link-host-deps.mjs` after installing dependencies so the development checkout continues to use the host DeepSeek Harness versions of `@deepseek-ai/*` and `@earendil-works/*`.
+Routine development uses `npm ci` (or `npm install`) and `npm run check` for full typechecks, tests, and builds. Running `node scripts/link-host-deps.mjs` is optional when linking live host dependencies for local debugging, and is not mandatory to avoid modifying user profiles unintentionally.
 
 CI runs frozen install, typecheck, tests, and build on Node.js 22 and 24, then confirms that the committed `lib/` matches the source build.
 
 ## License and attribution
 
-[Apache-2.0](LICENSE). Some code derives from Apache-2.0-licensed `dsh-xai`; see [NOTICE](NOTICE).
+[Apache-2.0](LICENSE). Some code derives from Apache-2.0-licensed `dsh-xai`; see [NOTICE](NOTICE). Special thanks to [KouzakiUmi](https://github.com/KouzakiUmi) for contributing image-to-image editing (`grok_imagine_edit`), session image interaction cards, and host-dependency stability and compatibility fixes.

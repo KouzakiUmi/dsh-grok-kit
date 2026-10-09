@@ -104,7 +104,7 @@ jobs:
 
       - name: Isolated pack-install smoke
         run: |
-          npm install -g @deepseek-ai/dsh@0.1.2-rc.1
+          npm install -g @deepseek-ai/dsh@0.2.0-rc.2
           node scripts/pack-install-smoke.mjs
 
       - name: Publish to npm

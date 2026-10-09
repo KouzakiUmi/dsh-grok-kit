@@ -6,7 +6,7 @@
 
 ## 先决条件
 
-- PATH 上有 DeepSeek Harness 的 `dsh`（**0.1.2-rc.1** 为测试矩阵；**0.1.5-rc.2** 与 **0.2.0-rc.2** 的模型解析 seam 已验证可用，0.2.0 线的设置页与流式路径待真机确认；不声称支持 0.1.1）
+- PATH 上有 DeepSeek Harness 的 `dsh`（当前冻结支持 **0.2.0-rc.2**，配套 `@earendil-works/pi-ai@0.87.1`，Node 22/24；不再支持旧 0.1 宿主线）
 - xAI 允许走 OAuth API 的 SuperGrok 或 X Premium 账号
 - 能打开浏览器完成 device-code 授权
 
@@ -22,6 +22,19 @@ dsh plugin --profile web add dsh-grok-kit
 
 ```sh
 pnpm dsh plugin --profile web add dsh-grok-kit
+```
+
+也可以指定 0.2.0 准确锚点：
+
+```sh
+dsh plugin --profile web add dsh-grok-kit@0.2.0
+```
+
+如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
+
+```sh
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 如果这个 profile 已装过 GitHub 来源，先尝试显式请求 npm 最新版：
@@ -60,10 +73,12 @@ allowBuilds:
 ```sh
 git clone https://github.com/MaRi23333/dsh-grok-kit
 cd dsh-grok-kit
-npm install
+npm ci
 npm run check
 dsh plugin --profile web add .
 ```
+
+日常开发运行 `npm ci`（或 `npm install`）与 `npm run check` 即可。若需在本地环境链接真实宿主依赖进行调试，可按需可选运行 `node scripts/link-host-deps.mjs`。
 
 ## 登录
 
@@ -91,7 +106,7 @@ Web UI：
 
 嵌套的 `grok_web_search` / `x_search`（再开一轮 `grok-build-0.1`）在 `backendSearch` 关闭时自动注册（`nestedSearchTools ?? !backendSearch`）。只有需要与主搜索同时使用 `allowed_domains` / 账号/日期过滤时，才设 `nestedSearchTools: true`。主请求 403 会让整轮聊天失败——在插件配置里设 `backendSearch: false`。开启主循环搜索时，`x_keyword_search` 等拒绝桩会从转发流中剥掉，不属于正常界面体验。
 
-`grok_imagine` 默认打开。当前 DSH 还不能把生成图直接显示在对话中；需要直接取得文件时，请让 Agent 把图片保存到指定目录。未指定目录时，图片会保存到 DSH 附件库。
+`grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启。图片保存到 DSH 附件库并直接在会话图片卡片中显示；支持从卡片下载或通过宿主文件工具导出，两工具的 `save_path` 参数均不再支持直接写盘。
 
 ## 代理
 

@@ -11,7 +11,7 @@
  * profile, so a logged-out stub session is enough. Network is used only by
  * the scratch `npm install` itself.
  *
- * Usage: node scripts/verify-host-compat.mjs [0.2.0-rc.2|0.1.5-rc.2|0.1.2-rc.1]
+ * Usage: node scripts/verify-host-compat.mjs [0.2.0-rc.2]
  * Requires `npm run build` (or a committed lib/) first.
  */
 import { execFileSync } from 'node:child_process'
@@ -22,8 +22,6 @@ import { fileURLToPath } from 'node:url'
 
 const HOST_SETS = {
   '0.2.0-rc.2': { dsh: '0.2.0-rc.2', piAi: '0.87.1', schemastery: '3.18.4', cordis: '4.0.4' },
-  '0.1.5-rc.2': { dsh: '0.1.5-rc.2', piAi: '0.85.1', schemastery: '3.18.2', cordis: '4.0.2' },
-  '0.1.2-rc.1': { dsh: '0.1.2-rc.1', piAi: '0.84.4', schemastery: '3.18.2', cordis: '4.0.2' },
 }
 // Components absent from a given host line (renamed/absorbed upstream) are
 // excluded from that leg's frozen fixture; everything else stays pinned.
@@ -72,7 +70,7 @@ function run(file, args, opts = {}) {
   return execFileSync(file, args, { encoding: 'utf8', shell, ...opts })
 }
 
-const requested = process.argv[2] ?? '0.1.5-rc.2'
+const requested = process.argv[2] ?? '0.2.0-rc.2'
 const set = HOST_SETS[requested]
 if (set === undefined) {
   console.error(`verify-host-compat: unknown host set "${requested}" (known: ${Object.keys(HOST_SETS).join(', ')})`)

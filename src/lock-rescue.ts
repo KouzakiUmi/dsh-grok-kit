@@ -5,10 +5,12 @@
 //
 
 /**
- * Writer-lock helpers. Automatic stale-lock recovery is intentionally a
- * no-op: any check-then-rename/rm on a path can move a live writer's lock
- * that appeared after the inspection (GROK-WRITER-LOCK-002). Orphan `.lock`
- * files are fail-closed — writers time out — and left for the operator.
+ * Writer-lock helpers. Supplementary plugin-level stale-lock recovery is
+ * intentionally a no-op: any check-then-rename/rm on a path cannot bind
+ * the inspected generation to the directory entry and risks moving a live
+ * writer's lock (GROK-WRITER-LOCK-002). Store operations delegate cross-process
+ * writer coordination and dead-PID reclamation to the official dsh-atomic-write
+ * claim-file protocol; this extra rescue helper never mutates locks.
  * @module dsh-grok-kit/lock-rescue
  */
 
@@ -36,9 +38,11 @@ export function isPidAlive(pid: number): boolean | undefined {
 }
 
 /**
- * Do not break writer locks. Path-based recovery cannot bind the inspected
- * file generation to the directory entry, so this never mutates `lockPath`
- * or creates `.stale-*` siblings. Returns `undefined` always.
+ * Do not break writer locks from this supplementary rescue helper. Path-based
+ * recovery cannot bind the inspected file generation to the directory entry,
+ * so this helper never mutates `lockPath` or creates `.stale-*` siblings.
+ * Routine writer coordination and dead-PID takeover are delegated to the
+ * official atomic-write protocol in the store. Returns `undefined` always.
  */
 export async function breakStaleWriterLock(_lockPath: string): Promise<number | undefined> {
   return undefined

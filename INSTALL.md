@@ -6,7 +6,7 @@ Idempotent runbook for humans and automation agents.
 
 ## Prerequisites
 
-- DeepSeek Harness `dsh` on PATH (**0.1.2-rc.1** is the tested matrix; **0.1.5-rc.2** and **0.2.0-rc.2** are verified for the model resolution seam, with the 0.2.0 settings page and streaming still to be confirmed on a live host; 0.1.1 is not claimed); a source checkout that runs `pnpm dsh` works too
+- DeepSeek Harness `dsh` on PATH (frozen support for **0.2.0-rc.2** paired with `@earendil-works/pi-ai@0.87.1`, Node 22/24; compatibility with the legacy 0.1 line is no longer supported); a source checkout that runs `pnpm dsh` works too
 - A SuperGrok or X Premium account that xAI allows on the OAuth API
 - A browser you can use to approve the device-code login
 
@@ -22,6 +22,19 @@ From a DeepSeek Harness source checkout, prefix the same command with `pnpm`:
 
 ```sh
 pnpm dsh plugin --profile web add dsh-grok-kit
+```
+
+Or pin the exact 0.2.0 release:
+
+```sh
+dsh plugin --profile web add dsh-grok-kit@0.2.0
+```
+
+If `dsh` is not on PATH, run via pinned `npx`:
+
+```sh
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
 If this profile already has the GitHub source, explicitly request the latest npm release first:
@@ -60,10 +73,12 @@ The file is usually `~/.dsh/profiles/web/pnpm-workspace.yaml` (create it if miss
 ```sh
 git clone https://github.com/MaRi23333/dsh-grok-kit
 cd dsh-grok-kit
-npm install
+npm ci
 npm run check
 dsh plugin --profile web add .
 ```
+
+Routine development uses `npm ci` (or `npm install`) and `npm run check`. Running `node scripts/link-host-deps.mjs` is optional when linking live host dependencies for local debugging.
 
 ## Sign in
 
@@ -91,7 +106,7 @@ This bundle's composition sets `backendSearch: false` (off by default; enable it
 
 Nested `grok_web_search` / `x_search` (a second `grok-build-0.1` hop) are registered automatically while `backendSearch` is off (`nestedSearchTools ?? !backendSearch`). Set `nestedSearchTools: true` only if you need `allowed_domains` / handle / date filters alongside backend search. A SuperGrok 403 on the chat route is fatal for that turn — set `backendSearch: false` in the plugin config. Reject-tool stubs such as `x_keyword_search` are stripped from the forwarded stream when backend search is on; they are not part of the normal UI.
 
-`grok_imagine` is on by default. Current DSH builds cannot display the generated image directly in the conversation. Ask the Agent to save it to a specific directory when you need a normal file; without a specified directory, it is stored in the DSH attachment library.
+ `grok_imagine` (text-to-image) and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are enabled by default. Images are stored in the DSH attachment library and rendered directly in session image cards; they can be downloaded from the card or exported with host file tools. Direct disk writing via `save_path` is no longer supported for either tool.
 
 ## Proxy
 

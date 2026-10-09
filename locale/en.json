@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Grok toolkit",
-    "description": "OAuth integration for SuperGrok / X Premium with Grok chat, web/X search, and Imagine. Limited maintenance; live features are not currently verified."
+    "description": "Use Grok via OAuth for chat, web/X search, Imagine generation and editing, and session image cards. Limited maintenance; community testing welcome."
   }
 }

@@ -176,12 +176,12 @@ declare class XaiOAuthCredentialStore implements CredentialStore {
   list(): Promise<readonly CredentialInfo[]>;
   /**
    * Run a read-modify-write under the cross-process writer lock.
-   * Leftover locks are fail-closed: this store never deletes or renames a
-   * `.lock` sibling (path-based rescue can steal a live writer's lock).
-   * A lock still present after the wait budget fails. That budget is a
-   * fixed 2s (dsh-atomic-write) and is sized for pure file I/O: `fn` MUST
-   * NOT perform network work inside
-   * the lock.
+   * Writer locking delegates to `@deepseek-ai/dsh-atomic-write`, which uses a
+   * claim-file protocol to safely take over locks whose recorded holder process
+   * has exited on the same host and PID namespace. Locks held by live processes,
+   * unverified permissions, or malformed records remain fail-closed and fail
+   * after the wait budget. That budget is a fixed 2s (dsh-atomic-write) and is
+   * sized for pure file I/O: `fn` MUST NOT perform network work inside the lock.
    * Refresh-first-then-commit flows read + refresh outside and only run the
    * guarded compare-and-write here (see createXaiOAuthSearchTokenSource).
    * pi-ai's own OAuth refresh does run inside its `modify` call — host
@@ -223,8 +223,9 @@ declare class XaiOAuthSession {
    * while a credential file exists — a logged-out store cannot succeed — and
    * with an unref'd timer so the CLI one-shots (bin.ts) still exit on time.
    * The retry reuses `refreshLiveCatalog`, so a transient lock timeout can be
-   * retried after the lock is released or cleared. The store remains
-   * fail-closed and never breaks a writer lock automatically.
+   * retried after the lock is released or cleared. Writer locks delegate
+   * exited-holder recovery to the official atomic-write protocol; live and
+   * unverified locks remain fail-closed.
    */
   private scheduleCatalogRetry;
   /** Cancel a pending retry and restart the backoff episode from zero. */
@@ -697,10 +698,12 @@ declare class XaiOAuthSearchProvider {
 //#endregion
 //#region src/lock-rescue.d.ts
 /**
- * Writer-lock helpers. Automatic stale-lock recovery is intentionally a
- * no-op: any check-then-rename/rm on a path can move a live writer's lock
- * that appeared after the inspection (GROK-WRITER-LOCK-002). Orphan `.lock`
- * files are fail-closed — writers time out — and left for the operator.
+ * Writer-lock helpers. Supplementary plugin-level stale-lock recovery is
+ * intentionally a no-op: any check-then-rename/rm on a path cannot bind
+ * the inspected generation to the directory entry and risks moving a live
+ * writer's lock (GROK-WRITER-LOCK-002). Store operations delegate cross-process
+ * writer coordination and dead-PID reclamation to the official dsh-atomic-write
+ * claim-file protocol; this extra rescue helper never mutates locks.
  * @module dsh-grok-kit/lock-rescue
  */
 /** Extract the owner pid from a dsh-atomic-write lock (`${pid}\n` and nothing else). */
@@ -708,9 +711,11 @@ declare function parseLockPid(text: string): number | undefined;
 /** Whether `pid` is running: `true` alive, `false` provably dead, `undefined` unknown. */
 declare function isPidAlive(pid: number): boolean | undefined;
 /**
- * Do not break writer locks. Path-based recovery cannot bind the inspected
- * file generation to the directory entry, so this never mutates `lockPath`
- * or creates `.stale-*` siblings. Returns `undefined` always.
+ * Do not break writer locks from this supplementary rescue helper. Path-based
+ * recovery cannot bind the inspected file generation to the directory entry,
+ * so this helper never mutates `lockPath` or creates `.stale-*` siblings.
+ * Routine writer coordination and dead-PID takeover are delegated to the
+ * official atomic-write protocol in the store. Returns `undefined` always.
  */
 declare function breakStaleWriterLock(_lockPath: string): Promise<number | undefined>;
 //#endregion

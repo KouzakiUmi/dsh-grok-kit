@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Isolated DSH pack-install smoke (default 0.1.2-rc.1; optional 0.2.0-rc.2): npm pack, `dsh plugin add` into
+ * Isolated DSH pack-install smoke (DSH 0.2.0-rc.2): npm pack, `dsh plugin add` into
  * the `web` profile, booted `--help`, and the plugin entry.
  * Isolates DSH_HOME / HOME / USERPROFILE and package-manager config/cache.
  * Does not read real user credentials.
  *
  * Requires the selected `dsh` version on PATH (CI installs it). Optional DSH_BIN.
  *
- * Usage: node scripts/pack-install-smoke.mjs [0.1.2-rc.1|0.2.0-rc.2]
+ * Usage: node scripts/pack-install-smoke.mjs [0.2.0-rc.2]
  */
 import { execFileSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -16,10 +16,9 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HOST_SETS = {
-  '0.1.2-rc.1': { dsh: '0.1.2-rc.1', piAi: '0.84.4' },
   '0.2.0-rc.2': { dsh: '0.2.0-rc.2', piAi: '0.87.1' },
 }
-const requestedDsh = process.argv[2] ?? '0.1.2-rc.1'
+const requestedDsh = process.argv[2] ?? '0.2.0-rc.2'
 if (!Object.hasOwn(HOST_SETS, requestedDsh)) {
   console.error(`pack-install-smoke: unknown host version "${requestedDsh}" (known: ${Object.keys(HOST_SETS).join(', ')})`)
   process.exit(2)
@@ -155,13 +154,13 @@ try {
 
   const pluginDir = join(dshHome, 'profiles', PROFILE, 'node_modules', 'dsh-grok-kit')
   const manifest = JSON.parse(readFileSync(join(pluginDir, 'package.json'), 'utf8'))
-  if (manifest.version !== '0.1.15') {
-    throw new Error(`installed plugin version is ${manifest.version}, expected 0.1.15`)
+  if (manifest.version !== '0.2.0') {
+    throw new Error(`installed plugin version is ${manifest.version}, expected 0.2.0`)
   }
   if (!existsSync(join(pluginDir, 'lib', 'index.js'))) {
     throw new Error('installed plugin is missing lib/index.js')
   }
-  console.log(`pack-install-smoke: OK — DSH ${EXPECTED_DSH} / pi-ai ${EXPECTED_PI_AI} / booted web profile loaded dsh-grok-kit@0.1.15`)
+  console.log(`pack-install-smoke: OK — DSH ${EXPECTED_DSH} / pi-ai ${EXPECTED_PI_AI} / booted web profile loaded dsh-grok-kit@0.2.0`)
 } finally {
   if (tarball !== undefined) rmSync(tarball, { force: true })
   rmSync(work, { recursive: true, force: true })

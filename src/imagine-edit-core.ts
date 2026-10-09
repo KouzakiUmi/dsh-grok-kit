@@ -426,7 +426,7 @@ export async function runImageEdit(options: RunImageEditOptions): Promise<EditSa
       authorization: `Bearer ${bearer}`,
       'content-type': 'application/json',
       accept: 'application/json',
-      'user-agent': 'dsh-grok-kit/0.1.15',
+      'user-agent': 'dsh-grok-kit/0.2.0',
     },
     body: JSON.stringify(body),
     ...signal === undefined ? {} : { signal },

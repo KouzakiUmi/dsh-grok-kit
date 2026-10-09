@@ -29,7 +29,7 @@ jobs:
           cache: npm
 
       - name: Install (frozen lockfile)
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Dependency tree is complete
         run: npm ls --all
@@ -67,14 +67,8 @@ jobs:
 
       - name: Isolated pack-install smoke
         run: |
-          npm install -g @deepseek-ai/dsh@0.1.2-rc.1
+          npm install -g @deepseek-ai/dsh@0.2.0-rc.2
           node scripts/pack-install-smoke.mjs
 
       - name: Host compat probe (dsh-llm-pi-ai 0.2.0-rc.2)
         run: node scripts/verify-host-compat.mjs 0.2.0-rc.2
-
-      - name: Host compat probe (dsh-llm-pi-ai 0.1.5-rc.2)
-        run: node scripts/verify-host-compat.mjs 0.1.5-rc.2
-
-      - name: Host compat probe (dsh-llm-pi-ai 0.1.2-rc.1)
-        run: node scripts/verify-host-compat.mjs 0.1.2-rc.1

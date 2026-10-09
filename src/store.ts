@@ -234,12 +234,12 @@ export class XaiOAuthCredentialStore implements CredentialStore {
 
   /**
    * Run a read-modify-write under the cross-process writer lock.
-   * Leftover locks are fail-closed: this store never deletes or renames a
-   * `.lock` sibling (path-based rescue can steal a live writer's lock).
-   * A lock still present after the wait budget fails. That budget is a
-   * fixed 2s (dsh-atomic-write) and is sized for pure file I/O: `fn` MUST
-   * NOT perform network work inside
-   * the lock.
+   * Writer locking delegates to `@deepseek-ai/dsh-atomic-write`, which uses a
+   * claim-file protocol to safely take over locks whose recorded holder process
+   * has exited on the same host and PID namespace. Locks held by live processes,
+   * unverified permissions, or malformed records remain fail-closed and fail
+   * after the wait budget. That budget is a fixed 2s (dsh-atomic-write) and is
+   * sized for pure file I/O: `fn` MUST NOT perform network work inside the lock.
    * Refresh-first-then-commit flows read + refresh outside and only run the
    * guarded compare-and-write here (see createXaiOAuthSearchTokenSource).
    * pi-ai's own OAuth refresh does run inside its `modify` call — host

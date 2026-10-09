@@ -163,8 +163,9 @@ export class XaiOAuthSession {
    * while a credential file exists — a logged-out store cannot succeed — and
    * with an unref'd timer so the CLI one-shots (bin.ts) still exit on time.
    * The retry reuses `refreshLiveCatalog`, so a transient lock timeout can be
-   * retried after the lock is released or cleared. The store remains
-   * fail-closed and never breaks a writer lock automatically.
+   * retried after the lock is released or cleared. Writer locks delegate
+   * exited-holder recovery to the official atomic-write protocol; live and
+   * unverified locks remain fail-closed.
    */
   private scheduleCatalogRetry(signal?: AbortSignal): void {
     if (this.disposed || signal?.aborted) return
