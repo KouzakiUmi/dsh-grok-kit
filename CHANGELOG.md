@@ -16,12 +16,10 @@
 - Stability fixes: Sign-in and sign-out wait for pending operations, refresh waiters can cancel independently, and terminal stream errors, diagnostic redaction, and saved empty-proxy overrides are handled more reliably.
 - 锁回收机制对齐：遵循官方 `@deepseek-ai/dsh-atomic-write@0.2.0-rc.2` 机制，在同机且同一 PID 命名空间下通过 claim 文件与二次存活性校验自动回收已退出进程遗留的写锁；活进程锁与无法验证的锁保持等待超时，不支持跨机器或跨容器挂载共用凭据锁目录。
 - Lock recovery alignment: Aligned with the official `@deepseek-ai/dsh-atomic-write@0.2.0-rc.2` contract to automatically recover leftover writer locks from exited processes on the same host and PID namespace via claim files and double-checked liveness probes; active and unverified locks continue to wait and time out, and cross-host or cross-container shared storage directories are unsupported.
-- 维护状态说明：维护者无有效订阅的有限维护状态保持不变；在线聊天、搜索与 Imagine 行为仍需社区实测反馈。
-- Maintenance notice: Limited maintenance remains in effect due to lack of an active subscription; live chat, search, and Imagine behavior continue to rely on community testing.
 
 ## 0.1.15（2026-10-04）
 
 - 插件列表和详情页新增随 DeepSeek Harness 界面语言切换的中英文名称与简介。
 - Added localized English and Chinese names and descriptions for the plugin list and detail page.
-- 同步版本号、锁文件、User-Agent 和隔离安装探针。未修改 OAuth、聊天、搜索或 Imagine 行为；维护者仍缺少有效订阅，在线功能尚未复测。
-- Synchronized the package, lockfile, User-Agent, and isolated-install probe versions. OAuth, chat, search, and Imagine behavior is unchanged; live features remain unverified without an active subscription.
+- 同步版本号、锁文件、User-Agent 和隔离安装探针。未修改 OAuth、聊天、搜索或 Imagine 行为。
+- Synchronized the package, lockfile, User-Agent, and isolated-install probe versions. OAuth, chat, search, and Imagine behavior is unchanged.

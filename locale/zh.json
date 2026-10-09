@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Grok 工具包",
-    "description": "通过 OAuth 接入 Grok，提供对话、网页/X 搜索、Imagine 生图与图生图，以及会话图片卡片。有限维护，欢迎社区实测反馈。"
+    "description": "通过 OAuth 接入 Grok，提供对话、网页/X 搜索、Imagine 生图与图生图，以及会话图片卡片。"
   }
 }

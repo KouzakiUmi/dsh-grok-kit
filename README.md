@@ -2,12 +2,6 @@
 
 **中文** · [English](README.en.md)
 
-> **维护状态公告（2026-09-30）**
->
-> 维护者目前**没有有效的 SuperGrok 订阅**，无法持续实测聊天、搜索与 Imagine 的在线表现。本项目进入**有限维护**：暂停主动功能开发，不承诺对新版 DeepSeek Harness 或 xAI 上游变化及时适配。已发布版本与源码继续保留；在线可用性未经当前实测。
->
-> 有限维护期间，离线可复现的问题、文档、打包与宿主兼容修复可按可用精力处理。在线行为的变化需要由拥有真实订阅的社区测试者验证后，再决定是否进入正式发布。欢迎按[实测反馈流程](#实测反馈流程)提交测试结果；有意长期协作的测试者可以在 issue 中说明。**任何情况下都不要分享账号、token 或 `auth.json`。**
-
 <p align="center">
   <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit：DeepSeek Harness 的 Grok OAuth 与融合搜索插件">
 </p>
@@ -108,7 +102,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.0** 面向 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不再支持旧 0.1 宿主线。新增图生图工具 `grok_imagine_edit` 与会话图片交互卡片，并完善登录刷新和异常处理；有限维护状态不变。变更说明见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.0** 面向 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不再支持旧 0.1 宿主线。新增图生图工具 `grok_imagine_edit` 与会话图片交互卡片，并完善登录刷新和异常处理。变更说明见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
@@ -194,7 +188,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#f82370b68bbdb2204e095
 
 ## 实测反馈流程
 
-有限维护期间，插件在线行为结论主要来自社区实测。拥有有效 SuperGrok / X Premium 订阅的用户可以按 [live-testing 模板](https://github.com/MaRi23333/dsh-grok-kit/issues/new?template=live-testing.md) 开 issue，逐项记录聊天、连续对话、工具调用、搜索与 Imagine 的通过 / 失败 / 未测状态，并附上插件版本、`dsh --version`、Node 版本、操作系统、订阅档位（按官方原文）、测试日期和最小复现步骤。提交前先脱敏：不要粘贴 token、`auth.json` 内容、账号邮箱、session id、私有路径或私密对话内容。
+欢迎通过 issue 反馈问题、提出建议，也欢迎通过 PR 参与改进。拥有有效 SuperGrok / X Premium 订阅的用户可以按 [live-testing 模板](https://github.com/MaRi23333/dsh-grok-kit/issues/new?template=live-testing.md) 开 issue，逐项记录聊天、连续对话、工具调用、搜索与 Imagine 的通过 / 失败 / 未测状态，并附上插件版本、`dsh --version`、Node 版本、操作系统、订阅档位（按官方原文）、测试日期和最小复现步骤。提交前先脱敏：不要粘贴 token、`auth.json` 内容、账号邮箱、session id、私有路径或私密对话内容。
 
 提交前请先搜索[现有 issue](https://github.com/MaRi23333/dsh-grok-kit/issues)，有相同问题时把结果补充到原 issue，不要重复开帖。不要仅为测试续订订阅，也不必覆盖每一个可选功能；单次会话中一项或几项的真实结果同样有价值。
 

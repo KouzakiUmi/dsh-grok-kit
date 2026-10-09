@@ -9,23 +9,22 @@ npm token or GitHub repository secret.
 Release for that already-published version after this workflow is installed: the
 workflow will correctly reject it because `dsh-grok-kit@0.1.3` already exists.
 
-## Limited maintenance and evidence boundaries
+## Verification and evidence boundaries
 
-Since 2026-09-30 the maintainer has no active SuperGrok subscription and the
-project is in limited maintenance: offline-reproducible fixes, docs, packaging,
-and host-compat work may be addressed as time permits, but live chat, search,
-and Imagine behavior cannot be re-verified by the maintainer.
+Releases combine automated checks, host-compatibility checks, and live-service
+feedback from maintainers and contributors. Record what was actually tested;
+project maintenance status is not a substitute for verification.
 
-Evidence boundaries for any release made during limited maintenance:
+Evidence boundaries for releases:
 
 - Local gates (`npm run check`, package checks, the frozen-install smoke, and
   the host-compat probes) verify offline behavior, host compatibility, build,
   and packaging within the tested scope; they do **not** verify live chat,
   search, or Imagine behavior.
-- Maintenance releases that only change docs, metadata, or the version must say
+- Updates that only change docs, metadata, or the version must say
   so in the Release notes and must not claim behavioral fixes.
-- Changes touching online behavior need live-testing feedback from community
-  testers with a real subscription (see
+- Changes touching online behavior need live-testing evidence from a maintainer
+  or contributor with an eligible account (see
   `.github/ISSUE_TEMPLATE/live-testing.md`) before a formal release.
 
 ## One-time Trusted Publisher setup
