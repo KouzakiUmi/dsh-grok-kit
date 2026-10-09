@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
-> Use an eligible SuperGrok or X Premium subscription in DeepSeek Harness through OAuth, with web/X search in the main model turn, continuous reasoning, Imagine, and an xAI-only proxy.
+> Use Grok in DeepSeek Harness through OAuth, with fused web/X search in the main model turn, reasoning continuity across turns, Imagine image generation and editing, and an xAI-only proxy.
 
 > [!IMPORTANT]
 > **Unofficial project, trademark, and account-use notice**
@@ -48,7 +48,7 @@ To let both search systems coexist, DSH's native `web_search` remains in the hos
 
 For domain, account, or date filters, use the standalone `grok_web_search` / `x_search` tools — the default path while `backendSearch` is off; enabling `backendSearch` turns this standalone path into the optional mode.
 
-`statefulResponses` is off by default. When enabled, the plugin uses `store: true` + `previous_response_id` and appends only new user items. A previous `toolUse` turn (client tools such as bash) is never continued — otherwise xAI emits a second message that reprints the search writeup. A live OAuth probe could list sources on follow-up, but `cached_tokens` does not become that turn's 100k–300k search KV.
+`statefulResponses` is off by default. When enabled, the plugin uses `store: true` and `previous_response_id` to continue the conversation, appending only new user messages. It does not continue a turn that used client tools such as bash, to avoid repeating an existing search answer. Continuing a conversation does not guarantee that all search material from the previous turn is cached.
 
 ## Interface and behavior
 
@@ -164,7 +164,7 @@ The “Search & feature options” card on Settings → xAI Grok can also overri
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
 - The xAI-only fetch hook is restored when the plugin is disposed and does not permanently change system or process environment variables
 - On Windows, Node mode bits are not NTFS ACLs. Restrict the directory ACL yourself if the user profile or `$DSH_HOME` is stored in a shared location
-- Writer lock and safety boundaries: Credential writes delegate to official `@deepseek-ai/dsh-atomic-write` (`$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, contenders use an exclusive claim file and double-checked record/PID inspection to automatically take over and reclaim locks left by proven exited processes; locks held by live PIDs, unverified permissions, malformed records, or empty files continue to wait and time out (fail-closed). The credential and lock directory must reside on a local filesystem within the same PID namespace; sharing the directory across hosts or container boundaries is prohibited (mismatched PID spaces can cause mutex failures and data corruption). Path-based operations cannot guarantee absolute atomicity against arbitrary manual file replacement, and the plugin's supplementary rescue helper intentionally avoids modifying lock files
+- Writer lock and safety boundaries: Credential writes delegate to official `@deepseek-ai/dsh-atomic-write` (`$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, contenders use an exclusive claim file and double-checked record/PID inspection to automatically take over and reclaim locks left by proven exited processes; locks held by live PIDs, unverified permissions, malformed records, or empty files continue to wait and time out (fail-closed). The credential and lock directory must reside on a local filesystem within the same PID namespace; sharing the directory across hosts or container boundaries is prohibited (mismatched PID spaces can cause mutex failures and data corruption). Manually replacing credential or lock files while these processes are running can bypass these safeguards; stop all related processes before making such changes
 
 ## Compatibility and limitations
 

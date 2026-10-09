@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
-> 通过 OAuth 在 DeepSeek Harness 中使用 Grok：主循环融合网页与 X 搜索、连续 reasoning、Imagine，以及仅作用于 xAI 的独立代理。
+> 通过 OAuth 在 DeepSeek Harness 中使用 Grok：主循环融合网页与 X 搜索、多轮推理衔接、Imagine 生图与图生图，以及仅作用于 xAI 的独立代理。
 
 > [!IMPORTANT]
 > **非官方项目、商标与账户使用声明**
@@ -28,7 +28,7 @@
 `dsh-grok-kit` 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 增加独立的 `xai-oauth` 路由。它不要求 `XAI_API_KEY`，也不修改 dsh 源码；重点不只是“能登录”，而是把服务端搜索和连续 reasoning 所需的请求字段接进主聊天路径。
 
 - **搜索融入主循环：** 网页与 X 检索发生在 grok-4.6 的同一轮 Think 中，推理可以直接使用刚搜到的材料
-- **多轮 reasoning 连续：** 默认使用 high effort，并保留 `reasoning.encrypted_content`，让后续回合能够带回加密推理上下文
+- **多轮推理衔接：** 默认使用 high effort，并保留 `reasoning.encrypted_content`，让后续回合能够带回加密推理上下文
 - **登录状态与 Grok CLI 同步：** 直接共用并回写 `~/.grok/auth.json`，不是只复制一次后各自轮换 refresh token
 - **Imagine 文生图与图生图：** `grok_imagine` 与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启，非聊天模型不会混进对话模型列表；生成图与编辑图统一通过 DSH 附件库保存并保留归一化 metadata，在会话图片卡片中直观展示提示词、输入图与结果，并支持下载与再次生成/编辑
 
@@ -48,7 +48,7 @@
 
 需要按域名、账号或日期过滤时，改走独立的 `grok_web_search` / `x_search`（`backendSearch` 关闭时的默认路径）；开启 `backendSearch` 后这条独立路径退居可选。
 
-`statefulResponses` 默认关。打开后用 `store: true` + `previous_response_id` 只追加新 user；上一轮若是 `toolUse`（bash 等客户端工具）不会续链，否则会把已经写完的搜索正文再生成一遍。OAuth 探针里 follow-up 能列来源，但 `cached_tokens` 不会变成那次搜索的 10–30 万 KV。
+`statefulResponses` 默认关闭。开启后，插件通过 `store: true` 和 `previous_response_id` 续接对话，只追加新的用户消息；若上一轮调用了 bash 等客户端工具，则不续接，以免重复生成已有的搜索正文。续接对话不保证缓存上一轮的全部搜索材料。
 
 ## 界面与效果
 
@@ -164,7 +164,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#f82370b68bbdb2204e095
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
 - xAI 专用 fetch hook 会在插件卸载时恢复；它不会永久修改系统或进程环境变量
 - Windows 上的 Node mode bit 不等于 NTFS ACL；如果用户目录或 `$DSH_HOME` 位于共享位置，请自行收紧目录权限
-- 写入锁机制与安全边界：凭据写入委托官方 `@deepseek-ai/dsh-atomic-write`（`$DSH_HOME/.xai-oauth-auth.json.lock`）。在同机且同一 PID 命名空间下，争用者通过独占 claim 文件与二次记录/PID 检查自动接管并回收已确认退出的进程遗留锁；活进程 PID、权限不明、格式损坏或空锁继续保持等待并超时（fail-closed）。写入目录必须为本机文件系统且处于同一 PID 命名空间，禁止跨机器或跨容器挂载共用同一 auth 与锁目录（异构环境 PID 无法对齐，可能导致互斥失效发生并发双写）；路径级检查无法对抗任意手动外部文件替换，插件额外救援入口亦不擅自修改锁文件
+- 写入锁机制与安全边界：凭据写入委托官方 `@deepseek-ai/dsh-atomic-write`（`$DSH_HOME/.xai-oauth-auth.json.lock`）。在同机且同一 PID 命名空间下，争用者通过独占 claim 文件与二次记录/PID 检查自动接管并回收已确认退出的进程遗留锁；活进程 PID、权限不明、格式损坏或空锁继续保持等待并超时（fail-closed）。写入目录必须为本机文件系统且处于同一 PID 命名空间，禁止跨机器或跨容器挂载共用同一 auth 与锁目录（异构环境 PID 无法对齐，可能导致互斥失效发生并发双写）。运行时手动替换凭据或锁文件可能破坏这些保证；需要清理时，请先停止所有相关进程
 
 ## 兼容性与限制
 
