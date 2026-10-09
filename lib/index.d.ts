@@ -587,7 +587,7 @@ interface RunImageEditOptions {
  */
 declare function runImageEdit(options: RunImageEditOptions): Promise<EditSaveResult & {
   text: string;
-  mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+  mediaType: string;
   bytes: number;
   model: string;
   sourceCount: number;
@@ -601,10 +601,6 @@ declare function safeMessage(error: unknown): string;
 //#region src/proxy.d.ts
 /** Absolute path of the plugin-owned proxy setting file. */
 declare function xaiProxyPath(dshHome?: string): string;
-/**
- * Read the plugin's own stored proxy URL ('' = off; invalid/userinfo values
- * are dropped AND the disk copy is scrubbed so credentials do not linger).
- */
 declare function readStoredProxyUrl(): string;
 /**
  * Persist the plugin's own proxy setting. Fail-closed: URLs with embedded
