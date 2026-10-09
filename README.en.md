@@ -113,7 +113,7 @@ If this profile previously used the GitHub source, first try `dsh plugin --profi
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c93b6921eb48f0d1a31b
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#f82370b68bbdb2204e095257ecc551b9111d5831
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.

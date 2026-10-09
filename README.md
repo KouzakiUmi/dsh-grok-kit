@@ -113,7 +113,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c93b6921eb48f0d1a31b
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#f82370b68bbdb2204e095257ecc551b9111d5831
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。
