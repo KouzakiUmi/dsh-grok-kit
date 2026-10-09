@@ -228,9 +228,11 @@ describe('actual DSH owner contract', () => {
 it('aggregates the actual DSH ChatNodeStore values from owner turn', () => {
   const tail = captureRegistrations().find(entry => entry.spec.name === 'conversation.chat.turnTail')!.component as (props: Record<string, unknown>) => unknown
   const block = settledBlock('grok_imagine', { prompt: 'tail prompt' }, [{ type: 'image', attachment: IMAGE_REF }])
+  // Real node.location is a ConversationLocation: the turn branch carries a
+  // TurnLocation object, so the numeric id lives at location.turn.turn.
   const useChat = (select: Function) => select({ nodes: { values: () => [
-    { kind: 'tool-call', location: { turn: 1 }, data: { root: block } },
-    { kind: 'tool-call', location: { turn: 2 }, data: { root: block } },
+    { kind: 'tool-call', location: { kind: 'turn', turn: { turn: 1, status: 'closed' } }, data: { root: block } },
+    { kind: 'tool-call', location: { kind: 'turn', turn: { turn: 2, status: 'closed' } }, data: { root: block } },
   ] } })
   const out = renderDeep(tail({ owner: { turn: { turn: 1 }, seq: 5 }, useChat }))
   expect(out.texts.filter(text => text === 'tail prompt')).toHaveLength(1)

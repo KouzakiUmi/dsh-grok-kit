@@ -65,7 +65,9 @@ interface SessionsService {
 
 interface ChatNodes {
   turnDataSource?: (turn: unknown, kind: string) => ExternalStore<ToolCallBlock[]>
-  values?: () => readonly { kind: string; location?: { turn?: number }; data?: unknown }[]
+  // Real shape: location is a ConversationLocation whose turn branch carries a
+  // TurnLocation object, so the numeric id lives at location.turn.turn.
+  values?: () => readonly { kind: string; location?: { turn?: { turn?: number } }; data?: unknown }[]
 }
 
 interface ChatState {
@@ -238,9 +240,10 @@ function promptOf(block: unknown): string {
 
 /**
  * Text of the result block.
- * Calls with a save_path produce no session attachment (the image went
- * straight to disk), so the result block carries text only — returning null
- * here would make the whole tool call vanish from the conversation.
+ * `save_path` is rejected before any request and results always land in the
+ * attachment library, but failure blocks and text-only results still carry
+ * text — returning null here would make the whole tool call vanish from the
+ * conversation.
  */
 function textOf(block: unknown): string {
   if (!isObject(block) || !('kind' in block) || !Array.isArray(block.content)) return ''
@@ -775,11 +778,12 @@ function countTurnCodexResults(rows: unknown, closingSeq: number): number {
 }
 
 interface TurnTailProps {
-  owner?: { turn: { turn: unknown }; seq: number }
+  owner?: { turn: { turn: unknown }; seq: number; openFile?: (path: string) => void }
   turn?: { turn: unknown }
   seq?: number
   sessionId?: string
   sessions?: SessionsService
+  openFile?: (path: string) => void
   useChat?: UseChat
 }
 
@@ -795,7 +799,9 @@ function GrokImagineTurnTail(rawProps: TurnTailProps) {
     : empty
   const legacyRows = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
   const rows = useMemo(() => typeof chat?.nodes.values === 'function'
-    ? chat.nodes.values().filter(node => node.kind === 'tool-call' && node.location?.turn === props.turn?.turn).map(node => node.data)
+    // ConversationLocation carries the TurnLocation object at `.turn`; the
+    // numeric turn id lives one level deeper (location.turn.turn).
+    ? chat.nodes.values().filter(node => node.kind === 'tool-call' && node.location?.turn?.turn === props.turn?.turn).map(node => node.data)
     : legacyRows, [chat, props.turn?.turn, legacyRows])
   const results = useMemo(() => selectTurnImagineResults(rows, props.seq ?? Number.POSITIVE_INFINITY), [rows, props.seq])
   const codexCount = useMemo(() => countTurnCodexResults(rows, props.seq ?? Number.POSITIVE_INFINITY), [rows, props.seq])
@@ -814,6 +820,7 @@ function GrokImagineTurnTail(rawProps: TurnTailProps) {
           block={block}
           sessionId={props.sessionId}
           sessions={props.sessions}
+          openFile={props.openFile}
         />
       ))}
     </section>
