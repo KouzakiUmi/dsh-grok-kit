@@ -8,6 +8,9 @@ import {
   buildEditRequestBody,
   decodeFirstImage,
   parseAttachmentSpec,
+  resolveImageSources,
+  runImageEdit,
+  safeDetail,
   sniffEditableImageMediaType,
 } from '../src/imagine-edit-core.ts'
 import { applyGrokImagineEditTool } from '../src/imagine-edit.ts'
@@ -73,6 +76,59 @@ describe('decodeFirstImage', () => {
   })
 })
 
+describe('edit input and result contracts', () => {
+  const dataUri = `data:image/png;base64,${Buffer.from(PNG).toString('base64')}`
+  const tokens: XaiOAuthTokenSource = { available: () => true, resolve: vi.fn(async () => 'tok') }
+
+  it.each([
+    ['oversized', `data:image/png;base64,${Buffer.alloc(64).toString('base64')}`, 8, /limit/],
+    ['fake PNG', `data:image/png;base64,${Buffer.from('ordinary text').toString('base64')}`, 100, /not a PNG/],
+    ['wrong MIME', `data:image/jpeg;base64,${Buffer.from(PNG).toString('base64')}`, 100, /does not match/],
+    ['bad padding', `${dataUri}===`, 100, /valid base64/],
+  ])('rejects %s before any OAuth or HTTP request', async (_name, image, maxBytes, error) => {
+    const fetchImpl = vi.fn()
+    const resolve = vi.fn(async () => 'tok')
+    await expect(runImageEdit({ tokens: { ...tokens, resolve }, prompt: 'p', imageSpecs: [image as string],
+      maxBytes: maxBytes as number, fetchImpl, save: vi.fn() })).rejects.toThrow(error as RegExp)
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(resolve).not.toHaveBeenCalled()
+  })
+
+  it('accepts valid data URIs at the exact byte limit and normalizes whitespace', async () => {
+    const result = await resolveImageSources([dataUri.replace(',', ',\n')], { maxBytes: PNG.byteLength })
+    expect(result).toEqual([{ url: dataUri, origin: 'data-uri', mediaType: 'image/png', bytes: PNG.byteLength }])
+  })
+
+  it('keeps stored attachment metadata after JPEG-to-WebP reencoding', async () => {
+    const saved = { attachmentId: SHA, mediaType: 'image/webp', bytes: 2, width: 1, height: 1, name: 'saved.webp' }
+    const result = await runImageEdit({ tokens, prompt: 'p', imageSpecs: [dataUri],
+      fetchImpl: async () => new Response(JSON.stringify({ data: [{ b64_json: Buffer.from(JPEG).toString('base64') }] })),
+      save: async () => saved })
+    expect(result).toMatchObject(saved)
+    expect(result.text).toContain('Image: image/webp, 2 bytes.')
+  })
+
+  it('redacts upstream errors before truncation', async () => {
+    const detail = JSON.stringify({ access_token: 'access-secret', refresh_token: 'refresh-secret' }) + ' token=query-secret Authorization: Bearer opaque-secret'
+    expect(safeDetail(detail)).not.toMatch(/access-secret|refresh-secret|query-secret|opaque-secret/)
+    await expect(runImageEdit({ tokens, prompt: 'p', imageSpecs: [dataUri],
+      fetchImpl: async () => new Response(detail, { status: 400 }), save: vi.fn() })).rejects.toThrow(/\[redacted\]/)
+  })
+
+  it('does not save an image if cancellation arrives while decoding the response', async () => {
+    const controller = new AbortController()
+    const save = vi.fn()
+    const response = new Response()
+    vi.spyOn(response, 'json').mockImplementation(async () => {
+      controller.abort(new Error('cancelled'))
+      return { data: [{ b64_json: Buffer.from(PNG).toString('base64') }] }
+    })
+    await expect(runImageEdit({ tokens, prompt: 'p', imageSpecs: [dataUri], signal: controller.signal,
+      fetchImpl: async () => response, save })).rejects.toThrow('cancelled')
+    expect(save).not.toHaveBeenCalled()
+  })
+})
+
 describe('applyGrokImagineEditTool', () => {
   const tokens: XaiOAuthTokenSource = { available: () => true, resolve: async () => 'tok' }
   const session = { liveModelIds: () => ['grok-imagine-image-2.0'] } as unknown as XaiOAuthSession
@@ -84,7 +140,7 @@ describe('applyGrokImagineEditTool', () => {
     width: 1,
     height: 1,
     name: 'grok-imagine-edit.png',
-  })), overrides: { tokens?: XaiOAuthTokenSource; resolveAttachments?: () => unknown } = {}) {
+  })), overrides: { tokens?: XaiOAuthTokenSource; resolveAttachments?: () => unknown; maxImageBytes?: number } = {}) {
     let registered: { execute: Function; output: { render: Function }; presentResult: Function } | undefined
     applyGrokImagineEditTool({
       tools: { register: (definition: typeof registered) => { registered = definition } },
@@ -93,6 +149,7 @@ describe('applyGrokImagineEditTool', () => {
       session,
       resolveAttachments: (overrides.resolveAttachments ?? (() => ({ saveImage }))) as never,
       fetch: fetchImpl,
+      maxImageBytes: overrides.maxImageBytes,
     })
     return { registered, saveImage }
   }
@@ -114,6 +171,18 @@ describe('applyGrokImagineEditTool', () => {
     expect(registered!.presentResult({ prompt: 'sketch', image: 'src' }, { isError: false, meta: value })).toMatchObject({ card: 'generic' })
   })
 
+  it('reads local inputs through the agent filesystem with a byte limit', async () => {
+    const resolve = vi.fn(async () => ({ targetKey: 'image' }))
+    const readBytes = vi.fn(async () => PNG)
+    const { registered } = register(async () => new Response(JSON.stringify({ data: [{ b64_json: Buffer.from(PNG).toString('base64') }] })))
+    const signal = new AbortController().signal
+    await registered!.execute({ prompt: 'edit', image: 'input.png' }, {
+      signal, agent: { ctx: { fs: { resolve, readBytes } }, session: { header: { cwd: '/tmp/ws' } } },
+    })
+    expect(resolve).toHaveBeenCalledWith(expect.stringContaining('input.png'), { cwd: '/tmp/ws', signal })
+    expect(readBytes).toHaveBeenCalledWith({ targetKey: 'image' }, signal, 20 * 1024 * 1024)
+  })
+
   it('rejects more than five sources before any network call', async () => {
     let called = false
     const { registered } = register(async () => { called = true; return new Response('{}', { status: 200 }) })
@@ -122,6 +191,21 @@ describe('applyGrokImagineEditTool', () => {
       { signal: new AbortController().signal },
     )).rejects.toThrow(/too many source images/)
     expect(called).toBe(false)
+  })
+
+  it('requires an attachment store even with a workspace, before network calls', async () => {
+    const fetchImpl = vi.fn()
+    const { registered } = register(fetchImpl, undefined, { resolveAttachments: () => undefined })
+    await expect(registered!.execute({ prompt: 'p', image: `data:image/png;base64,${Buffer.from(PNG).toString('base64')}` },
+      { agent: { session: { header: { cwd: '/tmp/ws' } } } })).rejects.toThrow(/attachment service/)
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it.each([0, 1.5, 5])('rejects invalid n=%s before network calls', async n => {
+    const fetchImpl = vi.fn()
+    const { registered } = register(fetchImpl)
+    await expect(registered!.execute({ prompt: 'p', image: 'https://example.com/image.png', n }, {})).rejects.toThrow(/integer/)
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
   it('maps a non-OK edit response to an error with the status', async () => {
@@ -133,21 +217,20 @@ describe('applyGrokImagineEditTool', () => {
     )).rejects.toThrow(/HTTP 400/)
   })
 
-  it('aligns a lying save_path extension to the returned media type before writing', async () => {
+  it.each(['out.png', '../outside.png'])('rejects save_path %s before requesting an edit', async save_path => {
     const dir = await mkdtemp(join(tmpdir(), 'grok-edit-'))
-    const { registered } = register(async () => new Response(
+    const fetchImpl = vi.fn(async () => new Response(
       JSON.stringify({ data: [{ b64_json: Buffer.from(JPEG).toString('base64') }] }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     ))
+    const { registered, saveImage } = register(fetchImpl)
     const dataUri = `data:image/png;base64,${Buffer.from(PNG).toString('base64')}`
-    const value = await registered!.execute(
-      { prompt: 'x', image: dataUri, save_path: join(dir, 'out.png') },
+    await expect(registered!.execute(
+      { prompt: 'x', image: dataUri, save_path },
       { signal: new AbortController().signal, agent: { session: { header: { cwd: dir } } } },
-    )
-    // xAI returned JPEG: the file must be out.jpg, not a .png that lies.
-    expect(value.path).toBe(join(dir, 'out.jpg'))
-    expect(value.text).toContain('Adjusted the save_path extension')
-    expect(new Uint8Array(await readFile(value.path))).toEqual(JPEG)
+    )).rejects.toThrow(/save_path is unsupported/)
+    expect(fetchImpl).not.toHaveBeenCalled()
+    expect(saveImage).not.toHaveBeenCalled()
   })
 
   it('retries once with a refreshed token after a 401', async () => {

@@ -9,8 +9,8 @@
  */
 
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import type {} from '@deepseek-ai/dsh-fs'
 import type { Context } from '@deepseek-ai/cordis'
 import type { AttachmentStore, ImageAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -22,14 +22,12 @@ import {
   DEFAULT_MAX_IMAGE_BYTES,
   MAX_N,
   MAX_SOURCE_IMAGES,
-  alignExtension,
   extensionFor,
   runImageEdit,
   type EditSaveResult,
 } from './imagine-edit-core.ts'
 
 const TOOL_NAME = 'grok_imagine_edit'
-const SAVE_DIR = '.dsh-grok-kit'
 const RESOLUTIONS = ['1k', '1.5k', '2k']
 
 /** Minimal structural view of the attachment store used by this tool. */
@@ -48,11 +46,6 @@ interface EditAttachmentStore {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
-}
-
-/** Result-file timestamp, same style as the generations path. */
-function stamp(): string {
-  return new Date().toISOString().replaceAll(':', '').replaceAll('.', '-')
 }
 
 export interface GrokImagineEditOptions {
@@ -137,56 +130,15 @@ export function applyGrokImagineEditTool(ctx: Context, options: GrokImagineEditO
     return bytes
   }
 
-  /** Hand the result to the attachment library, or write via an explicit save_path. */
-  const makeSaver = (exec: { agent?: { session?: { header?: { cwd?: string } } } }, requestedPath: unknown) => async (
+  /** Store results through the host; file exports belong to sandboxed host tools. */
+  const makeSaver = (attachments: EditAttachmentStore) => async (
     bytes: Uint8Array,
     mediaType: 'image/png' | 'image/jpeg' | 'image/webp',
-    meta: { model: string; n: number; returned: number },
-  ): Promise<EditSaveResult> => {
-    const extension = extensionFor(mediaType)
-    const cwd = exec.agent?.session?.header?.cwd
-    if (isNonEmptyString(requestedPath)) {
-      if (cwd === undefined || cwd.length === 0) {
-        throw new Error('grok_imagine_edit: no session working directory; cannot resolve a relative save_path')
-      }
-      const raw = requestedPath.trim()
-      const asDirectory = raw.endsWith('/') || raw.endsWith('\\')
-      const requested = asDirectory
-        ? join(isAbsolute(raw) ? raw : resolve(cwd, raw), `grok-imagine-edit-${stamp()}.${extension}`)
-        : (isAbsolute(raw) ? raw : resolve(cwd, raw))
-      // The requested save_path extension may not match the actual response
-      // format (xAI usually returns JPEG): align before writing, otherwise we
-      // drop a mislabeled file that image readers reject.
-      const aligned = asDirectory ? { path: requested } : alignExtension(requested, mediaType)
-      const target = aligned.path
-      await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, bytes)
-      return { path: target, ...aligned.note === undefined ? {} : { note: aligned.note } }
-    }
-    const attachments = options.resolveAttachments() as unknown as EditAttachmentStore | undefined
-    if (attachments !== undefined) {
-      const ref = await attachments.saveImage({
-        data: bytes,
-        mediaType,
-        name: `grok-imagine-edit.${extension}`,
-      })
-      return {
-        attachmentId: ref.attachmentId,
-        mediaType: ref.mediaType,
-        bytes: ref.bytes,
-        width: ref.width,
-        height: ref.height,
-        ...ref.name === undefined ? {} : { name: ref.name },
-      }
-    }
-    if (cwd === undefined || cwd.length === 0) {
-      throw new Error('grok_imagine_edit: no session working directory; enable the attachment service or run from a workspace')
-    }
-    const target = join(cwd, SAVE_DIR, `edit-${stamp()}-1.${extension}`)
-    await mkdir(join(cwd, SAVE_DIR), { recursive: true })
-    await writeFile(target, bytes)
-    return { path: target }
-  }
+  ): Promise<EditSaveResult> => attachments.saveImage({
+    data: bytes,
+    mediaType,
+    name: `grok-imagine-edit.${extensionFor(mediaType)}`,
+  })
 
   // Schemastery descriptors via defineTool: same JSON-schema shape the tool
   // shipped with as a standalone plugin, but with inferred arg typing that
@@ -201,7 +153,7 @@ export function applyGrokImagineEditTool(ctx: Context, options: GrokImagineEditO
       aspect_ratio: { type: 'string', description: 'Optional output aspect ratio, e.g. 16:9 or 1:1 (default follows the first source image).' },
       resolution: { type: 'string', description: 'Optional output resolution: 1k, 1.5k or 2k.' },
       n: { type: 'number', description: `Number of edited images to request (1-${String(MAX_N)}). Default 1; only the first is kept.` },
-      save_path: { type: 'string', description: 'Optional file (or trailing-slash directory) to write the result to, instead of the DSH attachment library.' },
+      save_path: { type: 'string', description: 'Unsupported: results are saved to the DSH attachment library. Use the host file tools to export an attachment.' },
     },
     output: {
       schema: {
@@ -247,13 +199,21 @@ export function applyGrokImagineEditTool(ctx: Context, options: GrokImagineEditO
       if (prompt.length === 0) throw new Error('prompt must be a non-empty string')
       const primary = isNonEmptyString(args?.image) ? args.image.trim() : ''
       if (primary.length === 0) throw new Error('image must be a non-empty source (file path, URL or data URI)')
-      const extra = Array.isArray(args?.images) ? args.images.filter(isNonEmptyString) : []
+      if (args?.save_path !== undefined) {
+        throw new Error('grok_imagine_edit: save_path is unsupported; use the host file tools to export the saved attachment')
+      }
+      const attachments = options.resolveAttachments() as unknown as EditAttachmentStore | undefined
+      if (attachments === undefined) throw new Error('grok_imagine_edit requires the DSH attachment service to save results')
+      if (args?.images !== undefined && (!Array.isArray(args.images) || args.images.some(image => !isNonEmptyString(image)))) {
+        throw new Error('images must be an array of non-empty source images')
+      }
+      const extra = args?.images ?? []
       const imageSpecs = [primary, ...extra]
       if (imageSpecs.length > maxSourceImages) {
         throw new Error(`too many source images: ${imageSpecs.length} (at most ${maxSourceImages})`)
       }
-      const n = typeof args?.n === 'number' && Number.isSafeInteger(args.n) ? args.n : 1
-      if (n < 1 || n > MAX_N) throw new Error(`n must be an integer between 1 and ${String(MAX_N)}`)
+      const n = args?.n ?? 1
+      if (!Number.isSafeInteger(n) || n < 1 || n > MAX_N) throw new Error(`n must be an integer between 1 and ${String(MAX_N)}`)
       const resolution = args?.resolution
       if (resolution !== undefined && !RESOLUTIONS.includes(resolution as string)) {
         throw new Error(`resolution must be one of ${RESOLUTIONS.join(', ')}`)
@@ -274,7 +234,13 @@ export function applyGrokImagineEditTool(ctx: Context, options: GrokImagineEditO
         maxSourceImages,
         maxBytes: maxImageBytes,
         readAttachmentBytes,
-        save: makeSaver(exec, args?.save_path),
+        readFile: async path => {
+          const fs = exec.agent?.ctx?.fs ?? ctx.fs
+          if (fs === undefined) throw new Error('grok_imagine_edit: the DSH filesystem service is required for local source images')
+          const target = await fs.resolve(path, { cwd, signal: exec.signal })
+          return fs.readBytes(target, exec.signal, maxImageBytes)
+        },
+        save: makeSaver(attachments),
         logger: message => ctx.logger?.info?.(message),
         signal: exec?.signal,
       })

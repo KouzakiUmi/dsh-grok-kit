@@ -12,6 +12,7 @@
 
 import { extname } from 'node:path'
 import type { XaiOAuthTokenSource } from './token-source.ts'
+import { safeMessage } from './redact.ts'
 
 /** xAI image-edit endpoint (sibling of the generations endpoint in imagine.ts). */
 export const XAI_IMAGES_EDIT_URL = 'https://api.x.ai/v1/images/edits'
@@ -219,7 +220,26 @@ export async function resolveImageSources(specs: readonly string[], options: Res
       if (normalized === undefined) {
         throw new Error('data URI must be a base64 image/png, image/jpeg or image/webp payload')
       }
-      resolved.push(normalized)
+      const payload = normalized.url.slice(normalized.url.indexOf(',') + 1)
+      const decodedSize = Math.floor(payload.replace(/=+$/u, '').length * 3 / 4)
+      if (decodedSize > maxBytes) {
+        throw new Error(`data URI is ${decodedSize} bytes, over the ${maxBytes}-byte limit`)
+      }
+      // Node's base64 decoder silently ignores malformed padding/trailing bits.
+      const bytes = Buffer.from(payload, 'base64')
+      if (bytes.toString('base64').replace(/=+$/u, '') !== payload.replace(/=+$/u, '')
+        || !/^[A-Za-z0-9+/]+={0,2}$/u.test(payload)
+        || (payload.includes('=') && payload.length % 4 !== 0)) {
+        throw new Error('data URI must contain valid base64 image bytes')
+      }
+      if (bytes.byteLength > maxBytes) {
+        throw new Error(`data URI is ${bytes.byteLength} bytes, over the ${maxBytes}-byte limit`)
+      }
+      const mediaType = sniffEditableImageMediaType(bytes)
+      if (mediaType === undefined) throw new Error('data URI is not a PNG, JPEG or WebP image')
+      const declaredType = normalized.url.slice(5, normalized.url.indexOf(';'))
+      if (mediaType !== declaredType) throw new Error('data URI media type does not match its image bytes')
+      resolved.push({ url: dataUriFor(bytes, mediaType), origin: 'data-uri', mediaType, bytes: bytes.byteLength })
       continue
     }
     // Session images arrive as attachments: test before treating as a path,
@@ -330,7 +350,7 @@ export function decodeFirstImage(parsed: { data?: Array<{ b64_json?: string }> }
 
 /** Keep only the diagnostics-worthy fragment; never echo credentials. */
 export function safeDetail(text: unknown): string {
-  return String(text ?? '').replace(/\s+/gu, ' ').slice(0, 300)
+  return safeMessage(text ?? '').replace(/\s+/gu, ' ').slice(0, 300)
 }
 
 export interface EditSaveResult {
@@ -370,7 +390,7 @@ export interface RunImageEditOptions {
  * The default fetch is the host-global one (already wrapped by dsh-grok-kit's
  * xAI proxy hook, which covers api.x.ai).
  */
-export async function runImageEdit(options: RunImageEditOptions): Promise<EditSaveResult & { text: string; mediaType: 'image/png' | 'image/jpeg' | 'image/webp'; bytes: number; model: string; sourceCount: number; requestBodyKeys: string[] }> {
+export async function runImageEdit(options: RunImageEditOptions): Promise<EditSaveResult & { text: string; mediaType: string; bytes: number; model: string; sourceCount: number; requestBodyKeys: string[] }> {
   const {
     tokens,
     prompt,
@@ -390,6 +410,7 @@ export async function runImageEdit(options: RunImageEditOptions): Promise<EditSa
     logger,
   } = options
   if (save === undefined || typeof save !== 'function') throw new Error('save callback is required')
+  signal?.throwIfAborted()
   const doFetch = fetchImpl ?? globalThis.fetch
   const images = await resolveImageSources(imageSpecs, { cwd, maxBytes, maxSourceImages, readFile, readAttachmentBytes })
   const body = buildEditRequestBody({ model, prompt, images, n, aspectRatio, resolution })
@@ -424,7 +445,10 @@ export async function runImageEdit(options: RunImageEditOptions): Promise<EditSa
   }
   const parsed = await response.json() as { data?: Array<{ b64_json?: string }> }
   const { bytes, mediaType, returned } = decodeFirstImage(parsed)
+  signal?.throwIfAborted()
   const saved = await save(bytes, mediaType, { model: body.model as string, n, returned })
+  const savedMediaType = saved.mediaType ?? mediaType
+  const savedBytes = saved.bytes ?? bytes.byteLength
   const sources = images.map(image => image.origin === 'file' ? `file:${image.mediaType}` : image.origin)
   const lines = [
     `Edited with ${String(body.model)}${returned > 1 ? ` (kept 1 of ${returned} returned images)` : ''}.`,
@@ -432,13 +456,16 @@ export async function runImageEdit(options: RunImageEditOptions): Promise<EditSa
   ]
   if (saved.path !== undefined) lines.push(`Saved to ${saved.path}`)
   if (typeof saved.note === 'string' && saved.note.length > 0) lines.push(saved.note)
-  if (saved.attachmentId !== undefined) lines.push(`attachmentId=${String(saved.attachmentId)}`)
-  lines.push(`Image: ${mediaType}, ${bytes.byteLength} bytes.`)
+  if (saved.attachmentId !== undefined) {
+    lines.push(`attachmentId=${String(saved.attachmentId)}`)
+    if (saved.width !== undefined && saved.height !== undefined) lines.push(`attachment=${JSON.stringify({ attachmentId: saved.attachmentId, mediaType: savedMediaType, bytes: savedBytes, width: saved.width, height: saved.height, ...(saved.name === undefined ? {} : { name: saved.name }) })}`)
+  }
+  lines.push(`Image: ${savedMediaType}, ${savedBytes} bytes.`)
   return {
     text: lines.join(' '),
     ...saved,
-    mediaType,
-    bytes: bytes.byteLength,
+    mediaType: savedMediaType,
+    bytes: savedBytes,
     model: body.model as string,
     sourceCount: images.length,
     requestBodyKeys: Object.keys(body),
