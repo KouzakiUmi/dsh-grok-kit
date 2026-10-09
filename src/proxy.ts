@@ -44,14 +44,14 @@ function cleanupStoredProxy(file: string): void {
  * Read the plugin's own stored proxy URL ('' = off; invalid/userinfo values
  * are dropped AND the disk copy is scrubbed so credentials do not linger).
  */
-export function readStoredProxyUrl(): string {
+function readStoredProxySetting(): string | undefined {
   try {
     const file = xaiProxyPath()
     const doc = JSON.parse(readFileSync(file, 'utf8')) as {
       version?: unknown
       proxyUrl?: unknown
     }
-    if (doc.version !== PROXY_FILE_VERSION) return ''
+    if (doc.version !== PROXY_FILE_VERSION) return undefined
     const normalized = validProxyUrl(typeof doc.proxyUrl === 'string' ? doc.proxyUrl.trim() : '')
     if (normalized === undefined) {
       cleanupStoredProxy(file)
@@ -59,8 +59,12 @@ export function readStoredProxyUrl(): string {
     }
     return normalized
   } catch {
-    return ''
+    return undefined
   }
+}
+
+export function readStoredProxyUrl(): string {
+  return readStoredProxySetting() ?? ''
 }
 
 /**
@@ -192,8 +196,8 @@ let originalFetch: typeof fetch | undefined
 
 /** Effective proxy URL: stored setting > config `proxyUrl` > `DSH_XAI_PROXY`. Invalid/userinfo values resolve to ''. */
 export function resolveXaiProxyUrl(configUrl?: string): string {
-  const stored = readStoredProxyUrl()
-  if (stored !== '') return stored
+  const stored = readStoredProxySetting()
+  if (stored !== undefined) return stored
   const env = process.env.DSH_XAI_PROXY
   const candidate = nonBlank(configUrl) ? configUrl.trim() : nonBlank(env) ? env.trim() : ''
   return validProxyUrl(candidate) ?? ''

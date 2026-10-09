@@ -41,17 +41,20 @@ describe('proxy settings', () => {
     await writeStoredProxyUrl('http://stored.example:7897')
     expect(resolveXaiProxyUrl('http://config.example:7897')).toBe('http://stored.example:7897')
 
-    // Cleared stored setting falls back to config.
+    // Explicitly disabling the proxy must survive a restart, overriding config/env.
     await writeStoredProxyUrl('')
-    expect(resolveXaiProxyUrl('http://config.example:7897')).toBe('http://config.example:7897')
+    expect(resolveXaiProxyUrl('http://config.example:7897')).toBe('')
 
-    // Config cleared: env.
+    expect(resolveXaiProxyUrl('')).toBe('')
+    await rm(xaiProxyPath(home))
+    // With no saved override, an empty config follows the environment.
     expect(resolveXaiProxyUrl('')).toBe('http://env.example:7897')
 
     // Everything cleared: direct.
     process.env.DSH_XAI_PROXY = ''
     expect(resolveXaiProxyUrl('')).toBe('')
     expect(readStoredProxyUrl()).toBe('')
+    await writeStoredProxyUrl('')
     expect(await readFile(xaiProxyPath(home), 'utf8')).toContain('"version": 1')
   })
 

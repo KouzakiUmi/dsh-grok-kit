@@ -105,7 +105,7 @@ export class XaiOAuthWebAuth {
   private challengeWaiters: Array<{ resolve(value: LoginChallenge): void; reject(error: unknown): void }> = []
   /** Serializes import/logout against each other and against an in-flight login. */
   private exclusive: Promise<void> = Promise.resolve()
-  private exclusivePending = false
+  private exclusivePending = 0
 
   constructor(private readonly session: XaiOAuthSession) {}
 
@@ -120,7 +120,7 @@ export class XaiOAuthWebAuth {
   async signIn(): Promise<LoginChallenge> {
     // Never start a login over a running import/logout (or the reverse):
     // the TOCTOU would interleave two credential writers.
-    if (this.exclusivePending) await this.exclusive
+    while (this.exclusivePending > 0) await this.exclusive
     if (this.operation === undefined) this.start()
     if (this.challenge !== undefined) return this.challenge
     return new Promise<LoginChallenge>((resolve, reject) => {
@@ -165,9 +165,9 @@ export class XaiOAuthWebAuth {
       await this.operation?.catch(() => undefined)
       await fn()
     })
-    this.exclusivePending = true
+    this.exclusivePending += 1
     this.exclusive = run.catch(() => undefined)
-    return run.finally(() => { this.exclusivePending = false })
+    return run.finally(() => { this.exclusivePending -= 1 })
   }
 
   private start(): void {

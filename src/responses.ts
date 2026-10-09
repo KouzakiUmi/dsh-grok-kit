@@ -192,6 +192,9 @@ export function applyXaiResponsesPayload(
 }
 
 function rewriteBackendSearchError(event: AssistantMessageEvent, backendSearch: boolean): AssistantMessageEvent {
+  if (event.type === 'error' && event.error.errorMessage !== undefined) {
+    event = { ...event, error: { ...event.error, errorMessage: safeMessage(event.error.errorMessage) } }
+  }
   if (!backendSearch || event.type !== 'error') return event
   const message = event.error.errorMessage ?? ''
   if (/\b403\b/.test(message)) {
@@ -249,6 +252,23 @@ function withPayload(
   }
 }
 
+/** Always settle result(): ending a pi-ai stream alone leaves that promise pending. */
+function streamFailure(error: unknown, model: Model<Api>, signal?: AbortSignal): AssistantMessageEvent {
+  const reason = signal?.aborted === true ? 'aborted' : 'error'
+  return {
+    type: 'error',
+    reason,
+    error: {
+      role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      stopReason: reason,
+      timestamp: Date.now(),
+      errorMessage: safeMessage(error),
+    },
+  }
+}
+
 function retryOn401(
   inner: ReturnType<Provider['streamSimple']>,
   options: {
@@ -257,6 +277,7 @@ function retryOn401(
     rejected: string
     signal?: AbortSignal
     backendSearch: boolean
+    model: Model<Api>
   },
 ): ReturnType<Provider['streamSimple']> {
   const out = createAssistantMessageEventStream()
@@ -265,6 +286,7 @@ function retryOn401(
       const iterator = inner[Symbol.asyncIterator]()
       const first = await iterator.next()
       if (first.done) {
+        out.push(streamFailure(new Error('xAI chat stream ended without a terminal event'), options.model, options.signal))
         out.end()
         return
       }
@@ -276,6 +298,7 @@ function retryOn401(
           for await (const next of second) {
             out.push(rewriteBackendSearchError(next, options.backendSearch))
           }
+          out.push(streamFailure(new Error('xAI chat stream ended without a terminal event'), options.model, options.signal))
           out.end()
           return
         }
@@ -286,11 +309,13 @@ function retryOn401(
         if (step.done) break
         out.push(rewriteBackendSearchError(step.value, options.backendSearch))
       }
+      out.push(streamFailure(new Error('xAI chat stream ended without a terminal event'), options.model, options.signal))
       out.end()
     } catch (error: unknown) {
       // Never drop an error silently: an empty stream looks like a hang on the
       // user side. The host idle watchdog would eventually fire, but log now.
       console.error(`dsh-grok-kit: chat stream failed: ${safeMessage(error)}`)
+      out.push(streamFailure(error, options.model, options.signal))
       out.end()
     }
   })()
@@ -300,6 +325,8 @@ function retryOn401(
 function forwardStream(
   inner: ReturnType<Provider['streamSimple']>,
   backendSearch: boolean,
+  model: Model<Api>,
+  signal?: AbortSignal,
   extras?: {
     remember?: (responseId: string, stopReason: string) => void
     retryPrevious?: () => ReturnType<Provider['streamSimple']>
@@ -327,6 +354,7 @@ function forwardStream(
             if (finished !== undefined) extras.remember?.(finished.responseId, finished.stopReason)
             out.push(rewriteBackendSearchError(sanitized, backendSearch))
           }
+          out.push(streamFailure(new Error('xAI chat stream ended without a terminal event'), model, signal))
           out.end()
           return
         }
@@ -337,9 +365,11 @@ function forwardStream(
         if (finished !== undefined) extras?.remember?.(finished.responseId, finished.stopReason)
         out.push(rewriteBackendSearchError(sanitized, backendSearch))
       }
+      out.push(streamFailure(new Error('xAI chat stream ended without a terminal event'), model, signal))
       out.end()
     } catch (error: unknown) {
       console.error(`dsh-grok-kit: chat stream failed: ${safeMessage(error)}`)
+      out.push(streamFailure(error, model, signal))
       out.end()
     }
   })()
@@ -403,11 +433,8 @@ export function wrapXaiResponsesProvider(
         usedPrevious: () => pending.usedPrevious === true,
       }
       : undefined
-    const decorate = (inner: ReturnType<Provider['streamSimple']>) => (
-      options.backendSearch || extras !== undefined
-        ? forwardStream(inner, options.backendSearch, extras)
-        : inner
-    )
+    const decorate = (inner: ReturnType<Provider['streamSimple']>) =>
+      forwardStream(inner, options.backendSearch, model, streamOptions?.signal, extras)
     if (!options.retry401 || options.tokenSource === undefined) {
       return decorate(begin(currentKey))
     }
@@ -424,6 +451,7 @@ export function wrapXaiResponsesProvider(
       rejected,
       signal: streamOptions?.signal,
       backendSearch: options.backendSearch,
+      model,
     }))
   }
   return {

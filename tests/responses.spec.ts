@@ -143,6 +143,50 @@ describe('applyXaiResponsesPayload', () => {
 })
 
 describe('wrapXaiResponsesProvider 401', () => {
+  it('settles the final result with a redacted error when OAuth refresh throws', async () => {
+    const refresh = vi.fn(async () => { throw new Error('refresh failed access_token=refresh-secret') })
+    const inner: Provider = {
+      id: 'xai-oauth', name: 'x', auth: {}, getModels: () => [],
+      stream: () => createAssistantMessageEventStream(),
+      streamSimple() {
+        const stream = createAssistantMessageEventStream()
+        stream.push(errorEvent('HTTP 401'))
+        stream.end()
+        return stream
+      },
+    }
+    const wrapped = wrapXaiResponsesProvider(inner, { backendSearch: false, retry401: true,
+      tokenSource: { available: () => true, resolve: async () => 'old', refresh } })
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const stream = wrapped.streamSimple(GROK_46_MODEL, { messages: [] } as never, { apiKey: 'old' })
+      const events: AssistantMessageEvent[] = []
+      for await (const event of stream) events.push(event)
+      expect(events).toHaveLength(1)
+      expect(events[0]?.type).toBe('error')
+      await expect(stream.result()).resolves.toMatchObject({ stopReason: 'error', errorMessage: 'refresh failed access_token=[redacted]' })
+      expect(log.mock.calls.flat().join(' ')).not.toContain('refresh-secret')
+    } finally { log.mockRestore() }
+  })
+
+  it('settles an unexpectedly empty stream as an error instead of leaving result pending', async () => {
+    const inner: Provider = {
+      id: 'xai-oauth', name: 'x', auth: {}, getModels: () => [],
+      stream: () => createAssistantMessageEventStream(),
+      streamSimple() {
+        const stream = createAssistantMessageEventStream()
+        stream.end()
+        return stream
+      },
+    }
+    const wrapped = wrapXaiResponsesProvider(inner, { backendSearch: true, retry401: false })
+    const stream = wrapped.streamSimple(GROK_46_MODEL, { messages: [] } as never)
+    const events: AssistantMessageEvent[] = []
+    for await (const event of stream) events.push(event)
+    expect(events[0]?.type).toBe('error')
+    await expect(stream.result()).resolves.toMatchObject({ stopReason: 'error' })
+  })
+
   it('retries once on HTTP 401 before forwarding start or error', async () => {
     const refresh = vi.fn(async () => 'new-token')
     const tokens: XaiOAuthTokenSource = { available: () => true, resolve: async () => 'old', refresh }
@@ -645,4 +689,3 @@ describe('stateful continuation wrap', () => {
     expect(events.some(event => event.type === 'done')).toBe(true)
   })
 })
-

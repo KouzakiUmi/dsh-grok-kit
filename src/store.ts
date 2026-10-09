@@ -20,6 +20,7 @@ import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import {
   grokAuthPath,
+  hasGrokXaiCredential,
   isGrokAuthDocument,
   isGrokAuthPath,
   parseGrokAuthDocument,
@@ -126,7 +127,7 @@ function isDshAuthDocument(value: unknown): boolean {
   return 'version' in document && 'credential' in document
 }
 
-function parseStoredCredential(text: string, filename: string): OAuthCredential {
+function parseStoredCredential(text: string, filename: string): OAuthCredential | undefined {
   let value: unknown
   try {
     value = JSON.parse(text)
@@ -134,6 +135,7 @@ function parseStoredCredential(text: string, filename: string): OAuthCredential 
     throw new Error(`xai-oauth: ${filename} is not valid JSON`)
   }
   if (isDshAuthDocument(value)) return parseDocument(text, filename).credential
+  if (isGrokAuthDocument(value) && !hasGrokXaiCredential(value)) return undefined
   if (isGrokAuthDocument(value) || isGrokAuthPath(filename)) {
     return parseGrokAuthDocument(text, filename)
   }
@@ -190,7 +192,8 @@ export class XaiOAuthCredentialStore implements CredentialStore {
     const text = await this.readText()
     if (text === undefined || text.trim().length === 0) return undefined
     try {
-      return cloneCredential(parseStoredCredential(text, this.filename))
+      const credential = parseStoredCredential(text, this.filename)
+      return credential === undefined ? undefined : cloneCredential(credential)
     } catch (error) {
       // An empty Grok document (`{}`) is a valid file with no xAI slot yet.
       if (isGrokAuthPath(this.filename)) {
@@ -258,7 +261,8 @@ export class XaiOAuthCredentialStore implements CredentialStore {
         ? undefined
         : (() => {
           try {
-            return cloneCredential(parseStoredCredential(existingText, this.filename))
+            const credential = parseStoredCredential(existingText, this.filename)
+            return credential === undefined ? undefined : cloneCredential(credential)
           } catch {
             return undefined
           }

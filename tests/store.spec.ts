@@ -205,6 +205,36 @@ describe('XaiOAuthCredentialStore', () => {
       .toMatch(/\/user\/.grok\/auth\.json$/)
   })
 
+  it('stays signed out after deleting xAI from a shared file with one foreign slot', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-xai-logout-'))
+    const filename = join(dir, '.grok', 'auth.json')
+    await mkdir(join(dir, '.grok'), { recursive: true })
+    const foreign = { key: 'foreign-access', refresh_token: 'foreign-refresh', oidc_issuer: 'https://other.example' }
+    await writeFile(filename, JSON.stringify({ 'https://other.example::client': foreign }), { mode: 0o600 })
+    const store = new XaiOAuthCredentialStore(filename)
+    await store.modify(XAI_PI_PROVIDER, async () => CREDENTIAL)
+    expect(await store.read(XAI_PI_PROVIDER)).toMatchObject({ access: CREDENTIAL.access })
+    await store.delete(XAI_PI_PROVIDER)
+    expect(await store.read(XAI_PI_PROVIDER)).toBeUndefined()
+    expect(await store.list()).toEqual([])
+    expect(JSON.parse(await readFile(filename, 'utf8'))).toEqual({ 'https://other.example::client': foreign })
+  })
+
+  it('migrates a legacy DSH envelope in the Grok file without retaining stale tokens', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'dsh-xai-migrate-'))
+    const filename = join(dir, '.grok', 'auth.json')
+    await mkdir(join(dir, '.grok'), { recursive: true })
+    await writeFile(filename, JSON.stringify({ version: 1, credential: CREDENTIAL }), { mode: 0o600 })
+    const store = new XaiOAuthCredentialStore(filename)
+    await store.modify(XAI_PI_PROVIDER, async () => ({ ...CREDENTIAL, access: 'rotated', refresh: 'rotated-refresh' }))
+    const document = JSON.parse(await readFile(filename, 'utf8'))
+    expect(document).not.toHaveProperty('credential')
+    expect(document).not.toHaveProperty('version')
+    expect(await store.read(XAI_PI_PROVIDER)).toMatchObject({ access: 'rotated', refresh: 'rotated-refresh' })
+    await store.delete(XAI_PI_PROVIDER)
+    expect(await store.read(XAI_PI_PROVIDER)).toBeUndefined()
+  })
+
   it('keeps the writer lock out of ~/.grok when sharing the Grok CLI file', () => {
     const grok = lockPathForAuthFile(join('/home', 'u', '.grok', 'auth.json')).replaceAll('\\', '/')
     expect(grok).toMatch(/\/.dsh\/.xai-oauth-auth\.json$/)

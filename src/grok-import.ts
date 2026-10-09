@@ -82,6 +82,7 @@ function parseExpires(record: Record<string, unknown>): number {
 interface Candidate {
   credential: OAuthCredential
   preferred: boolean
+  foreign: boolean
 }
 
 function walk(value: unknown, key: string): Candidate[] {
@@ -91,8 +92,8 @@ function walk(value: unknown, key: string): Candidate[] {
   const refresh = firstString(value, ['refresh_token', 'refresh'])
   if (access !== undefined && refresh !== undefined) {
     const issuer = firstString(value, ['oidc_issuer', 'issuer'])
-    const preferred = key.includes('auth.x.ai')
-      || (issuer !== undefined && issuer.includes('auth.x.ai'))
+    const preferred = key.split('::')[0] === GROK_XAI_ISSUER || issuer === GROK_XAI_ISSUER
+    const foreign = !preferred && (issuer !== undefined || key.includes('://'))
     const accountId = firstString(value, ['user_id', 'accountId', 'principal_id'])
     const credential: OAuthCredential = {
       type: 'oauth',
@@ -101,7 +102,7 @@ function walk(value: unknown, key: string): Candidate[] {
       expires: parseExpires(value),
       ...accountId === undefined ? {} : { accountId },
     }
-    return [{ credential, preferred }]
+    return [{ credential, preferred, foreign }]
   }
   return Object.entries(value).flatMap(([child, nested]) => walk(nested, child))
 }
@@ -124,6 +125,13 @@ export function isGrokAuthDocument(value: unknown): boolean {
   return walk(value, '').length > 0
 }
 
+/** A remaining foreign slot after logout must never become the xAI credential. */
+export function hasGrokXaiCredential(value: unknown): boolean {
+  const candidates = walk(value, '')
+  return candidates.some(candidate => candidate.preferred)
+    || (candidates.length === 1 && !candidates[0]!.foreign)
+}
+
 function formatExpiresAt(expires: number): string {
   return new Date(expires).toISOString()
 }
@@ -135,7 +143,7 @@ function slotRecord(document: Record<string, unknown>): { key: string; slot: Rec
   for (const [key, nested] of Object.entries(document)) {
     if (!isRecord(nested)) continue
     const issuer = firstString(nested, ['oidc_issuer', 'issuer'])
-    if (key.includes('auth.x.ai') || (issuer !== undefined && issuer.includes('auth.x.ai'))) {
+    if (key.split('::')[0] === GROK_XAI_ISSUER || issuer === GROK_XAI_ISSUER) {
       return { key, slot: nested }
     }
   }
@@ -151,7 +159,9 @@ export function writeGrokAuthDocument(existingText: string | undefined, credenti
   if (existingText !== undefined && existingText.trim().length > 0) {
     const parsed = JSON.parse(existingText) as unknown
     if (!isRecord(parsed)) throw new Error('xai-oauth: Grok CLI auth file must contain an object')
-    document = { ...parsed }
+    // Migrating a legacy DSH envelope must remove its stale credential: readers
+    // prioritize that envelope over the new Grok slot if both remain present.
+    document = 'version' in parsed && 'credential' in parsed ? {} : { ...parsed }
   }
   const found = slotRecord(document)
   const key = found?.key ?? GROK_XAI_SLOT_KEY
@@ -173,6 +183,7 @@ export function writeGrokAuthDocument(existingText: string | undefined, credenti
 export function removeGrokAuthSlot(existingText: string): string | undefined {
   const parsed = JSON.parse(existingText) as unknown
   if (!isRecord(parsed)) return undefined
+  if ('version' in parsed && 'credential' in parsed) return undefined
   const document = { ...parsed }
   const found = slotRecord(document)
   if (found !== undefined) delete document[found.key]
@@ -196,7 +207,7 @@ export function parseGrokAuthDocument(text: string, filename: string): OAuthCred
   // No auth.x.ai marker: accept only an unambiguous single-credential document.
   // Importing an arbitrary first pair from a multi-provider document would
   // write a foreign refresh token into the dsh store and POST it to auth.x.ai.
-  if (candidates.length === 1) return candidates[0]!.credential
+  if (candidates.length === 1 && !candidates[0]!.foreign) return candidates[0]!.credential
   throw new Error(
     `xai-oauth: ${filename} contains ${candidates.length} credential pairs and none marks auth.x.ai;`
     + ' re-run `grok login` to write the standard document, or export the xAI credential explicitly',
