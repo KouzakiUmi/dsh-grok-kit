@@ -58,25 +58,25 @@ describe('applyGrokImagineTool', () => {
     expect(presented).not.toHaveProperty('kind')
   })
 
-  it('fails with a text error when there is no attachment store and no session cwd', async () => {
+  it('rejects a missing attachment store before any request, even with a workspace', async () => {
     const tokens: XaiOAuthTokenSource = { available: () => true, resolve: async () => 'tok' }
     const session = { liveModelIds: () => undefined } as unknown as XaiOAuthSession
     let registered: { execute: Function } | undefined
+    const fetchImpl = vi.fn()
     applyGrokImagineTool({
       tools: { register: (definition: typeof registered) => { registered = definition } },
     } as never, {
       tokens,
       session,
       resolveAttachments: () => undefined,
-      fetch: async () => new Response(JSON.stringify({ data: [{ b64_json: Buffer.from(PNG).toString('base64') }] }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      }),
+      fetch: fetchImpl,
     })
-    await expect(registered!.execute({ prompt: 'x' }, { signal: new AbortController().signal })).rejects.toThrow(/no session working directory/)
+    await expect(registered!.execute({ prompt: 'x' }, { signal: new AbortController().signal,
+      agent: { session: { header: { cwd: '/tmp/ws' } } } })).rejects.toThrow(/attachment service/)
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('rejects n > 1 before any network call (billed per n, renders one)', async () => {
+  it.each([2, 1.5, 0, Number.NaN])('rejects n=%s before any network call (billed per n, renders one)', async n => {
     const tokens: XaiOAuthTokenSource = { available: () => true, resolve: async () => 'tok' }
     const session = { liveModelIds: () => undefined } as unknown as XaiOAuthSession
     let registered: { execute: Function } | undefined
@@ -89,7 +89,7 @@ describe('applyGrokImagineTool', () => {
       resolveAttachments: () => ({ saveImage: async () => ({}) } as never),
       fetch: async () => { called = true; return new Response('{}', { status: 200 }) },
     })
-    await expect(registered!.execute({ prompt: 'x', n: 2 }, { signal: new AbortController().signal })).rejects.toThrow(/one image per call/)
+    await expect(registered!.execute({ prompt: 'x', n }, { signal: new AbortController().signal })).rejects.toThrow(/one image per call|finite JSON number/)
     expect(called).toBe(false)
   })
 })

@@ -35,6 +35,7 @@ export interface ToolCallBlock {
   phase?: string
   call?: { name?: string; argsRaw?: string }
   argsRaw?: string
+  name?: string
   content?: ContentPart[]
   isError?: boolean
   callId?: string
@@ -63,7 +64,8 @@ interface SessionsService {
 }
 
 interface ChatNodes {
-  turnDataSource: (turn: unknown, kind: string) => ExternalStore<ToolCallBlock[]>
+  turnDataSource?: (turn: unknown, kind: string) => ExternalStore<ToolCallBlock[]>
+  values?: () => readonly { kind: string; location?: { turn?: number }; data?: unknown }[]
 }
 
 interface ChatState {
@@ -71,7 +73,7 @@ interface ChatState {
 }
 
 interface UseChat {
-  (selector: (chat: ChatState) => ExternalStore<ToolCallBlock[]>): ExternalStore<ToolCallBlock[]>
+  (selector: (chat: ChatState) => ChatState): ChatState
 }
 
 // ---------------------------------------------------------------------------
@@ -83,8 +85,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function toolNameOf(block: unknown): string {
-  if (isObject(block) && 'kind' in block && isObject(block.call)) {
-    const name = block.call.name
+  if (isObject(block)) {
+    const name = isObject(block.call) ? block.call.name : block.name
     if (typeof name === 'string' && TOOL_NAMES.has(name)) return name
   }
   return TOOL_NAME
@@ -94,7 +96,7 @@ function argsOf(block: unknown): Record<string, unknown> | undefined {
   if (!isObject(block)) return undefined
   const raw = 'kind' in block && isObject(block.call)
     ? block.call.argsRaw
-    : block.phase === 'start' ? block.argsRaw : undefined
+    : block.argsRaw
   if (typeof raw !== 'string' || raw === '') return undefined
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -105,11 +107,16 @@ function argsOf(block: unknown): Record<string, unknown> | undefined {
 }
 
 /** Edit results have no "regenerate" semantics; re-edit the same input image instead. */
-function regenerateText(toolName: string, prompt: string, args: Record<string, unknown> | undefined): string {
+export function regenerateText(toolName: string, prompt: string, args: Record<string, unknown> | undefined): string {
   if (toolName !== 'grok_imagine_edit') return `请用 grok_imagine 按以下提示词重新生成一张图，不要改写提示词：\n${prompt}`
-  const source = args?.image
-  const hint = typeof source === 'string' && source.length > 0 && source.length <= 400 ? `输入图沿用：${source}` : '输入图沿用上一条 grok_imagine_edit 调用的那张图'
-  return `请用 grok_imagine_edit 编辑这张图，${hint}。不要改写提示词：\n${prompt}`
+  const sources = [args?.image, ...(Array.isArray(args?.images) ? args.images : [])]
+    .filter((source): source is string => typeof source === 'string' && source.length > 0)
+  const hint = sources.length > 0 && sources.every(source => source.length <= 400)
+    ? `输入图沿用全部这些来源（第一张为 image，其余为 images）：${JSON.stringify(sources)}`
+    : '输入图沿用上一条 grok_imagine_edit 调用的全部图片（image 和 images）'
+  const settings = Object.fromEntries(['aspect_ratio', 'resolution', 'n']
+    .filter(key => args?.[key] !== undefined).map(key => [key, args![key]]))
+  return `请用 grok_imagine_edit 再次编辑，${hint}。参数沿用：${JSON.stringify(settings)}。不要改写提示词：\n${prompt}`
 }
 
 const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
@@ -219,7 +226,7 @@ function promptOf(block: unknown): string {
   if (!isObject(block)) return ''
   const raw = 'kind' in block && isObject(block.call)
     ? block.call.argsRaw
-    : block.phase === 'start' ? block.argsRaw : undefined
+    : block.argsRaw
   if (typeof raw !== 'string' || raw === '') return ''
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -287,10 +294,13 @@ function useImageLoader(sessionId: string | undefined, sessions: SessionsService
   const activeSession = useRef(sessionId)
   const disposed = useRef(false)
   activeSession.current = sessionId
-  useEffect(() => () => {
-    disposed.current = true
-    for (const entry of urls.current.values()) URL.revokeObjectURL(entry.url)
-    urls.current.clear()
+  useEffect(() => {
+    disposed.current = false
+    return () => {
+      disposed.current = true
+      for (const entry of urls.current.values()) URL.revokeObjectURL(entry.url)
+      urls.current.clear()
+    }
   }, [])
   useEffect(() => () => {
     for (const [key, entry] of urls.current) {
@@ -299,7 +309,7 @@ function useImageLoader(sessionId: string | undefined, sessions: SessionsService
       urls.current.delete(key)
     }
   }, [sessionId])
-  return useCallback(async (attachment: ImageRef): Promise<string> => {
+  return useCallback(async (attachment: Pick<ImageRef, 'attachmentId'>): Promise<string> => {
     if (typeof sessionId !== 'string' || sessionId === '' || typeof sessions?.binding !== 'function') throw new Error('Image session is unavailable')
     const key = `${sessionId}\0${attachment.attachmentId}`
     const cached = urls.current.get(key)
@@ -473,8 +483,9 @@ function ImagineFrame({ attachment, load }: { attachment: ImageRef; load: (attac
 function ActionButton({ label, onClick, disabled }: { label: string; onClick: () => Promise<unknown>; disabled?: boolean }) {
   const [state, setState] = useState<'idle' | 'pending' | 'failed'>('idle')
   const alive = useRef(true)
-  useEffect(() => () => {
-    alive.current = false
+  useEffect(() => {
+    alive.current = true
+    return () => { alive.current = false }
   }, [])
   return (
     <button
@@ -485,7 +496,7 @@ function ActionButton({ label, onClick, disabled }: { label: string; onClick: ()
       onClick={() => {
         if (state === 'pending' || disabled === true) return
         setState('pending')
-        Promise.resolve(onClick()).then(() => {
+        Promise.resolve().then(onClick).then(() => {
           if (alive.current) setState('idle')
         }).catch(() => {
           if (alive.current) setState('failed')
@@ -501,9 +512,11 @@ interface CardProps {
   block: unknown
   sessionId: string | undefined
   sessions: SessionsService | undefined
+  openFile?: (path: string) => void
+  owner?: { block: unknown; openFile?: (path: string) => void }
 }
 
-function ImagineResultCard({ block, sessionId, sessions }: CardProps) {
+function ImagineResultCard({ block, sessionId, sessions, openFile }: CardProps) {
   const load = useImageLoader(sessionId, sessions)
   const images = imageAttachments(block)
   const prompt = promptOf(block)
@@ -532,7 +545,7 @@ function ImagineResultCard({ block, sessionId, sessions }: CardProps) {
         {hasImages ? null : grokTitle(title)}
         {!hasImages && resultText !== '' ? (
           <section aria-label="执行结果" style={{ display: 'grid', gap: 8 }}>
-            <strong style={{ fontSize: 13, fontWeight: 600 }}>图片未进会话，已直接落盘</strong>
+            <strong style={{ fontSize: 13, fontWeight: 600 }}>执行结果</strong>
             <pre
               style={{
                 boxSizing: 'border-box',
@@ -582,6 +595,7 @@ function ImagineResultCard({ block, sessionId, sessions }: CardProps) {
             </pre>
           </section>
         ) : null}
+        <SourceImages block={block} sessionId={sessionId} sessions={sessions} openFile={openFile} />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
           {prompt ? (
             <ActionButton
@@ -646,38 +660,76 @@ function ImagineResultCard({ block, sessionId, sessions }: CardProps) {
   )
 }
 
-function GeneratingCard({ sessionId, sessions, prompt }: { sessionId: string | undefined; sessions: SessionsService | undefined; prompt: string }) {
+function SourceImages({ block, sessionId, sessions, openFile }: CardProps) {
+  const load = useImageLoader(sessionId, sessions)
+  const args = argsOf(block)
+  const sources = [args?.image, ...(Array.isArray(args?.images) ? args.images : [])]
+    .filter((value): value is string => typeof value === 'string' && value.trim() !== '')
+  if (sources.length === 0) return null
+  return <section aria-label="输入图片" style={{ display: 'grid', gap: 8, width: '100%' }}>
+    <strong>输入图片</strong>
+    {sources.map((source, index) => {
+      let ref: ImageRef | undefined
+      try { ref = imageRef(JSON.parse(source.replace(/^attachment=/u, ''))) } catch { /* May be a path or handle. */ }
+      const id = /sha256:[a-f0-9]{64}/u.exec(source)?.[0]
+      if (ref !== undefined || id !== undefined) return <SourceAttachment key={index} id={ref?.attachmentId ?? id!} load={load} />
+      if (/^data:image\/(png|jpeg|webp);base64,/iu.test(source)) return <img key={index} src={source} alt={`输入图片 ${index + 1}`} style={{ maxWidth: 240, maxHeight: 160, objectFit: 'contain' }} />
+      if (/^https?:\/\//iu.test(source)) return <a key={index} href={source} target="_blank" rel="noreferrer">{`输入图片 ${index + 1}（远程链接）`}</a>
+      return <div key={index} style={{ overflowWrap: 'anywhere' }}>{source}{openFile ? <button type="button" style={actionStyle} onClick={() => openFile(source)}>打开输入图片</button> : null}</div>
+    })}
+  </section>
+}
+
+function SourceAttachment({ id, load }: { id: string; load: (ref: Pick<ImageRef, 'attachmentId'>) => Promise<string> }) {
+  const [src, setSrc] = useState<string | null>(null)
+  const [failed, setFailed] = useState(false)
+  useEffect(() => {
+    let live = true
+    setSrc(null)
+    setFailed(false)
+    // Session readAttachment requires only the opaque id; display metadata is returned by the host.
+    load({ attachmentId: id }).then(value => { if (live) setSrc(value) }).catch(() => { if (live) setFailed(true) })
+    return () => { live = false }
+  }, [id, load])
+  return src ? <img src={src} alt="输入图片" style={{ maxWidth: 240, maxHeight: 160, objectFit: 'contain' }} /> : <div style={detailStyle}>{failed ? '输入图片无法读取：' : '正在加载输入图片：'}{id}</div>
+}
+
+function GeneratingCard(props: CardProps) {
+  const { sessionId, sessions } = props
+  const prompt = promptOf(props.block)
   return (
     <section aria-label="正在生成图片…" style={shellStyle}>
-      {grokTitle('正在生成图片…')}
-      {prompt ? <div style={detailStyle}>{prompt}</div> : null}
+      {grokTitle(toolNameOf(props.block) === 'grok_imagine_edit' ? '正在编辑图片…' : '正在生成图片…')}
+      {prompt ? <div style={{ ...detailStyle, whiteSpace: 'pre-wrap', width: '100%' }}>{prompt}</div> : <div style={detailStyle}>正在接收调用参数…</div>}
+      <SourceImages {...props} />
       <progress style={{ width: '100%', height: 4 }} />
       {typeof sessionId === 'string' && typeof sessions?.binding === 'function' ? (
-        <ActionButton
-          label="取消"
-          onClick={async () => {
-            const accepted = await sessions.binding(sessionId)?.session?.cancel?.()
-            if (accepted?.ok === false) throw new Error('cancel failed')
-          }}
-        />
+        <ActionButton label="取消" onClick={async () => {
+          const accepted = await sessions.binding(sessionId)?.session?.cancel?.()
+          if (accepted?.ok !== true) throw new Error('cancel failed')
+        }} />
       ) : null}
     </section>
   )
 }
 
-function GrokImagineToolView(props: CardProps) {
+function GrokImagineToolView(rawProps: CardProps) {
+  const props = rawProps.owner ? { ...rawProps, block: rawProps.owner.block, openFile: rawProps.owner.openFile } : rawProps
   const settled = isObject(props.block) && 'kind' in (props.block as Record<string, unknown>)
   if (!settled) {
-    return <GeneratingCard sessionId={props.sessionId} sessions={props.sessions} prompt={promptOf(props.block)} />
+    return <GeneratingCard {...props} />
   }
   if ((props.block as ToolCallBlock).isError === true) {
     return (
       <section aria-label="图片生成失败" style={shellStyle}>
         {grokTitle('图片生成失败')}
+        <div style={{ ...detailStyle, whiteSpace: 'pre-wrap' }}>{promptOf(props.block)}</div>
+        <div style={{ ...detailStyle, whiteSpace: 'pre-wrap' }}>{textOf(props.block)}</div>
+        <SourceImages {...props} />
       </section>
     )
   }
-  return <ImagineResultCard block={props.block} sessionId={props.sessionId} sessions={props.sessions} />
+  return <ImagineResultCard {...props} />
 }
 
 // ---------------------------------------------------------------------------
@@ -723,6 +775,7 @@ function countTurnCodexResults(rows: unknown, closingSeq: number): number {
 }
 
 interface TurnTailProps {
+  owner?: { turn: { turn: unknown }; seq: number }
   turn?: { turn: unknown }
   seq?: number
   sessionId?: string
@@ -730,15 +783,20 @@ interface TurnTailProps {
   useChat?: UseChat
 }
 
-function GrokImagineTurnTail(props: TurnTailProps) {
-  const empty = useMemo<ExternalStore<ToolCallBlock[]>>(() => ({
-    subscribe: () => () => undefined,
-    getSnapshot: () => [],
-  }), [])
-  const source = typeof props.useChat === 'function' && props.turn !== undefined
-    ? props.useChat(chat => chat.nodes.turnDataSource(props.turn!.turn, 'tool-call'))
+function GrokImagineTurnTail(rawProps: TurnTailProps) {
+  const props = rawProps.owner ? { ...rawProps, ...rawProps.owner } : rawProps
+  const empty = useMemo<ExternalStore<ToolCallBlock[]>>(() => {
+    const rows: ToolCallBlock[] = []
+    return { subscribe: () => () => undefined, getSnapshot: () => rows }
+  }, [])
+  const chat = typeof props.useChat === 'function' ? props.useChat(chat => chat) : undefined
+  const source = props.turn !== undefined && typeof chat?.nodes.turnDataSource === 'function'
+    ? chat.nodes.turnDataSource(props.turn.turn, 'tool-call')
     : empty
-  const rows = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
+  const legacyRows = useSyncExternalStore(source.subscribe, source.getSnapshot, source.getSnapshot)
+  const rows = useMemo(() => typeof chat?.nodes.values === 'function'
+    ? chat.nodes.values().filter(node => node.kind === 'tool-call' && node.location?.turn === props.turn?.turn).map(node => node.data)
+    : legacyRows, [chat, props.turn?.turn, legacyRows])
   const results = useMemo(() => selectTurnImagineResults(rows, props.seq ?? Number.POSITIVE_INFINITY), [rows, props.seq])
   const codexCount = useMemo(() => countTurnCodexResults(rows, props.seq ?? Number.POSITIVE_INFINITY), [rows, props.seq])
   if (results.length === 0) return null

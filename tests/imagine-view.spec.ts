@@ -26,7 +26,7 @@ vi.mock('react/jsx-runtime', () => {
   return { jsx, jsxs: jsx, Fragment: Symbol.for('Fragment') }
 })
 
-import { applyImagineViews } from '../src/client/imagine-view.tsx'
+import { applyImagineViews, regenerateText } from '../src/client/imagine-view.tsx'
 
 interface Registration {
   spec: { name: string; key?: string; id?: string }
@@ -60,6 +60,24 @@ interface Expanded {
   texts: string[]
   tags: string[]
 }
+
+describe('edit regeneration', () => {
+  it('retains all source images and rendering parameters', () => {
+    const text = regenerateText('grok_imagine_edit', 'original prompt', {
+      image: 'first.png', images: ['second.png', 'third.png'], aspect_ratio: '16:9', resolution: '2k', n: 1,
+    })
+    expect(text).toContain('["first.png","second.png","third.png"]')
+    expect(text).toContain('"aspect_ratio":"16:9"')
+    expect(text).toContain('"resolution":"2k"')
+    expect(text).toContain('original prompt')
+  })
+
+  it('refers to all original inputs instead of copying a large data URI', () => {
+    const text = regenerateText('grok_imagine_edit', 'p', { image: 'data:'.padEnd(1000, 'A'), images: ['extra.png'] })
+    expect(text).toContain('全部图片（image 和 images）')
+    expect(text).not.toContain('A'.repeat(100))
+  })
+})
 
 /** Recursively expand rendered elements down to DOM nodes and text. */
 function renderDeep(node: unknown, out: Expanded = { texts: [], tags: [] }): Expanded {
@@ -126,7 +144,7 @@ describe('imagine views (merged from dsh-grok-imagine-ui)', () => {
     const result = view({ block, sessionId: 's1', sessions: SESSIONS })
     expect(result).not.toBeNull()
     const out = renderDeep(result)
-    expect(out.texts).toContain('图片未进会话，已直接落盘')
+    expect(out.texts).toContain('执行结果')
     expect(out.texts).toContain('Saved to /tmp/ws/out.jpg')
     expect(out.texts).toContain('sketch it')
     expect(out.texts).toContain('已编辑')
@@ -183,4 +201,37 @@ describe('imagine views (merged from dsh-grok-imagine-ui)', () => {
     })
     expect(tail({ turn: { turn: {} }, sessionId: 's1', sessions: SESSIONS, useChat: emptyUseChat })).toBeNull()
   })
+})
+
+
+describe('actual DSH owner contract', () => {
+  it('shows prompt and all local inputs for a running call without phase', () => {
+    const view = toolViewFor(captureRegistrations(), 'grok_imagine_edit')
+    const rendered = renderDeep(view({ sessionId: 's', sessions: SESSIONS, owner: {
+      block: { name: 'grok_imagine_edit', argsRaw: JSON.stringify({ prompt: 'snow scene', image: 'input.png', images: ['second.png'] }) },
+      openFile: () => undefined,
+    } }))
+    expect(rendered.texts.join(' ')).toContain('snow scene')
+    expect(rendered.texts.join(' ')).toContain('input.png')
+    expect(rendered.texts.join(' ')).toContain('second.png')
+    expect(rendered.tags).toContain('progress')
+  })
+  it('renders settled results from owner.block', () => {
+    const view = toolViewFor(captureRegistrations(), 'grok_imagine')
+    const rendered = renderDeep(view({ owner: { block: settledBlock('grok_imagine', { prompt: 'test prompt' }, [{ type: 'image', attachment: IMAGE_REF }]) } }))
+    expect(rendered.texts.join(' ')).toContain('test prompt')
+    expect(rendered.tags).toContain('details')
+  })
+})
+
+
+it('aggregates the actual DSH ChatNodeStore values from owner turn', () => {
+  const tail = captureRegistrations().find(entry => entry.spec.name === 'conversation.chat.turnTail')!.component as (props: Record<string, unknown>) => unknown
+  const block = settledBlock('grok_imagine', { prompt: 'tail prompt' }, [{ type: 'image', attachment: IMAGE_REF }])
+  const useChat = (select: Function) => select({ nodes: { values: () => [
+    { kind: 'tool-call', location: { turn: 1 }, data: { root: block } },
+    { kind: 'tool-call', location: { turn: 2 }, data: { root: block } },
+  ] } })
+  const out = renderDeep(tail({ owner: { turn: { turn: 1 }, seq: 5 }, useChat }))
+  expect(out.texts.filter(text => text === 'tail prompt')).toHaveLength(1)
 })
