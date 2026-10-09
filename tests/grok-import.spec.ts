@@ -52,6 +52,12 @@ describe('parseGrokAuthDocument', () => {
     expect(() => parseGrokAuthDocument(JSON.stringify({ key: 'only-access' }), 'auth.json')).toThrow(/refresh token/)
   })
 
+  it.each(['https://other.example', 'https://auth.x.ai.evil.example'])('rejects a single credential explicitly issued by %s', issuer => {
+    expect(() => parseGrokAuthDocument(JSON.stringify({ [`${issuer}::client`]: {
+      key: 'foreign', refresh_token: 'foreign-refresh', oidc_issuer: issuer,
+    } }), 'auth.json')).toThrow(/none marks auth\.x\.ai/)
+  })
+
   it('rejects a multi-provider document when no pair marks auth.x.ai', () => {
     const multi = {
       'other-provider': { access_token: 'a1', refresh_token: 'r1', oidc_issuer: 'https://other.example' },

@@ -12,4 +12,8 @@ describe('safeMessage', () => {
   it('caps diagnostic length', () => {
     expect(safeMessage('x'.repeat(2000)).length).toBe(1000)
   })
+
+  it('redacts opaque Authorization bearer tokens', () => {
+    expect(safeMessage('Authorization: Bearer opaque+/token==')).toBe('Authorization: Bearer [redacted]')
+  })
 })

@@ -1,5 +1,13 @@
 # dsh-grok-kit
 
+> **本仓库是 fork**（[KouzakiUmi/dsh-grok-kit](https://github.com/KouzakiUmi/dsh-grok-kit)），基线 v0.1.13。
+> 相对上游**只改了 `package.json` 的依赖与 peer 声明**，用来适配 DeepSeek Harness 0.2.0-rc.x 的顶层 pi-ai 0.87.1；
+> 源码与功能行为与上游一致。理由、安装、验证与同步上游的做法见 [FORK-NOTES.md](FORK-NOTES.md)。
+>
+> **fork v0.1.14（2026-10-01）**：吸收了两个本地卫星插件 `dsh-grok-imagine-edit`（图生图工具
+> `grok_imagine_edit`）与 `dsh-grok-imagine-ui`（会话图片视图），自此无需单独安装二者；详见
+> [FORK-NOTES.md](FORK-NOTES.md) 的合并记录。
+
 **中文** · [English](README.en.md)
 
 > **维护状态公告（2026-09-30）**
@@ -36,7 +44,7 @@
 - **搜索融入主循环：** 网页与 X 检索发生在 grok-4.6 的同一轮 Think 中，推理可以直接使用刚搜到的材料
 - **多轮 reasoning 连续：** 默认使用 high effort，并保留 `reasoning.encrypted_content`，让后续回合能够带回加密推理上下文
 - **登录状态与 Grok CLI 同步：** 直接共用并回写 `~/.grok/auth.json`，不是只复制一次后各自轮换 refresh token
-- **Imagine 与干净的模型选择器：** `grok_imagine` 默认开启，非聊天模型不会混进对话模型列表；当前 DSH 不会把生成图直接显示在对话中
+- **Imagine 与干净的模型选择器：** `grok_imagine` 默认开启，非聊天模型不会混进对话模型列表；生成图通过 DSH 附件库保存，并在会话图片卡片中显示
 
 此外还包括 xAI 专用代理、聊天 401 强制刷新重试、凭据原子写入与诊断脱敏等支撑能力。
 
@@ -121,7 +129,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#bf9faad3bbb576dab259c
 
 - 模型选择器只展示主线 Grok 聊天模型；Imagine、video、embedding、build/code 变体会被隐藏
 - 默认 grok-4.6 描述符使用 high reasoning，并请求 `reasoning.encrypted_content`，以便后续回合带回加密推理上下文
-- `grok_imagine` 默认开启，但当前 DSH 还不能把生成图直接显示在对话中。需要直接取得文件时，请在提示中让 Agent 把生成结果保存到指定目录；未指定目录时，图片会保存到 DSH 附件库
+- `grok_imagine` 默认开启，图片保存到 DSH 附件库并在会话中显示。可通过卡片下载，或使用宿主文件工具导出；`grok_imagine_edit` 的 `save_path` 参数不再支持直接写盘
 - dsh 原生 `web_search` 仍保留在宿主工具列表中，但会从启用 backend search 的 xAI payload 中移除，避免工具重名
 
 模型列表来自登录账号的 `GET /v1/models` 结果，并在本地缓存。服务端能力或模型要求发生变化时，仍可能需要更新插件；不会把“模型 id 可见”等同于“所有能力一定可用”。
@@ -196,3 +204,14 @@ CI 在 Node.js 22 与 24 上执行 frozen install、typecheck、测试、构建�
 ## 许可证与致谢
 
 [Apache-2.0](LICENSE)。部分代码源自 Apache-2.0 许可的 `dsh-xai`，详见 [NOTICE](NOTICE)。
+
+
+### 图片输入与再次编辑
+
+- 本地图片路径：由当前 Agent 的 DSH 文件服务读取，遵循执行环境、会话工作目录及大小限制。运行卡片显示文件路径和“打开输入图片”入口；浏览器无法直接读取任意本地路径。
+- 用户上传图片：DSH 将上传内容保存为会话附件。把宿主提供的完整 `attachment={...}` 引用传给 `grok_imagine_edit.image`；卡片通过会话 `readAttachment` 加载缩略图。
+- 生成图片再编辑：工具结果包含 ImageBlock 和完整 `attachment={...}` 文本。将完整引用作为下一次 `image` 参数，附件服务会读取并验证保存后的图片。保存过程可能改变格式和大小，必须沿用保存后的 metadata。
+- 裸 `attachmentId=sha256:...` 仅在宿主附件库提供 `imageHostPath` 时支持；远程附件后端应使用完整引用。附件 ID 不是本地文件路径或 URL。
+- data URI 输入经过解码大小、base64、图片签名和 MIME 一致性检查；远程 URL 交给上游获取，卡片显示链接，避免浏览器自动请求任意远程地址。
+
+运行卡片会显示提示词和全部输入来源；图片生成完成后显示结果、下载入口与再次生成入口。再次编辑会保留全部输入图和原调用的渲染参数。

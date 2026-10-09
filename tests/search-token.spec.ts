@@ -109,4 +109,33 @@ describe('createXaiOAuthSearchTokenSource', () => {
     await expect(second).resolves.toBe('new')
     expect(fixture.refresh).toHaveBeenCalledOnce()
   })
+
+  it('does not coalesce the same bearer from different credential stores', async () => {
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1 }
+    const a = fakeSession({ credential, refresh: async current => ({ ...current, access: 'new-a' }) })
+    const b = fakeSession({ credential, refresh: async current => ({ ...current, access: 'new-b' }) })
+    Object.defineProperty(b.session.store, 'filename', { value: 'separate-store.json' })
+    const first = createXaiOAuthSearchTokenSource(a.session).refresh!('old')
+    const second = createXaiOAuthSearchTokenSource(b.session).refresh!('old')
+    expect(await Promise.all([first, second])).toEqual(['new-a', 'new-b'])
+    expect(a.refresh).toHaveBeenCalledOnce()
+    expect(b.refresh).toHaveBeenCalledOnce()
+  })
+
+  it('cancels one waiter without aborting the shared refresh for another', async () => {
+    let release!: (value: OAuthCredential) => void
+    const gate = new Promise<OAuthCredential>(resolve => { release = resolve })
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1 }
+    const fixture = fakeSession({ credential, refresh: async () => gate })
+    const source = createXaiOAuthSearchTokenSource(fixture.session)
+    const controller = new AbortController()
+    const cancelled = source.refresh!('old', controller.signal)
+    const other = source.refresh!('old')
+    controller.abort(new Error('cancelled caller'))
+    await expect(cancelled).rejects.toThrow('cancelled caller')
+    release({ ...credential, access: 'new', refresh: 'new-r' })
+    await expect(other).resolves.toBe('new')
+    expect(fixture.refresh).toHaveBeenCalledOnce()
+    expect(fixture.refresh.mock.calls[0]![1].aborted).toBe(false)
+  })
 })

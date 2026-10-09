@@ -17,7 +17,18 @@ export interface XaiOAuthTokenSource {
   refresh?(rejectedAccessToken: string, signal?: AbortSignal): Promise<string | undefined>
 }
 
-const inFlightRefresh = new Map<string, Promise<string | undefined>>()
+const inFlightRefresh = new Map<string, Map<string, Promise<string | undefined>>>()
+
+/** Cancellation belongs to a caller, not to a shared credential rotation. */
+function waitForRefresh(pending: Promise<string | undefined>, signal?: AbortSignal): Promise<string | undefined> {
+  signal?.throwIfAborted()
+  if (signal === undefined) return pending
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
+}
 
 /**
  * Build a token source that is OAuth-only by construction, including forced
@@ -39,13 +50,21 @@ export function createXaiOAuthSearchTokenSource(session: XaiOAuthSession): XaiOA
       return accessToken === undefined || accessToken.length === 0 ? undefined : accessToken
     },
     async refresh(rejectedAccessToken: string, signal?: AbortSignal): Promise<string | undefined> {
-      const existing = inFlightRefresh.get(rejectedAccessToken)
-      if (existing !== undefined) return existing
-      const pending = refreshRejected(session, rejectedAccessToken, signal).finally(() => {
-        if (inFlightRefresh.get(rejectedAccessToken) === pending) inFlightRefresh.delete(rejectedAccessToken)
+      signal?.throwIfAborted()
+      const storeKey = session.store.filename
+      let refreshes = inFlightRefresh.get(storeKey)
+      if (refreshes === undefined) {
+        refreshes = new Map()
+        inFlightRefresh.set(storeKey, refreshes)
+      }
+      const existing = refreshes.get(rejectedAccessToken)
+      if (existing !== undefined) return waitForRefresh(existing, signal)
+      const pending = refreshRejected(session, rejectedAccessToken).finally(() => {
+        if (refreshes.get(rejectedAccessToken) === pending) refreshes.delete(rejectedAccessToken)
+        if (refreshes.size === 0) inFlightRefresh.delete(storeKey)
       })
-      inFlightRefresh.set(rejectedAccessToken, pending)
-      return pending
+      refreshes.set(rejectedAccessToken, pending)
+      return waitForRefresh(pending, signal)
     },
   }
 }
@@ -68,7 +87,7 @@ async function refreshRejected(
   const credential = await session.store.modify(XAI_PI_PROVIDER, async candidate => {
     refreshSignal.throwIfAborted()
     if (candidate?.type !== 'oauth') return undefined
-    if (candidate.access !== rejectedAccessToken) return undefined
+    if (candidate.access !== rejectedAccessToken || candidate.refresh !== current.refresh) return undefined
     return rotated
   })
   refreshSignal.throwIfAborted()

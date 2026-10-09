@@ -102,6 +102,14 @@ describe('parseXSearchArgs', () => {
     expect(parseXSearchArgs({ query: 'q', allowed_x_handles: twenty }).allowedXHandles).toHaveLength(20)
     expect(() => parseXSearchArgs({ query: 'q', allowed_x_handles: [...twenty, 'h20'] })).toThrow(/at most 20/)
   })
+
+  it.each(['2026-02-29', '2026-02-30', '2026-04-31'])('rejects an impossible calendar date %s', from_date => {
+    expect(() => parseXSearchArgs({ query: 'q', from_date })).toThrow(/valid date/)
+  })
+
+  it('accepts leap day in a leap year', () => {
+    expect(parseXSearchArgs({ query: 'q', from_date: '2024-02-29' }).fromDate).toBe('2024-02-29')
+  })
 })
 
 describe('defaults', () => {

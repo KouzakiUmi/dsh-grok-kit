@@ -54,7 +54,8 @@ function parseIsoDate(value: unknown, name: string): string | undefined {
   if (typeof value !== 'string' || !ISO_DATE.test(value)) {
     throw new Error(`${name} must be YYYY-MM-DD`)
   }
-  if (!Number.isFinite(Date.parse(`${value}T00:00:00Z`))) {
+  const parsed = new Date(`${value}T00:00:00Z`)
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
     throw new Error(`${name} must be a valid date`)
   }
   return value

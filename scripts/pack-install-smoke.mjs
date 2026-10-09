@@ -128,6 +128,14 @@ try {
   tarball = resolve(root, packName)
   console.log(`pack-install-smoke: packed ${tarball}`)
 
+  // pnpm 11 hard-fails installs when dependency build scripts are neither allowed nor
+  // explicitly denied (ERR_PNPM_IGNORED_BUILDS). pi-ai 0.87.1 pins @google/genai and pulls
+  // protobufjs, both shipping build scripts. Declare them denied at the profile root where
+  // `dsh plugin add` runs pnpm so the smoke measures pack/install/boot rather than builds.
+  const profileDir = join(dshHome, 'profiles', PROFILE)
+  mkdirSync(profileDir, { recursive: true })
+  writeFileSync(join(profileDir, 'pnpm-workspace.yaml'), "allowBuilds:\n  '@google/genai': false\n  protobufjs: false\n")
+
   run(host.bin, ['plugin', '--profile', PROFILE, 'add', tarball], { env, cwd: work, stdio: 'inherit' })
 
   const dump = run(host.bin, ['--profile', PROFILE, '--dump-config'], { env, cwd: work })
