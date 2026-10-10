@@ -77,6 +77,12 @@ describe('edit regeneration', () => {
     expect(text).toContain('全部图片（image 和 images）')
     expect(text).not.toContain('A'.repeat(100))
   })
+
+  it('trims sources before measuring and embedding them', () => {
+    const text = regenerateText('grok_imagine_edit', 'p', { image: '  first.png  ', images: ['  second.png'] })
+    expect(text).toContain('["first.png","second.png"]')
+    expect(text).not.toContain('  first.png')
+  })
 })
 
 /** Recursively expand rendered elements down to DOM nodes and text. */

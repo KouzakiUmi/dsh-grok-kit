@@ -113,7 +113,8 @@ export function regenerateText(toolName: string, prompt: string, args: Record<st
   if (toolName !== 'grok_imagine_edit') return `请用 grok_imagine 按以下提示词重新生成一张图，不要改写提示词：\n${prompt}`
   const sources = [args?.image, ...(Array.isArray(args?.images) ? args.images : [])]
     .filter((source): source is string => typeof source === 'string' && source.trim().length > 0)
-  const hint = sources.length > 0 && sources.every(source => source.trim().length <= 400)
+    .map(source => source.trim())
+  const hint = sources.length > 0 && sources.every(source => source.length <= 400)
     ? `输入图沿用全部这些来源（第一张为 image，其余为 images）：${JSON.stringify(sources)}`
     : '输入图沿用上一条 grok_imagine_edit 调用的全部图片（image 和 images）'
   const settings = Object.fromEntries(['aspect_ratio', 'resolution', 'n']
