@@ -187,6 +187,13 @@ describe('imagine views (merged from dsh-grok-imagine-ui)', () => {
     expect(pending.texts).toContain('p')
   })
 
+  it('shows an edit-specific failure title for errored grok_imagine_edit calls', () => {
+    const view = toolViewFor(registrations, 'grok_imagine_edit')
+    const failed = renderDeep(view({ block: settledBlock('grok_imagine_edit', { prompt: 'p', image: 'x' }, [], true), sessionId: 's1', sessions: SESSIONS }))
+    expect(failed.texts).toContain('图片编辑失败')
+    expect(failed.texts).not.toContain('图片生成失败')
+  })
+
   it('turn tail aggregates the turn image results and falls back to null when empty', () => {
     const tail = registrations.find(entry => entry.spec.name === 'conversation.chat.turnTail')!.component as (props: Record<string, unknown>) => unknown
     const useChat = (selector: (chat: unknown) => unknown) => selector({
