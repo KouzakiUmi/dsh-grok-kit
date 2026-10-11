@@ -347,8 +347,14 @@ export class XaiOAuthSession {
   }
 
   async setSelectedModels(ids: readonly string[]): Promise<void> {
-    this.selectedIds = filterSelectedChatModelIds(ids)
-      ?? [preferredXaiOAuthModelFrom(this.availableModels())]
+    // An explicit empty list means "show every available model" (the Settings
+    // "Show all" button); writeCache omits the selected key in that case. A
+    // non-empty list that filters down to no chat model is invalid and falls
+    // back to the preferred model instead.
+    this.selectedIds = ids.length === 0
+      ? undefined
+      : filterSelectedChatModelIds(ids)
+        ?? [preferredXaiOAuthModelFrom(this.availableModels())]
     this.invalidateProvider()
     await this.writeCache()
     this.onCatalogChange?.()

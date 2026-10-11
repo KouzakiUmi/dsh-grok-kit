@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -235,5 +235,72 @@ describe('XaiOAuthSession.refreshLiveCatalog', () => {
     expect(session.liveModelIds()).toEqual(['grok-new'])
     expect(session.catalogSource).toBe('live')
     session.dispose()
+  })
+})
+
+describe('XaiOAuthSession.setSelectedModels', () => {
+  it('treats an explicit empty list as "show all" and persists it across reloads', async () => {
+    await isolateDshHome()
+    vi.stubGlobal('fetch', async () => new Response(
+      JSON.stringify({ data: [{ id: 'grok-4.5' }, { id: 'grok-4.6' }, { id: 'grok-imagine-image' }] }),
+      { status: 200 },
+    ))
+    const session = new XaiOAuthSession(
+      mockStore({ read: async () => oauthCredential() }),
+      undefined,
+      { catalogRetryDelaysMs: [] },
+    )
+    // Seed liveIds so writeCache emits a non-empty document: parseCache drops
+    // a document whose ids AND selected are both empty, which would make a
+    // reload assertion vacuous.
+    await session.refreshLiveCatalog()
+    expect(session.liveModelIds()).toEqual(['grok-4.5', 'grok-4.6', 'grok-imagine-image'])
+
+    // First pin one model, then clear the selection the way the Settings
+    // "Show all" button does (POST selected: []).
+    await session.setSelectedModels(['grok-4.5'])
+    expect(session.selectedModelIds()).toEqual(['grok-4.5'])
+    await session.setSelectedModels([])
+    expect(session.selectedModelIds()).toBeUndefined()
+    const visible = session.visibleModels().map(model => model.id)
+    expect(visible).toContain('grok-4.6')
+    expect(visible).toEqual(session.availableModels().map(model => model.id))
+
+    // The cache document carries live ids but must omit the selected key —
+    // assert the file itself so a selected: [] regression cannot pass.
+    const cached = JSON.parse(
+      await readFile(join(tempHome!, '.xai-oauth-models.json'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(cached['ids']).toContain('grok-4.6')
+    expect(cached).not.toHaveProperty('selected')
+
+    // A fresh session loading that cache stays in "show all".
+    const reloaded = new XaiOAuthSession(
+      mockStore({ read: async () => undefined }),
+      undefined,
+      { catalogRetryDelaysMs: [] },
+    )
+    await reloaded.loadCachedCatalog()
+    expect(reloaded.selectedModelIds()).toBeUndefined()
+  })
+
+  it('falls back to the preferred model when a non-empty selection has no chat-model ids', async () => {
+    const session = new XaiOAuthSession(
+      mockStore({ read: async () => undefined }),
+      undefined,
+      { catalogRetryDelaysMs: [] },
+    )
+    await session.setSelectedModels(['grok-imagine-image', 'grok-build-0.1'])
+    expect(session.selectedModelIds()).toEqual(['grok-4.6'])
+  })
+
+  it('keeps only chat-model ids when a non-empty selection is mixed', async () => {
+    const session = new XaiOAuthSession(
+      mockStore({ read: async () => undefined }),
+      undefined,
+      { catalogRetryDelaysMs: [] },
+    )
+    await session.setSelectedModels(['grok-imagine-image', 'grok-4.5', 'grok-build-0.1'])
+    expect(session.selectedModelIds()).toEqual(['grok-4.5'])
   })
 })
