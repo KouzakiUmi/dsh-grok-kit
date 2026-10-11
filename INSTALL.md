@@ -24,10 +24,10 @@ From a DeepSeek Harness source checkout, prefix the same command with `pnpm`:
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-Or pin the exact 0.2.0 release:
+Or pin version 0.2.1:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.0
+dsh plugin --profile web add dsh-grok-kit@0.2.1
 ```
 
 If `dsh` is not on PATH, run via pinned `npx`:

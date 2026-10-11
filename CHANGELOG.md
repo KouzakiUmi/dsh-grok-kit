@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.2.1（2026-10-11）
+
+- 聊天流显式跟踪终止事件：正常结束或重试结束后不再尝试补发错误；缺少终止事件的异常流仍会以错误结束。
+- Chat streams now track terminal events explicitly: completed responses and retries no longer attempt to append an extra error, while streams missing a terminal event still end with an error.
+- 图片编辑失败卡片显示“图片编辑失败”，与图片生成失败区分，并同步读屏标签。
+- Failed image edits now show “图片编辑失败”, distinct from generation failures, with a matching accessibility label.
+- 再次编辑时统一去除图片来源的首尾空白，确保长度判断和发送给 Agent 的来源一致。
+- Source-image references are trimmed before re-editing so length checks and the references sent to the agent remain consistent.
+- 缓存会话图片卡片的数据订阅源，减少重复获取；清理不影响现有行为的冗余分支。
+- Session image cards cache their subscription source to avoid repeated lookups; redundant branches were removed without changing their existing behavior.
+- 更新项目简介和安装说明；宿主支持范围与 0.2.0 相同。
+- Updated the project description and installation notes; host support is unchanged from 0.2.0.
+
 ## 0.2.0（2026-10-10）
 
 - 宿主环境升级：冻结支持 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24）；正式停止对旧 0.1 宿主线的兼容支持。

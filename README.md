@@ -86,10 +86,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-也可以指定 0.2.0 准确锚点：
+也可以固定安装 0.2.1：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.0
+dsh plugin --profile web add dsh-grok-kit@0.2.1
 dsh web
 ```
 
@@ -102,7 +102,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.0** 面向 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不再支持旧 0.1 宿主线。新增图生图工具 `grok_imagine_edit` 与会话图片交互卡片，并完善登录刷新和异常处理。变更说明见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.1** 完善聊天流终止处理、图片卡片的数据订阅和编辑失败提示，并统一再次编辑时的图片来源处理。宿主支持范围延续 0.2.0：DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
