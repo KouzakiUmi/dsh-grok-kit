@@ -261,6 +261,24 @@ describe('generate', () => {
     expect(stored.tasks[0]).toMatchObject({ taskId: result.taskId, state: 'failed' })
   })
 
+  it.each([500, 502, 503, 504])('keeps HTTP %s submission ambiguous and never resubmits through status/resume', async status => {
+    const storePath = await newStorePath()
+    const harness = makeHarness({ storePath,
+      fetchMock: routeFetch({ submit: () => new Response('secret upstream detail', { status }) }),
+    })
+    const result = await harness.manager.generate({ prompt: 'p', image: PNG_DATA_URI })
+    expect(result.state).toBe('submission-unknown')
+    expect(result.error).toContain(`HTTP ${String(status)}`)
+    expect(result.error).toContain('never re-POSTed automatically to avoid double billing')
+    expect(result.error).not.toContain('secret upstream detail')
+    expect(harness.refresh).not.toHaveBeenCalled()
+    const stored = JSON.parse(await readFile(storePath, 'utf8'))
+    expect(stored.tasks[0]).toMatchObject({ taskId: result.taskId, state: 'submission-unknown' })
+    expect(await harness.manager.status(result.taskId)).toEqual(result)
+    expect(await harness.manager.resume(result.taskId)).toEqual(result)
+    expect(harness.fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('never treats 429 as a token fault', async () => {
     const harness = makeHarness({ fetchMock: routeFetch({ submit: () => new Response('rate limited', { status: 429 }) }) })
     const result = await harness.manager.generate({ prompt: 'p', image: PNG_DATA_URI })
@@ -490,16 +508,19 @@ describe('status / resume', () => {
     }
   })
 
-  it('restores pending and removes the persisted stale error after resume', async () => {
+  it.each([429, 503])('restores pending and clears task/capability errors after HTTP %s', async status => {
     const one = await pendingTask()
     let polls = 0
     const harness = makeHarness({ storePath: one.storePath, fetchMock: routeFetch({
-      poll: () => ++polls === 1 ? json({}, 429) : json({ status: 'pending' }),
+      poll: () => ++polls === 1 ? json({}, status) : json({ status: 'pending' }),
     }) })
     expect((await harness.manager.status(one.taskId)).state).toBe('interrupted')
     const resumed = await harness.manager.resume(one.taskId)
     expect(resumed.state).toBe('pending')
     expect(resumed.error).toBeUndefined()
+    expect(harness.events.at(-2)).toMatchObject({ identity: 'acc-a', state: 'temporary-error', httpStatus: status })
+    expect(harness.events.at(-1)).toMatchObject({ identity: 'acc-a', state: 'available', httpStatus: 200 })
+    expect(harness.events.at(-1)).not.toHaveProperty('message')
     const stored = JSON.parse(await readFile(one.storePath, 'utf8'))
     expect(stored.tasks[0].state).toBe('pending')
     expect(stored.tasks[0]).not.toHaveProperty('error')

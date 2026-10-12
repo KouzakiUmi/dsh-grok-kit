@@ -571,11 +571,18 @@ export class VideoTaskManager {
         }
       }
       if (!response.ok) {
-        // Definite rejection: a stable status-only message, never the raw body.
+        // A server error may follow queued work: preserve uncertainty to avoid double billing.
+        // Publish status only, never the upstream error body.
         await discardBody(response)
         const detail = `HTTP ${String(response.status)}`
         if (response.status === 403) this.emitCapability(identity, 'restricted', response.status, detail)
         else this.emitCapability(identity, 'temporary-error', response.status, detail)
+        if (response.status >= 500) {
+          return await update({
+            state: 'submission-unknown',
+            error: `submission result unknown (${detail}); never re-POSTed automatically to avoid double billing`,
+          })
+        }
         return await update({ state: 'failed', error: `xAI video submission failed (${detail})` })
       }
       const parsed = await readBoundedJson(response, 'video submission')
@@ -900,6 +907,7 @@ export class VideoTaskManager {
     }
     if (remoteStatus !== 'done') {
       if (remoteStatus === 'pending') {
+        this.emitCapability(identity, 'available', 200, undefined)
         const updated: VideoTaskRecord = { ...record, state: 'pending', updatedAt: new Date().toISOString() }
         delete updated.error
         await this.assertIdentity(identity)
