@@ -86,10 +86,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-You can also pin version 0.2.1:
+You can also pin version 0.2.2:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.1
+dsh plugin --profile web add dsh-grok-kit@0.2.2
 dsh web
 ```
 
@@ -102,7 +102,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.1** refines chat-stream termination, image-card subscriptions, edit-failure labels, and source-image handling when editing again. Host support remains the same as 0.2.0: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.2** fixes unreadable sign-in button text in dark mode and “Show all” narrowing the model list to a single model. Clicking “Show all” restores all chat models and survives restarts; existing single-model selections are not changed automatically. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 

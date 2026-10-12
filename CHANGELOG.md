@@ -1,5 +1,14 @@
 # 更新记录 / Changelog
 
+## 0.2.2（2026-10-12）
+
+- 修复暗色模式下登录主按钮文字不清晰的问题，文字颜色跟随宿主主题。
+- Fixed unreadable text on the primary sign-in button in dark mode; its text color now follows the host theme.
+- 修复“全部显示”将模型列表收窄为一个模型的问题；现在显示所有可聊天模型，重启后仍保留这一选择。图片和搜索专用模型继续从聊天选择器过滤。
+- Fixed “Show all” narrowing the model list to a single model; all chat models are now shown, and the selection survives restarts. Image and search-only models remain excluded from the chat picker.
+- 已保存的单模型选择不会自动改变；遇到列表被收窄时，可在设置页点击“全部显示”。宿主支持范围不变。
+- Existing single-model selections are not changed automatically; click “Show all” in Settings if your list was narrowed. Host support is unchanged.
+
 ## 0.2.1（2026-10-11）
 
 - 聊天流显式跟踪终止事件：正常结束或重试结束后不再尝试补发错误；缺少终止事件的异常流仍会以错误结束。
