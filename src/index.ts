@@ -336,7 +336,10 @@ export function apply(ctx: Context, config: Config): void {
     resolveAttachments: () => ctx.get('attachments'),
     model: validVideoModel(effectiveConfig.videoModel) ? effectiveConfig.videoModel : DEFAULT_VIDEO_MODEL,
     maxVideoBytes: validVideoMaxBytes(effectiveConfig.videoMaxBytes) ? effectiveConfig.videoMaxBytes : DEFAULT_VIDEO_MAX_BYTES,
-    onCapability: event => capabilities.observe('video', event),
+    onCapability: event => {
+      // A late response from the previous account must not contaminate this tracker.
+      if (event.identity === capabilityIdentity) capabilities.observe('video', event)
+    },
   }) : undefined
   if (video !== undefined) {
     ctx.effect(() => () => video.dispose(), 'dsh-grok-kit: video task lifecycle')

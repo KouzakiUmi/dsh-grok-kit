@@ -720,6 +720,8 @@ interface VideoTaskResult {
   error?: string;
 }
 interface VideoCapabilityEvent {
+  /** Identity captured by the originating operation, never the later active account. */
+  identity: string;
   state: 'available' | 'restricted' | 'temporary-error';
   checkedAt: string;
   model: string;

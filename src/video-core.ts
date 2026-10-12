@@ -101,6 +101,8 @@ interface VideoTaskRecord extends VideoTaskResult {
 }
 
 export interface VideoCapabilityEvent {
+  /** Identity captured by the originating operation, never the later active account. */
+  identity: string
   state: 'available' | 'restricted' | 'temporary-error'
   checkedAt: string
   model: string
@@ -427,7 +429,12 @@ export class VideoTaskManager {
   private readonly model: string
   private readonly maxVideoBytes: number
   private readonly disposeController = new AbortController()
-  private readonly polls = new Map<string, Promise<VideoTaskResult>>()
+  private readonly polls = new Map<string, {
+    promise: Promise<VideoTaskResult>
+    controller: AbortController
+    waiters: number
+    settled: boolean
+  }>()
   private disposed = false
 
   constructor(options: VideoTaskManagerOptions) {
@@ -557,7 +564,7 @@ export class VideoTaskManager {
       if (response.status === 401 && this.options.tokens.refresh !== undefined) {
         // A 401 is an explicit rejection before generation starts, so exactly
         // one refreshed retry is safe; 403/429 must never be treated as token faults.
-        const refreshed = await this.options.tokens.refresh(access, signal)
+        const refreshed = await this.options.tokens.refresh(access, timed.signal)
         if (typeof refreshed === 'string' && refreshed.length > 0 && refreshed !== access) {
           await this.assertIdentity(identity)
           response = await post(refreshed)
@@ -567,20 +574,20 @@ export class VideoTaskManager {
         // Definite rejection: a stable status-only message, never the raw body.
         await discardBody(response)
         const detail = `HTTP ${String(response.status)}`
-        if (response.status === 403) this.emitCapability('restricted', response.status, detail)
-        else this.emitCapability('temporary-error', response.status, detail)
+        if (response.status === 403) this.emitCapability(identity, 'restricted', response.status, detail)
+        else this.emitCapability(identity, 'temporary-error', response.status, detail)
         return await update({ state: 'failed', error: `xAI video submission failed (${detail})` })
       }
       const parsed = await readBoundedJson(response, 'video submission')
       const requestId = typeof parsed.request_id === 'string' ? parsed.request_id.trim() : ''
       if (!REQUEST_ID_PATTERN.test(requestId)) {
-        this.emitCapability('available', 200, undefined)
+        this.emitCapability(identity, 'available', 200, undefined)
         return await update({
           state: 'submission-unknown',
           error: 'submission response carried no usable request id; never re-POSTed automatically to avoid double billing',
         })
       }
-      this.emitCapability('available', 200, undefined)
+      this.emitCapability(identity, 'available', 200, undefined)
       return await update({ state: 'pending', requestId })
     } catch (error) {
       // The request may have reached xAI: keep the unknown outcome on the SAME
@@ -590,7 +597,7 @@ export class VideoTaskManager {
         state: 'submission-unknown',
         error: `submission result unknown (${errorText(error)}); never re-POSTed automatically to avoid double billing`,
       })
-      this.emitCapability('temporary-error', undefined, 'video submission outcome unknown')
+      this.emitCapability(identity, 'temporary-error', undefined, 'video submission outcome unknown')
       if (signal?.aborted === true) throw signal.reason
       return record
     } finally {
@@ -607,19 +614,31 @@ export class VideoTaskManager {
     // share one in-flight poll or see each other's result.
     const identity = await this.requireIdentity()
     const key = `${identity}:${id}`
-    const existing = this.polls.get(key)
-    if (existing !== undefined) {
-      const joined = await waitForOperation(existing, signal)
-      await this.assertIdentity(identity)
-      return joined
+    signal?.throwIfAborted()
+    let operation = this.polls.get(key)
+    if (operation === undefined) {
+      const controller = new AbortController()
+      const promise = this.runStatus(identity, id, controller.signal).finally(() => {
+        created.settled = true
+        if (this.polls.get(key) === created) this.polls.delete(key)
+      })
+      const created = { controller, waiters: 0, settled: false, promise }
+      this.polls.set(key, created)
+      operation = created
     }
-    const pending = this.runStatus(id, signal).finally(() => {
-      if (this.polls.get(key) === pending) this.polls.delete(key)
-    })
-    this.polls.set(key, pending)
-    const result = await waitForOperation(pending, signal)
-    await this.assertIdentity(identity)
-    return result
+    // Cancellation belongs to the shared operation, not its first caller.
+    // Keep work alive while any waiter remains; cancel local work when all leave.
+    operation.waiters += 1
+    try {
+      const result = await waitForOperation(operation.promise, signal)
+      await this.assertIdentity(identity)
+      return result
+    } finally {
+      operation.waiters -= 1
+      if (operation.waiters === 0 && !operation.settled) {
+        operation.controller.abort(new Error('All video status waiters cancelled'))
+      }
+    }
   }
 
   /** Resume is the same single-poll continuation as status (frozen contract). */
@@ -680,12 +699,13 @@ export class VideoTaskManager {
     }
   }
 
-  private emitCapability(state: VideoCapabilityEvent['state'], httpStatus: number | undefined, message: string | undefined): void {
+  private emitCapability(identity: string, state: VideoCapabilityEvent['state'], httpStatus: number | undefined, message: string | undefined): void {
     const onCapability = this.options.onCapability
     if (typeof onCapability !== 'function') return
     // No cross-event dedupe: an account switch must re-observe the capability
     // for the new identity instead of being swallowed as a repeat.
     const event: VideoCapabilityEvent = {
+      identity,
       state,
       checkedAt: new Date().toISOString(),
       model: this.model,
@@ -779,8 +799,8 @@ export class VideoTaskManager {
     }
   }
 
-  private async runStatus(taskId: string, signal: AbortSignal | undefined): Promise<VideoTaskResult> {
-    const identity = await this.requireIdentity()
+  private async runStatus(identity: string, taskId: string, signal: AbortSignal | undefined): Promise<VideoTaskResult> {
+    await this.assertIdentity(identity)
     const records = await this.readRecordsFor(identity)
     const record = records.find(candidate => candidate.taskId === taskId)
     if (record === undefined) throw new Error(`unknown video task ${JSON.stringify(taskId)}`)
@@ -834,8 +854,8 @@ export class VideoTaskManager {
         // Stable status-only message: the error body is discarded, never echoed.
         await discardBody(response)
         const detail = `HTTP ${String(response.status)}`
-        if (response.status === 403) this.emitCapability('restricted', response.status, detail)
-        else this.emitCapability('temporary-error', response.status, detail)
+        if (response.status === 403) this.emitCapability(identity, 'restricted', response.status, detail)
+        else this.emitCapability(identity, 'temporary-error', response.status, detail)
         const updated: VideoTaskRecord = {
           ...record,
           state: 'interrupted',
@@ -867,7 +887,7 @@ export class VideoTaskManager {
 
     const remoteStatus = typeof parsed.status === 'string' ? parsed.status.trim() : ''
     if (remoteStatus === 'failed' || remoteStatus === 'expired') {
-      this.emitCapability('available', 200, undefined)
+      this.emitCapability(identity, 'available', 200, undefined)
       const updated: VideoTaskRecord = {
         ...record,
         state: 'failed',
@@ -880,7 +900,8 @@ export class VideoTaskManager {
     }
     if (remoteStatus !== 'done') {
       if (remoteStatus === 'pending') {
-        const updated: VideoTaskRecord = { ...record, updatedAt: new Date().toISOString() }
+        const updated: VideoTaskRecord = { ...record, state: 'pending', updatedAt: new Date().toISOString() }
+        delete updated.error
         await this.assertIdentity(identity)
         await this.persistRecord(identity, updated)
         return toResult(updated)
@@ -896,7 +917,7 @@ export class VideoTaskManager {
       return toResult(updated)
     }
 
-    this.emitCapability('available', 200, undefined)
+    this.emitCapability(identity, 'available', 200, undefined)
     return this.downloadCompleted(identity, record, parsed, signal)
   }
 

@@ -75,12 +75,12 @@ function makeHarness(overrides: {
   storePath?: string
   maxVideoBytes?: number
   resolveToken?: () => Promise<string | undefined>
-  refresh?: (rejected: string) => Promise<string | undefined>
+  refresh?: (rejected: string, signal?: AbortSignal) => Promise<string | undefined>
   attachments?: unknown
 } = {}): Harness {
   const saveFileStream = overrides.saveFileStream ?? saver()
   const resolve = vi.fn(async () => overrides.resolveToken?.() ?? 'tok')
-  const refresh = vi.fn(async (rejected: string) => overrides.refresh?.(rejected))
+  const refresh = vi.fn(async (rejected: string, signal?: AbortSignal) => overrides.refresh?.(rejected, signal))
   const tokens: XaiOAuthTokenSource = {
     available: () => true,
     resolve,
@@ -243,7 +243,7 @@ describe('generate', () => {
     const result = await harness.manager.generate({ prompt: 'p', image: PNG_DATA_URI })
     expect(result.state).toBe('pending')
     expect(seen).toEqual(['Bearer tok1', 'Bearer tok2'])
-    expect(harness.refresh).toHaveBeenCalledWith('tok1', undefined)
+    expect(harness.refresh).toHaveBeenCalledWith('tok1', harness.fetchMock.mock.calls[0][1]?.signal)
   })
 
   it('maps a definite rejection to failed with a stable status-only message and no body echo', async () => {
@@ -450,6 +450,115 @@ describe('status / resume', () => {
     expect(resumed.state).toBe('done')
   })
 
+  it('dispose aborts a stalled submission refresh without retrying the POST', async () => {
+    let refreshSignal: AbortSignal | undefined
+    const harness = makeHarness({ storePath: await newStorePath(),
+      fetchMock: routeFetch({ submit: () => json({}, 401) }),
+      refresh: async (_token, signal) => new Promise<string>((_resolve, reject) => {
+        refreshSignal = signal
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+      }),
+    })
+    const generated = harness.manager.generate({ prompt: 'wave', image: PNG_DATA_URI })
+    await vi.waitFor(() => expect(refreshSignal).toBeDefined())
+    await harness.manager.dispose()
+    expect(refreshSignal?.aborted).toBe(true)
+    expect((await generated).state).toBe('submission-unknown')
+    expect(harness.fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('the submission deadline aborts a stalled 401 refresh', async () => {
+    const path = await newStorePath()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      let refreshSignal: AbortSignal | undefined
+      const harness = makeHarness({ storePath: path,
+        fetchMock: routeFetch({ submit: () => json({}, 401) }),
+        refresh: async (_token, signal) => new Promise<string>((_resolve, reject) => {
+          refreshSignal = signal
+          signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+      })
+      const generated = harness.manager.generate({ prompt: 'wave', image: PNG_DATA_URI })
+      await vi.waitFor(() => expect(refreshSignal).toBeDefined())
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(refreshSignal?.aborted).toBe(true)
+      expect((await generated).state).toBe('submission-unknown')
+      expect(harness.fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('restores pending and removes the persisted stale error after resume', async () => {
+    const one = await pendingTask()
+    let polls = 0
+    const harness = makeHarness({ storePath: one.storePath, fetchMock: routeFetch({
+      poll: () => ++polls === 1 ? json({}, 429) : json({ status: 'pending' }),
+    }) })
+    expect((await harness.manager.status(one.taskId)).state).toBe('interrupted')
+    const resumed = await harness.manager.resume(one.taskId)
+    expect(resumed.state).toBe('pending')
+    expect(resumed.error).toBeUndefined()
+    const stored = JSON.parse(await readFile(one.storePath, 'utf8'))
+    expect(stored.tasks[0].state).toBe('pending')
+    expect(stored.tasks[0]).not.toHaveProperty('error')
+  })
+
+  it('isolates the first caller cancellation while a second waiter still needs the poll', async () => {
+    const one = await pendingTask()
+    let finish: ((response: Response) => void) | undefined
+    let sharedSignal: AbortSignal | undefined
+    const harness = makeHarness({ storePath: one.storePath, fetchMock: routeFetch({
+      poll: init => new Promise<Response>(resolve => {
+        finish = resolve
+        sharedSignal = init?.signal ?? undefined
+      }),
+    }) })
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const listener = vi.spyOn(secondController.signal, 'addEventListener')
+    const first = harness.manager.status(one.taskId, firstController.signal)
+    const rejected = expect(first).rejects.toThrow('first cancelled')
+    await vi.waitFor(() => expect(finish).toBeDefined())
+    const second = harness.manager.status(one.taskId, secondController.signal)
+    await vi.waitFor(() => expect(listener).toHaveBeenCalled())
+    firstController.abort(new Error('first cancelled'))
+    await rejected
+    expect(sharedSignal?.aborted).toBe(false)
+    finish?.(json({ status: 'pending' }))
+    expect((await second).state).toBe('pending')
+    expect(harness.fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts the shared poll only after every waiter cancels', async () => {
+    const one = await pendingTask()
+    let sharedSignal: AbortSignal | undefined
+    const harness = makeHarness({ storePath: one.storePath, fetchMock: routeFetch({
+      poll: init => new Promise<Response>((_resolve, reject) => {
+        sharedSignal = init?.signal ?? undefined
+        sharedSignal?.addEventListener('abort', () => reject(sharedSignal?.reason), { once: true })
+      }),
+    }) })
+    const firstController = new AbortController()
+    const secondController = new AbortController()
+    const listener = vi.spyOn(secondController.signal, 'addEventListener')
+    const first = harness.manager.status(one.taskId, firstController.signal)
+    const firstRejected = expect(first).rejects.toThrow('cancel first')
+    await vi.waitFor(() => expect(sharedSignal).toBeDefined())
+    const second = harness.manager.status(one.taskId, secondController.signal)
+    const secondRejected = expect(second).rejects.toThrow('cancel second')
+    await vi.waitFor(() => expect(listener).toHaveBeenCalled())
+    firstController.abort(new Error('cancel first'))
+    await firstRejected
+    expect(sharedSignal?.aborted).toBe(false)
+    secondController.abort(new Error('cancel second'))
+    await secondRejected
+    expect(sharedSignal?.aborted).toBe(true)
+    await vi.waitFor(async () => expect((await harness.manager.list())[0].state).toBe('interrupted'))
+    expect(harness.fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it('rejects unknown task ids locally', async () => {
     const harness = makeHarness({ storePath: await newStorePath() })
     await expect(harness.manager.status('missing-task')).rejects.toThrow(/unknown video task/)
@@ -616,6 +725,8 @@ describe('identity partitioning', () => {
       }),
     })
     await expect(harness.manager.status(result.taskId)).rejects.toThrow(/identity changed during the operation/)
+    expect(harness.events).toContainEqual(expect.objectContaining({ identity: 'acc-a', state: 'available' }))
+    expect(harness.events.some(event => event.identity === 'acc-b')).toBe(false)
   })
 })
 
