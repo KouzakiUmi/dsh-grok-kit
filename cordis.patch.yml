@@ -21,3 +21,5 @@
         # imagineTool above. editModel: '' = follow the live catalog
         # (grok-imagine-image-2.0, fallback grok-imagine-image).
         editTool: true
+        # Video generation spends shared subscription usage; opt in explicitly.
+        videoTool: false

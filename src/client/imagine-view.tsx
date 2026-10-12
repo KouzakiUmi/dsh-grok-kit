@@ -5,11 +5,22 @@
 //   - never return null for save_path calls: fall back to a text card
 //     (FIX-null-render-save-path.md)
 //
+// Redesigned on the shared MediaCardFrame (media-card.tsx): done cards are
+// media-first (gallery with a bounded max width, primary view/download),
+// while prompt / raw result / full attachment refs / technical info sit in
+// the collapsed details. Pending and failure cards reuse the same frame with
+// localized, honest feedback. All copy comes from the `imageUi*` locale keys
+// with an English fallback when no translator is bound — never hardcoded
+// Chinese.
+//
 
 /** Session image viewer for grok_imagine / grok_imagine_edit results. */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
+import { en } from './locales.ts'
+import type { XaiOAuthSettingsKey } from './locales.ts'
+import { MediaCardFrame, mediaCardStyles } from './media-card.tsx'
 
 const TOOL_NAME = 'grok_imagine'
 /** This view renders both text-to-image and image-to-image; the latter is registered as grok_imagine_edit. */
@@ -19,6 +30,16 @@ const TOOL_NAMES = new Set(['grok_imagine', 'grok_imagine_edit'])
  * cards); only counted at the turn tail for the purple/green source legend.
  */
 const CODEX_TOOL_NAMES = new Set(['codex_connect_image_generate'])
+
+/** Translator bound from the settings locale namespace and injected with the slot. */
+export type ImagineTranslate = (key: XaiOAuthSettingsKey, params?: Record<string, unknown>) => string
+
+/**
+ * English fallback for the rare case that the locale service is not bound
+ * (tests, or a boot where the namespace was not registered). English — never a
+ * hardcoded Chinese string — so an English UI can never show Chinese copy.
+ */
+export const FALLBACK_TRANSLATE: ImagineTranslate = key => en[key]
 
 // ---------------------------------------------------------------------------
 // Block shapes (loose on purpose: the host owns the real definitions)
@@ -109,17 +130,17 @@ function argsOf(block: unknown): Record<string, unknown> | undefined {
 }
 
 /** Edit results have no "regenerate" semantics; re-edit the same input image instead. */
-export function regenerateText(toolName: string, prompt: string, args: Record<string, unknown> | undefined): string {
-  if (toolName !== 'grok_imagine_edit') return `请用 grok_imagine 按以下提示词重新生成一张图，不要改写提示词：\n${prompt}`
+export function regenerateText(toolName: string, prompt: string, args: Record<string, unknown> | undefined, t: ImagineTranslate = FALLBACK_TRANSLATE): string {
+  if (toolName !== 'grok_imagine_edit') return `${t('imageUiRegenerateText')}\n${prompt}`
   const sources = [args?.image, ...(Array.isArray(args?.images) ? args.images : [])]
     .filter((source): source is string => typeof source === 'string' && source.trim().length > 0)
     .map(source => source.trim())
   const hint = sources.length > 0 && sources.every(source => source.length <= 400)
-    ? `输入图沿用全部这些来源（第一张为 image，其余为 images）：${JSON.stringify(sources)}`
-    : '输入图沿用上一条 grok_imagine_edit 调用的全部图片（image 和 images）'
+    ? `${t('imageUiEditSources')}${JSON.stringify(sources)}`
+    : t('imageUiEditSourcesFallback')
   const settings = Object.fromEntries(['aspect_ratio', 'resolution', 'n']
     .filter(key => args?.[key] !== undefined).map(key => [key, args![key]]))
-  return `请用 grok_imagine_edit 再次编辑，${hint}。参数沿用：${JSON.stringify(settings)}。不要改写提示词：\n${prompt}`
+  return `${t('imageUiEditIntro')}${hint}${t('imageUiEditSettings')}${JSON.stringify(settings)}${t('imageUiEditKeepPrompt')}\n${prompt}`
 }
 
 const IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
@@ -127,41 +148,29 @@ const MIN_ZOOM = 1
 const MAX_ZOOM = 4
 const ZOOM_STEP = 0.5
 
-const actionStyle: CSSProperties = {
-  justifySelf: 'start',
-  minHeight: 28,
+/** Bounded box for the media gallery: media-first, but never full-bleed. */
+const GALLERY_MAX_WIDTH = 520
+/** Text blocks (prompt / raw result) keep the shared prompt style plus a boxed chrome. */
+const blockStyle: CSSProperties = {
+  ...mediaCardStyles.prompt,
+  boxSizing: 'border-box',
+  width: '100%',
+  maxHeight: 160,
+  overflowY: 'auto',
+  padding: '10px 12px',
   border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 7,
-  padding: '3px 10px',
-  background: 'transparent',
-  color: 'var(--dsw-alias-label-primary)',
-  font: 'inherit',
-  cursor: 'pointer',
+  borderRadius: 8,
+  background: 'var(--dsw-alias-bg-base)',
+  color: 'var(--dsw-alias-label-secondary)',
+  fontFamily: 'var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
 }
-
-const detailStyle: CSSProperties = {
-  color: 'var(--dsw-alias-label-tertiary)',
-  fontSize: 13,
-  lineHeight: '18px',
-}
-
-const shellStyle: CSSProperties = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  alignItems: 'flex-start',
-  gap: 14,
-  minWidth: 0,
-  padding: 12,
-  border: '1px solid var(--dsw-alias-border-l2)',
-  borderRadius: 10,
-  background: 'var(--dsw-alias-bg-module-platform)',
-  color: 'var(--dsw-alias-label-primary)',
-}
+const sectionHeading: CSSProperties = { fontSize: 13, fontWeight: 600 }
 
 /**
  * Source badge. Grok and Codex image cards look alike in a session, so the
  * card must identify itself: this view renders the Grok line (purple dot);
  * the Codex line is rendered by dsh-codex-connect (green dot is reserved).
+ * The turn-tail legend below depends on this purple dot staying on the card.
  */
 const SOURCE_TONES = { grok: '#7c3aed', codex: '#10a37f' }
 const SOURCE_LABEL = 'Grok Imagine'
@@ -171,16 +180,6 @@ function sourceBadge(label: string, tone: string): ReactNode {
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <i aria-hidden style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: tone }} />
       <strong style={{ fontSize: 13, fontWeight: 600 }}>{label}</strong>
-    </span>
-  )
-}
-
-/** Title row: source badge + action (已生成 / 已编辑 / 正在生成). */
-function grokTitle(verb: string): ReactNode {
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 8 }}>
-      {sourceBadge(SOURCE_LABEL, SOURCE_TONES.grok)}
-      <span style={{ fontSize: 13, color: 'var(--dsw-alias-label-secondary)' }}>{verb}</span>
     </span>
   )
 }
@@ -216,13 +215,26 @@ function imageRef(value: unknown): ImageRef | undefined {
 function imageAttachments(block: unknown): ImageRef[] {
   if (!isObject(block) || !('kind' in block) || !Array.isArray(block.content)) return []
   const images: ImageRef[] = []
+  const seen = new Set<string>()
   for (const part of block.content as ContentPart[]) {
     if (!isObject(part) || part.type !== 'image') continue
     const ref = imageRef(part.attachment)
     if (ref === undefined) return []
+    // The same attachment can be repeated inside one result; dedupe by
+    // attachmentId while keeping every distinct real image.
+    if (seen.has(ref.attachmentId)) continue
+    seen.add(ref.attachmentId)
     images.push(ref)
   }
   return images
+}
+
+/** Local input references from the call args (image plus images[]). */
+function inputSources(block: unknown): string[] {
+  const args = argsOf(block)
+  if (args === undefined) return []
+  return [args.image, ...(Array.isArray(args.images) ? args.images : [])]
+    .filter((value): value is string => typeof value === 'string' && value.trim() !== '')
 }
 
 function promptOf(block: unknown): string {
@@ -340,7 +352,8 @@ function useImageLoader(sessionId: string | undefined, sessions: SessionsService
 // Components
 // ---------------------------------------------------------------------------
 
-function ImagineLightbox({ src, alt, onClose }: { src: string; alt: string; onClose: () => void }) {
+function ImagineLightbox({ src, alt, onClose, t: translate }: { src: string; alt: string; onClose: () => void; t: ImagineTranslate }) {
+  const t = translate ?? FALLBACK_TRANSLATE
   const dialog = useRef<HTMLDialogElement>(null)
   const viewport = useRef<HTMLDivElement>(null)
   const dragStart = useRef<{ pointerId: number; clientX: number; clientY: number; scrollLeft: number; scrollTop: number } | null>(null)
@@ -387,11 +400,11 @@ function ImagineLightbox({ src, alt, onClose }: { src: string; alt: string; onCl
           <button type="button" style={button} disabled={zoom === MIN_ZOOM} onClick={() => setZoom(value => Math.max(MIN_ZOOM, value - ZOOM_STEP))}>−</button>
           <span>{`${Math.round(zoom * 100)}%`}</span>
           <button type="button" style={button} disabled={zoom === MAX_ZOOM} onClick={() => setZoom(value => Math.min(MAX_ZOOM, value + ZOOM_STEP))}>+</button>
-          <button type="button" style={button} disabled={zoom === MIN_ZOOM} onClick={() => setZoom(MIN_ZOOM)}>重置</button>
+          <button type="button" style={button} disabled={zoom === MIN_ZOOM} onClick={() => setZoom(MIN_ZOOM)}>{t('imageUiZoomReset')}</button>
         </div>
         <button
           type="button"
-          aria-label="关闭"
+          aria-label={t('imageUiClose')}
           onClick={onClose}
           style={{ ...button, position: 'absolute', top: 8, right: 8, zIndex: 1, width: 32, padding: 0 }}
         >
@@ -439,10 +452,15 @@ function ImagineLightbox({ src, alt, onClose }: { src: string; alt: string; onCl
   )
 }
 
-function ImagineFrame({ attachment, load }: { attachment: ImageRef; load: (attachment: ImageRef) => Promise<string> }) {
+function ImagineFrame({ attachment, load, t: translate, onOpen }: {
+  attachment: ImageRef
+  load: (attachment: ImageRef) => Promise<string>
+  t: ImagineTranslate
+  onOpen: (value: { src: string; label: string }) => void
+}) {
+  const t = translate ?? FALLBACK_TRANSLATE
   const [src, setSrc] = useState<string | null>(null)
   const [error, setError] = useState(false)
-  const [open, setOpen] = useState(false)
   useEffect(() => {
     let live = true
     setError(false)
@@ -456,35 +474,40 @@ function ImagineFrame({ attachment, load }: { attachment: ImageRef; load: (attac
       live = false
     }
   }, [attachment.attachmentId, attachment.bytes, attachment.height, attachment.mediaType, attachment.name, attachment.width, load])
-  if (error) return <div style={detailStyle}>图片无法显示</div>
-  if (src === null) return <div style={detailStyle}>正在加载图片…</div>
+  if (error) return <div style={mediaCardStyles.muted}>{t('imageUiImageUnavailable')}</div>
+  if (src === null) return <div style={mediaCardStyles.muted}>{t('imageUiLoadingImage')}</div>
   const label = attachment.name ?? TOOL_NAME
   return (
-    <>
-      <button
-        type="button"
-        title="打开大图"
-        aria-label={`打开 ${label}`}
-        onClick={() => { setOpen(true) }}
-        style={{
-          display: 'block',
-          padding: 0,
-          border: '1px solid var(--dsw-alias-border-l2)',
-          borderRadius: 12,
-          background: 'var(--dsw-alias-bg-secondary, transparent)',
-          cursor: 'zoom-in',
-          overflow: 'hidden',
-          maxWidth: 'min(100%, 320px)',
-        }}
-      >
-        <img src={src} alt={label} style={{ display: 'block', width: '100%', height: 'auto', maxHeight: 320, objectFit: 'contain' }} />
-      </button>
-      {open ? <ImagineLightbox src={src} alt={label} onClose={() => { setOpen(false) }} /> : null}
-    </>
+    <button
+      type="button"
+      title={t('imageUiViewLarge')}
+      aria-label={`${t('imageUiViewLarge')}: ${label}`}
+      onClick={() => { onOpen({ src, label }) }}
+      style={{
+        display: 'block',
+        padding: 0,
+        border: '1px solid var(--dsw-alias-border-l2)',
+        borderRadius: 12,
+        background: 'var(--dsw-alias-bg-secondary, transparent)',
+        cursor: 'zoom-in',
+        overflow: 'hidden',
+        width: '100%',
+        maxWidth: '100%',
+      }}
+    >
+      <img src={src} alt={label} style={{ display: 'block', width: '100%', height: 'auto', maxHeight: 360, objectFit: 'contain' }} />
+    </button>
   )
 }
 
-function ActionButton({ label, onClick, disabled }: { label: string; onClick: () => Promise<unknown>; disabled?: boolean }) {
+function ActionButton({ t: translate, label, onClick, disabled, primary }: {
+  t: ImagineTranslate
+  label: string
+  onClick: () => Promise<unknown>
+  disabled?: boolean
+  primary?: boolean
+}) {
+  const t = translate ?? FALLBACK_TRANSLATE
   const [state, setState] = useState<'idle' | 'pending' | 'failed'>('idle')
   const alive = useRef(true)
   useEffect(() => {
@@ -494,7 +517,7 @@ function ActionButton({ label, onClick, disabled }: { label: string; onClick: ()
   return (
     <button
       type="button"
-      style={actionStyle}
+      style={primary === true ? { ...mediaCardStyles.action, ...mediaCardStyles.primaryAction } : mediaCardStyles.action}
       disabled={disabled === true || state === 'pending'}
       aria-busy={state === 'pending'}
       onClick={() => {
@@ -507,8 +530,43 @@ function ActionButton({ label, onClick, disabled }: { label: string; onClick: ()
         })
       }}
     >
-      {state === 'pending' ? '处理中…' : state === 'failed' ? '失败' : label}
+      {state === 'pending' ? t('working') : state === 'failed' ? t('actionFailed') : label}
     </button>
+  )
+}
+
+/** Compact one-line technical summary of an image (media-first key specs). */
+function imageSpecLine(images: ImageRef[]): string {
+  return images
+    .map(image => `${image.width}×${image.height} · ${formatMediaType(image.mediaType)} · ${formatBytes(image.bytes)}`)
+    .join('  ·  ')
+}
+
+/** Full attachment refs and technical info; always folded into details. */
+function ImageInfoSection({ images, t: translate }: { images: ImageRef[]; t: ImagineTranslate }) {
+  const t = translate ?? FALLBACK_TRANSLATE
+  if (images.length === 0) return null
+  return (
+    <section aria-label={t('imageUiImageInfo')} style={{ display: 'grid', gap: 6 }}>
+      <strong style={sectionHeading}>{t('imageUiImageInfo')}</strong>
+      {images.map((image, index) => (
+        <div key={image.attachmentId} style={{ display: 'grid', gap: 2 }}>
+          <span>{image.name ?? `${t('imageUiImage')} ${index + 1}`} · {formatMediaType(image.mediaType)} · {image.width}×{image.height} · {formatBytes(image.bytes)}</span>
+          <span>{`attachmentId: ${image.attachmentId}`}</span>
+        </div>
+      ))}
+    </section>
+  )
+}
+
+function PromptSection({ prompt, t: translate }: { prompt: string; t: ImagineTranslate }) {
+  const t = translate ?? FALLBACK_TRANSLATE
+  if (prompt === '') return null
+  return (
+    <section aria-label={t('imageUiPrompt')} style={{ display: 'grid', gap: 6 }}>
+      <strong style={sectionHeading}>{t('imageUiPrompt')}</strong>
+      <pre style={blockStyle}>{prompt}</pre>
+    </section>
   )
 }
 
@@ -517,17 +575,28 @@ interface CardProps {
   sessionId: string | undefined
   sessions: SessionsService | undefined
   openFile?: (path: string) => void
+  /** Locale translator injected with the slot; English fallback when absent. */
+  t?: ImagineTranslate
   owner?: { block: unknown; openFile?: (path: string) => void }
 }
 
-function ImagineResultCard({ block, sessionId, sessions, openFile }: CardProps) {
+/**
+ * Done card: media-first (bounded gallery + key specs + primary view and
+ * download), everything long — prompt, raw result, full attachment refs,
+ * technical info, local inputs — behind the collapsed details. A text-only
+ * result (save_path fallback) has no media, so its text stays visible.
+ */
+function ImagineResultCard({ block, sessionId, sessions, openFile, t: translate }: CardProps) {
+  const t = translate ?? FALLBACK_TRANSLATE
   const load = useImageLoader(sessionId, sessions)
   const images = imageAttachments(block)
   const prompt = promptOf(block)
   const resultText = textOf(block)
+  const inputs = inputSources(block)
   const hasImages = images.length > 0
-  const title = toolNameOf(block) === 'grok_imagine_edit' ? '已编辑' : '已生成'
+  const isEdit = toolNameOf(block) === 'grok_imagine_edit'
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const [viewer, setViewer] = useState<{ src: string; label: string } | null>(null)
   useEffect(() => {
     if (copyState === 'idle') return
     const timer = window.setTimeout(() => { setCopyState('idle') }, 2000)
@@ -535,156 +604,166 @@ function ImagineResultCard({ block, sessionId, sessions, openFile }: CardProps) 
   }, [copyState])
   if (!hasImages && resultText === '') return null
   const canPrompt = prompt !== '' && typeof sessionId === 'string' && typeof sessions?.binding === 'function'
+  const specLine = hasImages ? imageSpecLine(images) : ''
+  const hasDetails = prompt !== '' || hasImages || inputs.length > 0
+  const preview = hasImages
+    ? (
+        <div
+          data-testid="grok-imagine-gallery"
+          style={{
+            ...mediaCardStyles.preview,
+            display: 'grid',
+            gridTemplateColumns: images.length === 1 ? '1fr' : 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))',
+            gap: 10,
+            boxSizing: 'border-box',
+            width: '100%',
+            maxWidth: '100%',
+            padding: 12,
+          }}
+        >
+          {images.map((attachment, index) => (
+            <ImagineFrame
+              key={`${attachment.attachmentId}:${index}`}
+              attachment={attachment}
+              load={load}
+              t={t}
+              onOpen={setViewer}
+            />
+          ))}
+        </div>
+      )
+    : (
+        <section aria-label={t('imageUiResult')} style={{ display: 'grid', gap: 6, maxWidth: GALLERY_MAX_WIDTH }}>
+          <strong style={sectionHeading}>{t('imageUiResult')}</strong>
+          <pre style={blockStyle}>{resultText}</pre>
+        </section>
+      )
   return (
-    <section aria-label="grok_imagine" data-testid="grok-imagine-result" style={shellStyle}>
-      {hasImages ? (
-        <div style={{ display: 'grid', gap: 10, flex: '1 1 240px', maxWidth: 320, minWidth: 0 }}>
-          {grokTitle(title)}
-          <div data-testid="grok-imagine-gallery" style={{ display: 'grid', gap: 10 }}>
-            {images.map((attachment, index) => <ImagineFrame key={`${attachment.attachmentId}:${index}`} attachment={attachment} load={load} />)}
-          </div>
-        </div>
-      ) : null}
-      <div style={{ display: 'grid', gap: 10, flex: '2 1 280px', minWidth: 0 }}>
-        {hasImages ? null : grokTitle(title)}
-        {!hasImages && resultText !== '' ? (
-          <section aria-label="执行结果" style={{ display: 'grid', gap: 8 }}>
-            <strong style={{ fontSize: 13, fontWeight: 600 }}>执行结果</strong>
-            <pre
-              style={{
-                boxSizing: 'border-box',
-                width: '100%',
-                maxHeight: 140,
-                margin: 0,
-                overflowY: 'auto',
-                padding: '10px 12px',
-                border: '1px solid var(--dsw-alias-border-l2)',
-                borderRadius: 8,
-                background: 'var(--dsw-alias-bg-base)',
-                color: 'var(--dsw-alias-label-secondary)',
-                fontFamily: 'var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
-                fontSize: 12,
-                lineHeight: '18px',
-                whiteSpace: 'pre-wrap',
-                overflowWrap: 'anywhere',
-              }}
-            >
-              {resultText}
-            </pre>
-          </section>
-        ) : null}
-        {prompt ? (
-          <section aria-label="提示词" style={{ display: 'grid', gap: 8 }}>
-            <strong style={{ fontSize: 13, fontWeight: 600 }}>提示词</strong>
-            <pre
-              style={{
-                boxSizing: 'border-box',
-                width: '100%',
-                maxHeight: 96,
-                margin: 0,
-                overflowY: 'auto',
-                padding: '10px 12px',
-                border: '1px solid var(--dsw-alias-border-l2)',
-                borderRadius: 8,
-                background: 'var(--dsw-alias-bg-base)',
-                color: 'var(--dsw-alias-label-secondary)',
-                fontFamily: 'var(--dsw-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
-                fontSize: 12,
-                lineHeight: '18px',
-                whiteSpace: 'pre-wrap',
-                overflowWrap: 'anywhere',
-              }}
-            >
-              {prompt}
-            </pre>
-          </section>
-        ) : null}
-        <SourceImages block={block} sessionId={sessionId} sessions={sessions} openFile={openFile} />
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {prompt ? (
-            <ActionButton
-              label={copyState === 'copied' ? '已复制' : copyState === 'failed' ? '复制失败' : '复制提示词'}
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(prompt)
-                  setCopyState('copied')
-                } catch (error) {
-                  setCopyState('failed')
-                  throw error
-                }
-              }}
-            />
-          ) : null}
-          {images.map((image, index) => (
-            <ActionButton
-              key={`${image.attachmentId}:download`}
-              label={images.length === 1 ? '下载' : `下载 ${index + 1}`}
-              onClick={async () => {
-                triggerDownload(await load(image), image.name ?? `grok-imagine.${extensionFor(image.mediaType)}`)
-              }}
-            />
-          ))}
-          {images.map((image, index) => (
-            <ActionButton
-              key={`${image.attachmentId}:copy`}
-              label={images.length === 1 ? '复制图片' : `复制图片 ${index + 1}`}
-              onClick={async () => {
-                const blob = await (await fetch(await load(image))).blob()
-                await navigator.clipboard.write([new ClipboardItem({ [blob.type || image.mediaType]: blob })])
-              }}
-            />
-          ))}
-          {canPrompt ? (
-            <ActionButton
-              label="重新生成"
-              onClick={async () => {
-                const accepted = await sessions!.binding(sessionId!)?.session?.prompt?.([{
-                  type: 'text',
-                  text: regenerateText(toolNameOf(block), prompt, argsOf(block)),
-                }], 'queue')
-                if (accepted?.ok !== true) throw new Error('regenerate failed')
-              }}
-            />
-          ) : null}
-        </div>
-        {hasImages ? (
-          <details>
-            <summary style={{ cursor: 'pointer', color: 'var(--dsw-alias-label-secondary)', fontSize: 13 }}>图片详情</summary>
-            <div style={{ ...detailStyle, display: 'grid', gap: 4, marginTop: 6 }}>
-              {images.map((image, index) => (
-                <span key={image.attachmentId}>
-                  {image.name ?? `图片 ${index + 1}`} · {formatMediaType(image.mediaType)} · {image.width}×{image.height} · {formatBytes(image.bytes)}
-                </span>
-              ))}
-            </div>
-          </details>
-        ) : null}
-      </div>
-    </section>
+    <>
+      <MediaCardFrame
+        testId="grok-imagine-result"
+        ariaLabel="grok_imagine"
+        title={t(isEdit ? 'imageUiEdited' : 'imageUiGenerated')}
+        status={t('imageUiStatusDone')}
+        statusTone="success"
+        summary={(
+          <>
+            {sourceBadge(SOURCE_LABEL, SOURCE_TONES.grok)}
+            {specLine === '' ? null : <span>{specLine}</span>}
+          </>
+        )}
+        preview={preview}
+        actions={(
+          <>
+            {images.map((image, index) => (
+              <ActionButton
+                key={`view:${image.attachmentId}`}
+                t={t}
+                label={images.length === 1 ? t('imageUiViewLarge') : `${t('imageUiViewLarge')} ${index + 1}`}
+                onClick={async () => {
+                  setViewer({ src: await load(image), label: image.name ?? TOOL_NAME })
+                }}
+              />
+            ))}
+            {images.map((image, index) => (
+              <ActionButton
+                key={`download:${image.attachmentId}`}
+                t={t}
+                primary
+                label={images.length === 1 ? t('imageUiDownload') : `${t('imageUiDownload')} ${index + 1}`}
+                onClick={async () => {
+                  triggerDownload(await load(image), image.name ?? `grok-imagine.${extensionFor(image.mediaType)}`)
+                }}
+              />
+            ))}
+            {images.map((image, index) => (
+              <ActionButton
+                key={`copy:${image.attachmentId}`}
+                t={t}
+                label={images.length === 1 ? t('imageUiCopyImage') : `${t('imageUiCopyImage')} ${index + 1}`}
+                onClick={async () => {
+                  const blob = await (await fetch(await load(image))).blob()
+                  await navigator.clipboard.write([new ClipboardItem({ [blob.type || image.mediaType]: blob })])
+                }}
+              />
+            ))}
+            {prompt !== '' ? (
+              <ActionButton
+                t={t}
+                label={copyState === 'copied' ? t('imageUiCopied') : copyState === 'failed' ? t('imageUiCopyFailed') : t('imageUiCopyPrompt')}
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(prompt)
+                    setCopyState('copied')
+                  } catch (error) {
+                    setCopyState('failed')
+                    throw error
+                  }
+                }}
+              />
+            ) : null}
+            {canPrompt ? (
+              <ActionButton
+                t={t}
+                label={t('imageUiRegenerate')}
+                onClick={async () => {
+                  const accepted = await sessions!.binding(sessionId!)?.session?.prompt?.([{
+                    type: 'text',
+                    text: regenerateText(toolNameOf(block), prompt, argsOf(block), t),
+                  }], 'queue')
+                  if (accepted?.ok !== true) throw new Error('regenerate failed')
+                }}
+              />
+            ) : null}
+          </>
+        )}
+        details={hasDetails
+          ? (
+              <>
+                <PromptSection prompt={prompt} t={t} />
+                {hasImages && resultText !== ''
+                  ? (
+                      <section aria-label={t('imageUiResult')} style={{ display: 'grid', gap: 6 }}>
+                        <strong style={sectionHeading}>{t('imageUiResult')}</strong>
+                        <pre style={blockStyle}>{resultText}</pre>
+                      </section>
+                    )
+                  : null}
+                <SourceImages block={block} sessionId={sessionId} sessions={sessions} openFile={openFile} t={t} />
+                <ImageInfoSection images={images} t={t} />
+              </>
+            )
+          : undefined}
+        detailsLabel={t('imageUiDetails')}
+      />
+      {viewer === null
+        ? null
+        : <ImagineLightbox src={viewer.src} alt={viewer.label} t={t} onClose={() => setViewer(null)} />}
+    </>
   )
 }
 
-function SourceImages({ block, sessionId, sessions, openFile }: CardProps) {
+function SourceImages({ block, sessionId, sessions, openFile, t: translate }: CardProps) {
+  const t = translate ?? FALLBACK_TRANSLATE
   const load = useImageLoader(sessionId, sessions)
-  const args = argsOf(block)
-  const sources = [args?.image, ...(Array.isArray(args?.images) ? args.images : [])]
-    .filter((value): value is string => typeof value === 'string' && value.trim() !== '')
+  const sources = inputSources(block)
   if (sources.length === 0) return null
-  return <section aria-label="输入图片" style={{ display: 'grid', gap: 8, width: '100%' }}>
-    <strong>输入图片</strong>
+  return <section aria-label={t('imageUiInputImages')} style={{ display: 'grid', gap: 8, width: '100%' }}>
+    <strong style={sectionHeading}>{t('imageUiInputImages')}</strong>
     {sources.map((source, index) => {
       let ref: ImageRef | undefined
       try { ref = imageRef(JSON.parse(source.replace(/^attachment=/u, ''))) } catch { /* May be a path or handle. */ }
       const id = /sha256:[a-f0-9]{64}/u.exec(source)?.[0]
-      if (ref !== undefined || id !== undefined) return <SourceAttachment key={index} id={ref?.attachmentId ?? id!} load={load} />
-      if (/^data:image\/(png|jpeg|webp);base64,/iu.test(source)) return <img key={index} src={source} alt={`输入图片 ${index + 1}`} style={{ maxWidth: 240, maxHeight: 160, objectFit: 'contain' }} />
-      if (/^https?:\/\//iu.test(source)) return <a key={index} href={source} target="_blank" rel="noreferrer">{`输入图片 ${index + 1}（远程链接）`}</a>
-      return <div key={index} style={{ overflowWrap: 'anywhere' }}>{source}{openFile ? <button type="button" style={actionStyle} onClick={() => openFile(source)}>打开输入图片</button> : null}</div>
+      if (ref !== undefined || id !== undefined) return <SourceAttachment key={index} id={ref?.attachmentId ?? id!} load={load} t={t} />
+      if (/^data:image\/(png|jpeg|webp);base64,/iu.test(source)) return <img key={index} src={source} alt={`${t('imageUiInputImage')} ${index + 1}`} style={{ maxWidth: 240, maxHeight: 160, objectFit: 'contain' }} />
+      if (/^https?:\/\//iu.test(source)) return <a key={index} href={source} target="_blank" rel="noreferrer">{`${t('imageUiInputImage')} ${index + 1} ${t('imageUiRemoteLink')}`}</a>
+      return <div key={index} style={{ overflowWrap: 'anywhere' }}>{source}{openFile ? <button type="button" style={mediaCardStyles.action} onClick={() => openFile(source)}>{t('imageUiOpenInput')}</button> : null}</div>
     })}
   </section>
 }
 
-function SourceAttachment({ id, load }: { id: string; load: (ref: Pick<ImageRef, 'attachmentId'>) => Promise<string> }) {
+function SourceAttachment({ id, load, t: translate }: { id: string; load: (ref: Pick<ImageRef, 'attachmentId'>) => Promise<string>; t: ImagineTranslate }) {
+  const t = translate ?? FALLBACK_TRANSLATE
   const [src, setSrc] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   useEffect(() => {
@@ -695,25 +774,90 @@ function SourceAttachment({ id, load }: { id: string; load: (ref: Pick<ImageRef,
     load({ attachmentId: id }).then(value => { if (live) setSrc(value) }).catch(() => { if (live) setFailed(true) })
     return () => { live = false }
   }, [id, load])
-  return src ? <img src={src} alt="输入图片" style={{ maxWidth: 240, maxHeight: 160, objectFit: 'contain' }} /> : <div style={detailStyle}>{failed ? '输入图片无法读取：' : '正在加载输入图片：'}{id}</div>
+  return src
+    ? <img src={src} alt={t('imageUiInputImages')} style={{ maxWidth: 240, maxHeight: 160, objectFit: 'contain' }} />
+    : <div style={mediaCardStyles.muted}>{failed ? t('imageUiInputReadFailed') : t('imageUiLoadingInput')}{id}</div>
 }
 
-function GeneratingCard(props: CardProps) {
-  const { sessionId, sessions } = props
-  const prompt = promptOf(props.block)
+/**
+ * Pending card: same frame, busy status, progress, local inputs, and the
+ * stop-waiting action with its billing honesty note (pending only — a settled
+ * card never offers it). A new request is only ever issued by an explicit
+ * user click, never on render.
+ */
+function GeneratingCard({ block, sessionId, sessions, openFile, t: translate }: CardProps) {
+  const t = translate ?? FALLBACK_TRANSLATE
+  const prompt = promptOf(block)
+  const isEdit = toolNameOf(block) === 'grok_imagine_edit'
+  const canStop = typeof sessionId === 'string' && typeof sessions?.binding === 'function'
   return (
-    <section aria-label="正在生成图片…" style={shellStyle}>
-      {grokTitle(toolNameOf(props.block) === 'grok_imagine_edit' ? '正在编辑图片…' : '正在生成图片…')}
-      {prompt ? <div style={{ ...detailStyle, whiteSpace: 'pre-wrap', width: '100%' }}>{prompt}</div> : <div style={detailStyle}>正在接收调用参数…</div>}
-      <SourceImages {...props} />
-      <progress style={{ width: '100%', height: 4 }} />
-      {typeof sessionId === 'string' && typeof sessions?.binding === 'function' ? (
-        <ActionButton label="取消" onClick={async () => {
-          const accepted = await sessions.binding(sessionId)?.session?.cancel?.()
-          if (accepted?.ok !== true) throw new Error('cancel failed')
-        }} />
-      ) : null}
-    </section>
+    <MediaCardFrame
+      testId="grok-imagine-pending"
+      title={t(isEdit ? 'imageUiEditing' : 'imageUiGenerating')}
+      status={t('working')}
+      statusTone="busy"
+      summary={sourceBadge(SOURCE_LABEL, SOURCE_TONES.grok)}
+      preview={(
+        <div style={{ display: 'grid', gap: 10, width: '100%', maxWidth: GALLERY_MAX_WIDTH }}>
+          {prompt !== ''
+            ? <div style={{ ...mediaCardStyles.prompt, color: 'var(--dsw-alias-label-secondary)' }}>{prompt}</div>
+            : <div style={mediaCardStyles.muted}>{t('imageUiReceivingArgs')}</div>}
+          <progress style={{ width: '100%', height: 4 }} />
+          <SourceImages block={block} sessionId={sessionId} sessions={sessions} openFile={openFile} t={t} />
+        </div>
+      )}
+      notice={canStop ? t('imageUiStopNotice') : undefined}
+      actions={canStop
+        ? (
+            <ActionButton
+              t={t}
+              label={t('imageUiStopWaiting')}
+              onClick={async () => {
+                const accepted = await sessions!.binding(sessionId!)?.session?.cancel?.()
+                if (accepted?.ok !== true) throw new Error('cancel failed')
+              }}
+            />
+          )
+        : undefined}
+      detailsLabel={t('imageUiDetails')}
+    />
+  )
+}
+
+/** Errored call: unified frame, error status, prompt and host text stay visible. */
+function ImagineFailureCard({ block, sessionId, sessions, openFile, t: translate }: CardProps) {
+  const t = translate ?? FALLBACK_TRANSLATE
+  const prompt = promptOf(block)
+  const text = textOf(block)
+  const images = imageAttachments(block)
+  const inputs = inputSources(block)
+  const isEdit = toolNameOf(block) === 'grok_imagine_edit'
+  const hasDetails = inputs.length > 0 || images.length > 0
+  return (
+    <MediaCardFrame
+      testId="grok-imagine-failure"
+      title={t(isEdit ? 'imageUiEditFailed' : 'imageUiGenerateFailed')}
+      status={t('actionFailed')}
+      statusTone="error"
+      summary={sourceBadge(SOURCE_LABEL, SOURCE_TONES.grok)}
+      preview={prompt !== '' || text !== ''
+        ? (
+            <div style={{ display: 'grid', gap: 8, width: '100%', maxWidth: GALLERY_MAX_WIDTH }}>
+              {prompt !== '' ? <div style={{ ...mediaCardStyles.prompt, color: 'var(--dsw-alias-label-secondary)' }}>{prompt}</div> : null}
+              {text !== '' ? <pre style={blockStyle}>{text}</pre> : null}
+            </div>
+          )
+        : undefined}
+      details={hasDetails
+        ? (
+            <>
+              <SourceImages block={block} sessionId={sessionId} sessions={sessions} openFile={openFile} t={t} />
+              <ImageInfoSection images={images} t={t} />
+            </>
+          )
+        : undefined}
+      detailsLabel={t('imageUiDetails')}
+    />
   )
 }
 
@@ -724,15 +868,7 @@ function GrokImagineToolView(rawProps: CardProps) {
     return <GeneratingCard {...props} />
   }
   if ((props.block as ToolCallBlock).isError === true) {
-    const failureTitle = toolNameOf(props.block) === 'grok_imagine_edit' ? '图片编辑失败' : '图片生成失败'
-    return (
-      <section aria-label={failureTitle} style={shellStyle}>
-        {grokTitle(failureTitle)}
-        <div style={{ ...detailStyle, whiteSpace: 'pre-wrap' }}>{promptOf(props.block)}</div>
-        <div style={{ ...detailStyle, whiteSpace: 'pre-wrap' }}>{textOf(props.block)}</div>
-        <SourceImages {...props} />
-      </section>
-    )
+    return <ImagineFailureCard {...props} />
   }
   return <ImagineResultCard {...props} />
 }
@@ -744,10 +880,12 @@ function GrokImagineToolView(rawProps: CardProps) {
 function walkTurnImageResults(rows: unknown, closingSeq: number, names: Set<string>): ToolCallBlock[] {
   if (!Array.isArray(rows)) return []
   const images: ToolCallBlock[] = []
+  // Shared across every row: the same call may surface through more than one
+  // node (legacy store and ChatNodeStore), and the tail must render it once.
+  const visited = new Set<string>()
   for (const row of rows) {
     if (!isObject(row)) continue
     const pending: unknown[] = row.root === undefined ? [] : [row.root]
-    const visited = new Set<string>()
     while (pending.length > 0) {
       const block = pending.pop()
       if (block === undefined) continue
@@ -786,11 +924,14 @@ interface TurnTailProps {
   sessionId?: string
   sessions?: SessionsService
   openFile?: (path: string) => void
+  /** Locale translator injected with the slot; English fallback when absent. */
+  t?: ImagineTranslate
   useChat?: UseChat
 }
 
 function GrokImagineTurnTail(rawProps: TurnTailProps) {
   const props = rawProps.owner ? { ...rawProps, ...rawProps.owner } : rawProps
+  const t = props.t ?? FALLBACK_TRANSLATE
   const empty = useMemo<ExternalStore<ToolCallBlock[]>>(() => {
     const rows: ToolCallBlock[] = []
     return { subscribe: () => () => undefined, getSnapshot: () => rows }
@@ -815,9 +956,9 @@ function GrokImagineTurnTail(rawProps: TurnTailProps) {
   return (
     <section data-turn-image-results="grok-imagine" aria-label="grok_imagine" style={{ display: 'grid', gap: 12, minWidth: 0 }}>
       {codexCount > 0 ? (
-        <div style={{ ...detailStyle, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ ...mediaCardStyles.muted, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
           {sourceBadge(SOURCE_LABEL, SOURCE_TONES.grok)}
-          <span>{`紫点 = 本插件渲染的 Grok Imagine 出图；本回合另有 ${String(codexCount)} 张由 Codex（GPT Image）出图，卡片样式不同、不带紫点。`}</span>
+          <span>{`${t('imageUiCodexLegendA')}${String(codexCount)}${t('imageUiCodexLegendB')}`}</span>
         </div>
       ) : null}
       {results.map(block => (
@@ -827,6 +968,7 @@ function GrokImagineTurnTail(rawProps: TurnTailProps) {
           sessionId={props.sessionId}
           sessions={props.sessions}
           openFile={props.openFile}
+          t={t}
         />
       ))}
     </section>
@@ -841,22 +983,30 @@ function GrokImagineTurnTail(rawProps: TurnTailProps) {
  * Register the toolview occupant for both grok image tools and the turn-tail
  * summary. Called from the client entry; requires the `sessions` service via
  * a child fiber so the registrations unload with it.
+ *
+ * The translator is bound from the plugin's existing settings locale namespace
+ * (`settings.xai-oauth`, registered with zh + en by the client entry) so the
+ * cards follow the host language. If the locale service is not available the
+ * views fall back to the English copy — never to hardcoded Chinese.
  */
 export function applyImagineViews(ctx: Context): void {
+  const t: ImagineTranslate = typeof ctx.locale?.bind === 'function'
+    ? ctx.locale.bind('settings.xai-oauth') as ImagineTranslate
+    : FALLBACK_TRANSLATE
   ctx.inject(['sessions'], scope => {
     const sessions = scope.sessions as SessionsService
     for (const key of TOOL_NAMES) {
       scope.slots.inject('tool.call.toolview', () => scope.slots.register({
         name: 'tool.call.toolview',
         key,
-        inject: () => ({ sessions }),
+        inject: () => ({ sessions, t }),
       }, GrokImagineToolView))
     }
     scope.slots.inject('conversation.chat.turnTail', () => scope.slots.register({
       name: 'conversation.chat.turnTail',
       id: 'dsh-grok-kit-imagine',
       order: 21,
-      inject: () => ({ sessions }),
+      inject: () => ({ sessions, t }),
     }, GrokImagineTurnTail))
   })
 }

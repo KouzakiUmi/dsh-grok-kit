@@ -40,6 +40,9 @@ const OPTION_KEYS: ReadonlyArray<keyof StoredPluginOptions> = [
   'nestedSearchTools',
   'statefulResponses',
   'imagineTool',
+  'videoTool',
+  'videoModel',
+  'videoMaxBytes',
   'searchModel',
   'searchMaxResults',
   'webSearchTimeoutMs',
@@ -325,7 +328,8 @@ export function jsonContentTypeAccepted(contentType: string): boolean {
   return contentType.toLowerCase().split(';')[0].trim() === 'application/json'
 }
 
-function errorStatus(error: unknown): number {
+/** Shared JSON admission error classification for plugin-owned Web routes. */
+export function errorStatus(error: unknown): number {
   if (error instanceof PayloadTooLargeError) return 413
   if (error instanceof BadRequestError) return 400
   if (error instanceof SyntaxError) return 400

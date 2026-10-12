@@ -2,12 +2,14 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { createXaiOAuthSearchTokenSource } from '../src/index.ts'
 import type { XaiOAuthSession } from '../src/session.ts'
+import { oauthIdentityOf } from '../src/token-source.ts'
 
 interface OAuthCredential {
   type: 'oauth'
   access: string
   refresh: string
   expires: number
+  accountId?: string
 }
 
 function fakeSession(options: {
@@ -38,6 +40,35 @@ function fakeSession(options: {
   } as unknown as XaiOAuthSession
   return { session, getAuth, refresh, modify, current: () => current }
 }
+
+describe('durable OAuth account identity', () => {
+  it('hashes the stable account id, not the rotating token', () => {
+    const first = oauthIdentityOf({ type: 'oauth', accountId: 'account-a', access: 'old' })
+    expect(first).toMatch(/^[a-f0-9]{64}$/)
+    expect(oauthIdentityOf({ type: 'oauth', accountId: 'account-a', access: 'new' })).toBe(first)
+    expect(oauthIdentityOf({ type: 'oauth', accountId: 'account-b', access: 'old' })).not.toBe(first)
+    expect(first).not.toContain('account-a')
+  })
+
+  it('uses an xAI JWT subject only as a local partition and rejects foreign/opaque tokens', () => {
+    const jwt = (claims: unknown) => `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.signature`
+    const identified = oauthIdentityOf({ type: 'oauth', access: jwt({ iss: 'https://auth.x.ai', sub: 'account-a' }) })
+    expect(identified).toBe(oauthIdentityOf({ type: 'oauth', accountId: 'account-a' }))
+    expect(oauthIdentityOf({ type: 'oauth', access: jwt({ iss: 'https://foreign.example', sub: 'account-a' }) })).toBeUndefined()
+    expect(oauthIdentityOf({ type: 'oauth', access: jwt({ iss: 'https://auth.x.ai' }) })).toBeUndefined()
+    expect(oauthIdentityOf({ type: 'oauth', access: 'opaque' })).toBeUndefined()
+    expect(oauthIdentityOf({ type: 'api_key', accountId: 'account-a' })).toBeUndefined()
+    expect(oauthIdentityOf({ type: 'oauth', accountId: ' ' })).toBeUndefined()
+    expect(oauthIdentityOf({ type: 'oauth', access: 'x'.repeat(32_769) })).toBeUndefined()
+  })
+
+  it('does not refresh or contact the network for an identity lookup', async () => {
+    const fixture = fakeSession({ credential: { type: 'oauth', access: 'opaque', refresh: 'r', expires: 1 } })
+    await expect(createXaiOAuthSearchTokenSource(fixture.session).identity!()).resolves.toBeUndefined()
+    expect(fixture.getAuth).not.toHaveBeenCalled()
+    expect(fixture.refresh).not.toHaveBeenCalled()
+  })
+})
 
 describe('createXaiOAuthSearchTokenSource', () => {
   it('does not let ambient XAI_API_KEY become a fallback when OAuth is absent', async () => {
@@ -74,6 +105,16 @@ describe('createXaiOAuthSearchTokenSource', () => {
     expect(fixture.refresh).toHaveBeenCalledOnce()
     expect(fixture.modify).toHaveBeenCalledOnce()
     expect(fixture.current()?.refresh).toBe('refresh-new')
+  })
+
+  it('retains imported stable account metadata when a refresh response omits it', async () => {
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1, accountId: 'account-a' }
+    const fixture = fakeSession({ credential, refresh: async () => ({ type: 'oauth', access: 'new', refresh: 'r2', expires: Date.now() + 60_000 }) })
+    const source = createXaiOAuthSearchTokenSource(fixture.session)
+    const identity = await source.identity!()
+    await expect(source.refresh!('old')).resolves.toBe('new')
+    expect(fixture.current()?.accountId).toBe('account-a')
+    await expect(source.identity!()).resolves.toBe(identity)
   })
 
   it('reuses a bearer already rotated by another process instead of refreshing twice', async () => {

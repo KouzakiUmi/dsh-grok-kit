@@ -122,6 +122,40 @@ describe('sanitizeStoredOptions', () => {
   })
 })
 
+describe('video options', () => {
+  it('keeps video opt-in and preserves explicit settings precedence', () => {
+    const defaults = presentPluginOptions({}, {})
+    expect(defaults.effective).toMatchObject({ videoTool: false, videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 104_857_600 })
+    expect(defaults.sources.videoTool).toBe('default')
+    const overridden = presentPluginOptions({ videoTool: true, videoMaxBytes: 2_097_152 }, { videoTool: false })
+    expect(overridden.effective.videoTool).toBe(false)
+    expect(overridden.effective.videoMaxBytes).toBe(2_097_152)
+    expect(overridden.sources.videoTool).toBe('stored')
+  })
+
+  it('accepts supported models and bounded integral download limits only', () => {
+    expect(sanitizeStoredOptions({ version: 1, options: { videoTool: true, videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 1_048_576 } }))
+      .toEqual({ videoTool: true, videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 1_048_576 })
+    expect(sanitizeStoredOptions({ version: 1, options: { videoTool: 'yes', videoModel: 'unknown', videoMaxBytes: 536_870_913 } })).toEqual({})
+    expect(sanitizeStoredOptions({ version: 1, options: { videoMaxBytes: 104_857_600 } })).toEqual({ videoMaxBytes: 104_857_600 })
+    expect(sanitizeStoredOptions({ version: 1, options: { videoMaxBytes: 104_857_601 } })).toEqual({})
+    expect(sanitizeStoredOptions({ version: 1, options: { videoMaxBytes: 1_048_575 } })).toEqual({})
+    expect(sanitizeStoredOptions({ version: 1, options: { videoMaxBytes: 1_048_576.5 } })).toEqual({})
+    expect(presentPluginOptions({ videoModel: 'unknown', videoMaxBytes: Number.NaN }, {}).effective)
+      .toMatchObject({ videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 104_857_600 })
+  })
+
+  it('persists and removes video overrides without losing unrelated keys', async () => {
+    await tempHome()
+    const options = { videoTool: true, videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 2_097_152, backendSearch: false }
+    await writeStoredOptions(options)
+    expect(readStoredOptions()).toEqual(options)
+    const cleared = mergeStoredOptionsPatch(readStoredOptions(), { videoTool: null, videoModel: null, videoMaxBytes: null })
+    await writeStoredOptions(cleared)
+    expect(readStoredOptions()).toEqual({ backendSearch: false })
+  })
+})
+
 describe('presentPluginOptions', () => {
   it('shows Cordis backendSearch when there is no stored override (GROK-SETTINGS-001)', () => {
     const view = presentPluginOptions({ backendSearch: true }, {})

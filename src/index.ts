@@ -20,7 +20,7 @@ import type {} from '@deepseek-ai/dsh-llm'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import { createXaiOAuthAdapter } from './adapter.ts'
 import { registerXaiOAuthAuthRoutes } from './auth-routes.ts'
-import { XAI_OAUTH_ROUTE } from './ids.ts'
+import { XAI_OAUTH_ROUTE, XAI_PI_PROVIDER } from './ids.ts'
 import { applyXaiProxy, installXaiFetchHook } from './proxy.ts'
 import {
   createXaiOAuthSearchTokenSource,
@@ -33,6 +33,12 @@ import { XaiOAuthCredentialStore } from './store.ts'
 import { mergePluginOptions, readStoredOptions } from './options.ts'
 import { applyGrokImagineTool } from './imagine.ts'
 import { applyGrokImagineEditTool } from './imagine-edit.ts'
+import { DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_MAX_BYTES, validVideoModel, validVideoMaxBytes } from './video-config.ts'
+import { VideoTaskManager } from './video-core.ts'
+import { applyGrokVideoTools } from './video-tools.ts'
+import { CapabilityTracker } from './capabilities.ts'
+import { registerGrokCapabilityRoutes } from './capability-routes.ts'
+import { registerGrokVideoFileRoute } from './video-file-route.ts'
 import { DEFAULT_MAX_IMAGE_BYTES as DEFAULT_EDIT_MAX_IMAGE_BYTES, MAX_SOURCE_IMAGES as EDIT_MAX_SOURCE_IMAGES } from './imagine-edit-core.ts'
 import {
   applyGrokSearchTools,
@@ -174,6 +180,14 @@ export {
   isUserInputItem,
 } from './response-chain.ts'
 export type { ResponseChainRecord, ResponseChainStore } from './response-chain.ts'
+export { VideoTaskManager } from './video-core.ts'
+export type { VideoTaskResult, VideoTaskState, VideoTaskManagerOptions, VideoSourceContext } from './video-core.ts'
+export { applyGrokVideoTools } from './video-tools.ts'
+export { CapabilityTracker } from './capabilities.ts'
+export type { CapabilitySnapshot, CapabilityFeatureState, CapabilityObservation } from './capabilities.ts'
+export { registerGrokCapabilityRoutes } from './capability-routes.ts'
+export { registerGrokVideoFileRoute, GROK_VIDEO_FILE_PATH } from './video-file-route.ts'
+export { DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_MAX_BYTES } from './video-config.ts'
 export { XaiOAuthSession } from './session.ts'
 export { XaiOAuthCredentialStore, lockPathForAuthFile, resolveXaiOAuthStorePath, xaiOAuthAuthPath } from './store.ts'
 export { breakStaleWriterLock, isPidAlive, parseLockPid } from './lock-rescue.ts'
@@ -240,6 +254,12 @@ export interface Config {
   editMaxSourceImages?: number
   /** Per-source byte cap for grok_imagine_edit. Defaults to 20 MiB. */
   editMaxImageBytes?: number
+  /** Register video task tools. Opt-in only; generation consumes subscription usage. */
+  videoTool?: boolean
+  /** Supported single-image video model. */
+  videoModel?: string
+  /** Hard streamed download ceiling, defaults to 100 MiB. */
+  videoMaxBytes?: number
 }
 
 export const Config: z<Config> = z.object({
@@ -256,6 +276,9 @@ export const Config: z<Config> = z.object({
   editModel: z.string().default(''),
   editMaxSourceImages: z.number().default(EDIT_MAX_SOURCE_IMAGES),
   editMaxImageBytes: z.number().default(DEFAULT_EDIT_MAX_IMAGE_BYTES),
+  videoTool: z.boolean().default(false),
+  videoModel: z.string().default(DEFAULT_VIDEO_MODEL),
+  videoMaxBytes: z.number().default(DEFAULT_VIDEO_MAX_BYTES),
 })
 
 /** Resolve nested-tool registration. `nestedSearchTools` omit stays undefined until here. */
@@ -292,6 +315,51 @@ export function apply(ctx: Context, config: Config): void {
   // Stop the session's background catalog retry timer on plugin unload.
   ctx.effect(() => () => session.dispose(), 'dsh-grok-kit: session retry lifecycle')
   const tokens = createXaiOAuthSearchTokenSource(session)
+  const capabilities = new CapabilityTracker()
+  let capabilityIdentity: string | undefined
+  const currentIdentity = async (): Promise<string | undefined> => {
+    const identity = await tokens.identity?.()
+    // Unknown identity is deliberately fail-closed: never retain a previous account's observations.
+    if (identity !== capabilityIdentity || identity === undefined) capabilities.reset()
+    capabilityIdentity = identity
+    return identity
+  }
+  const authenticated = async (): Promise<boolean> => {
+    await currentIdentity()
+    const credential = await session.store.read(XAI_PI_PROVIDER)
+    return credential?.type === 'oauth'
+  }
+  const videoEnabled = effectiveConfig.videoTool === true
+  const video = videoEnabled ? new VideoTaskManager({
+    tokens,
+    identity: currentIdentity,
+    resolveAttachments: () => ctx.get('attachments'),
+    model: validVideoModel(effectiveConfig.videoModel) ? effectiveConfig.videoModel : DEFAULT_VIDEO_MODEL,
+    maxVideoBytes: validVideoMaxBytes(effectiveConfig.videoMaxBytes) ? effectiveConfig.videoMaxBytes : DEFAULT_VIDEO_MAX_BYTES,
+    onCapability: event => capabilities.observe('video', event),
+  }) : undefined
+  if (video !== undefined) {
+    ctx.effect(() => () => video.dispose(), 'dsh-grok-kit: video task lifecycle')
+    ctx.inject(['tools'], toolCtx => applyGrokVideoTools(toolCtx, { manager: video }))
+  }
+  ctx.inject(['webServer'], webCtx => registerGrokCapabilityRoutes(webCtx, {
+    tracker: capabilities,
+    videoEnabled,
+    authenticated,
+    identity: currentIdentity,
+    tasks: () => video?.list() ?? Promise.resolve([]),
+    resume: (taskId, signal) => {
+      if (video === undefined) return Promise.reject(new Error('video generation is disabled'))
+      return video.resume(taskId, signal)
+    },
+  }))
+  ctx.inject(['webServer'], webCtx => registerGrokVideoFileRoute(webCtx, {
+    enabled: videoEnabled,
+    identity: currentIdentity,
+    tasks: () => video?.list() ?? Promise.resolve([]),
+    resolveAttachments: () => ctx.get('attachments'),
+    maxBytes: validVideoMaxBytes(effectiveConfig.videoMaxBytes) ? effectiveConfig.videoMaxBytes : DEFAULT_VIDEO_MAX_BYTES,
+  }))
   const { backendSearch, nestedSearchTools } = resolveNestedSearchTools(effectiveConfig)
   const statefulResponses = resolveStatefulResponses(effectiveConfig)
   session.setWrapOptions({

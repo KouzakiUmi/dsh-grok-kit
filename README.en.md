@@ -134,6 +134,10 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 - Data URI inputs are validated for decoded byte size, base64 encoding, magic-byte signatures, and MIME consistency; remote URLs are fetched upstream, and the card displays links to avoid automatic browser requests to arbitrary addresses.
 - Session card interactions: cards display the prompt and all input sources; completed runs show the result, a download entry, and a regenerate/re-edit action. Re-editing retains all input images and original render parameters.
 
+### Development version: optional video tasks and capabilities
+
+Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings show local capability observations and tasks; quota is unverified, not estimated. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. This does not imply the published npm 0.2.2 package includes the feature. See the [video guide](VIDEO.md) for configuration and limitations.
+
 ## Configuration
 
 | Key | Default | Meaning |

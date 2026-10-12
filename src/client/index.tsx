@@ -18,6 +18,7 @@ import { en, zh } from './locales.ts'
 import type { XaiOAuthSettingsKey } from './locales.ts'
 import { decorateSettingsNavIcon } from './nav-icon.ts'
 import { applyImagineViews } from './imagine-view.tsx'
+import { applyVideoViews } from './video-view.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -84,4 +85,5 @@ export function apply(ctx: Context): void {
   // Session image views for grok_imagine / grok_imagine_edit, merged from
   // the former dsh-grok-imagine-ui companion plugin.
   applyImagineViews(ctx)
+  applyVideoViews(ctx)
 }

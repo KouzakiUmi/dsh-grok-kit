@@ -53,6 +53,22 @@ afterEach(async () => {
   if (home !== undefined) await rm(home, { recursive: true, force: true })
 })
 
+describe('session OAuth identity preservation', () => {
+  it('retains accountId through provider-native refresh without changing new-login semantics', async () => {
+    const session = new XaiOAuthSession(mockStore({ read: async () => undefined }), undefined, { catalogRetryDelaysMs: [] })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ access_token: 'new', refresh_token: 'r2', expires_in: 3600 }), { status: 200 })))
+    const oauth = session.models.getProvider('xai')?.auth.oauth
+    expect(oauth).toBeDefined()
+    const credential = { ...oauthCredential(), accountId: 'account-a' }
+    const rotated = await oauth!.refresh(credential, new AbortController().signal)
+    expect(rotated.accountId).toBe('account-a')
+    expect(rotated.access).toBe('new')
+    const withoutAccount = await oauth!.refresh(oauthCredential(), new AbortController().signal)
+    expect(withoutAccount.accountId).toBeUndefined()
+    session.dispose()
+  })
+})
+
 describe('XaiOAuthSession.refreshLiveCatalog', () => {
   it('does not reject when credential resolution hits a lock timeout', async () => {
     const store = mockStore({

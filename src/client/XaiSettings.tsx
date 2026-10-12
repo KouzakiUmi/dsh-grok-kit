@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { XaiOAuthSettingsKey } from './locales.ts'
+import { CapabilitiesView } from './capabilities-view.tsx'
 
 const STATUS_PATH = '/plugins/dsh-grok-kit/auth/status'
 const LOGIN_PATH = '/plugins/dsh-grok-kit/auth/login'
@@ -26,6 +27,9 @@ type OptionKey =
   | 'nestedSearchTools'
   | 'statefulResponses'
   | 'imagineTool'
+  | 'videoTool'
+  | 'videoModel'
+  | 'videoMaxBytes'
   | 'searchModel'
   | 'searchMaxResults'
   | 'webSearchTimeoutMs'
@@ -38,6 +42,9 @@ const ALL_OPTION_KEYS: readonly OptionKey[] = [
   'nestedSearchTools',
   'statefulResponses',
   'imagineTool',
+  'videoTool',
+  'videoModel',
+  'videoMaxBytes',
   'searchModel',
   'searchMaxResults',
   'webSearchTimeoutMs',
@@ -187,6 +194,12 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const [optionsDirty, setOptionsDirty] = useState<ReadonlySet<OptionKey>>(new Set())
   const [optionsBusy, setOptionsBusy] = useState(false)
   const [optionsFeedback, setOptionsFeedback] = useState<'idle' | 'saved' | 'error'>('idle')
+  // Bumped by every account-changing action (sign-in, Grok import, sign-out).
+  // Together with the account status it keys <CapabilitiesView/> so the panel
+  // remounts: fresh fetches, aborted in-flight work, revoked blob URLs, and no
+  // task rows or diagnostics carried over from the previous account — even an
+  // A→B import that stays "signed-in" gets a new key.
+  const [accountGeneration, setAccountGeneration] = useState(0)
 
   type OptionsPayload = {
     options?: Partial<Record<OptionKey, OptionValue>>
@@ -287,6 +300,8 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     if (status.status !== 'loading' && status.sharedGrokAuth === true) {
       if (!window.confirm(t('confirmLoginShared'))) return
     }
+    // Only once the user actually committed to a sign-in.
+    setAccountGeneration(generation => generation + 1)
     const popup = window.open('about:blank', '_blank')
     if (popup !== null) popup.opener = null
     setPopupBlocked(popup === null)
@@ -314,9 +329,15 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const importGrok = async (): Promise<void> => {
+    // Hide old account data during import and remount again after it commits.
+    // A pre-request bump alone could mount a panel that fetches the old account.
+    setAccountGeneration(generation => generation + 1)
+    setStatus({ status: 'loading' })
     setBusy(true)
     try {
-      setStatus(await jsonRequest<AccountStatus>(IMPORT_PATH, 'POST'))
+      const imported = await jsonRequest<AccountStatus>(IMPORT_PATH, 'POST')
+      setAccountGeneration(generation => generation + 1)
+      setStatus(imported)
     } catch (error: unknown) {
       setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
     } finally {
@@ -339,6 +360,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     if (status.status === 'signed-in' && status.sharedGrokAuth === true) {
       if (!window.confirm(t('confirmLogoutShared'))) return
     }
+    setAccountGeneration(generation => generation + 1)
     setBusy(true)
     try {
       // The route returns the full signed-out status (incl. grokImportAvailable),
@@ -560,6 +582,23 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
         <p style={optionHintStyle}>{t('imagineToolHint')}</p>
 
         <label style={optionRowStyle}>
+          <input
+            type="checkbox"
+            checked={optBool(options.videoTool, false)}
+            disabled={optionsBusy}
+            onChange={(event) => markOption('videoTool', event.target.checked)}
+          />
+          <span>{t('videoTool')}</span>
+        </label>
+        <p style={optionHintStyle}>{t('videoToolHint')}</p>
+        {/* Read-only presentation of the remaining video parameters: the first
+            version edits videoTool only, so these stay informational. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+          <span style={optionRowStyle}>{`${t('videoModelLabel')}: ${String(options.videoModel ?? '—')}`}</span>
+          <span style={optionRowStyle}>{`${t('videoMaxBytesLabel')}: ${String(options.videoMaxBytes ?? '—')}`}</span>
+        </div>
+
+        <label style={optionRowStyle}>
           <span>{t('nestedSearchTools')}</span>
           <select
             value={
@@ -644,6 +683,15 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
           {optionsFeedback === 'error' ? <p style={{ ...errorStyle, margin: 0 }}>{t('optionsError')}</p> : null}
         </div>
       </div>
+
+      {/* Capability status + local video task list (frozen plugin routes).
+          The key remounts the panel on every account change, so a previous
+          account's tasks/diagnostics and blob URLs never survive a switch. */}
+      <CapabilitiesView
+        key={`${status.status}:${String(accountGeneration)}`}
+        t={t}
+        signedIn={status.status === 'signed-in'}
+      />
     </section>
   )
 }

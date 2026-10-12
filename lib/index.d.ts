@@ -3,7 +3,7 @@ import { HarnessError } from "@deepseek-ai/dsh-llm";
 import { PiAiAdapter } from "@deepseek-ai/dsh-llm-pi-ai";
 import { Api, AssistantMessage, AssistantMessageEvent, AuthInteraction, Credential, CredentialInfo, CredentialStore, Model, MutableModels, OAuthCredential, Provider } from "@earendil-works/pi-ai";
 import { Context } from "@deepseek-ai/cordis";
-import { AttachmentStore, ImageMediaType } from "@deepseek-ai/dsh-attachment";
+import { AttachmentStore, FileAttachmentRef, ImageMediaType } from "@deepseek-ai/dsh-attachment";
 //#region src/catalog.d.ts
 declare const XAI_MODELS_URL = "https://api.x.ai/v1/models";
 type CatalogSource = 'live' | 'cache' | 'fallback';
@@ -46,6 +46,8 @@ declare function fetchLiveModelIds(accessToken: string, signal?: AbortSignal): P
 interface XaiOAuthTokenSource {
   /** Cheap local availability check. Must not refresh or make network calls. */
   available(): boolean;
+  /** Local, non-secret account partition. Missing identity must fail closed for durable tasks. */
+  identity?(): Promise<string | undefined>;
   /** Resolve a current OAuth bearer. Implementations may refresh an expired token under their existing lock. */
   resolve(signal?: AbortSignal): Promise<string | undefined>;
   /** Force-refresh after a server-side 401. Must stay OAuth-only and serialize refresh-token rotation. */
@@ -298,6 +300,9 @@ interface StoredPluginOptions {
   nestedSearchTools?: boolean;
   statefulResponses?: boolean;
   imagineTool?: boolean;
+  videoTool?: boolean;
+  videoModel?: string;
+  videoMaxBytes?: number;
   searchModel?: string;
   searchMaxResults?: number;
   webSearchTimeoutMs?: number;
@@ -309,6 +314,9 @@ interface EffectivePluginOptions {
   nestedSearchTools: boolean;
   statefulResponses: boolean;
   imagineTool: boolean;
+  videoTool: boolean;
+  videoModel: string;
+  videoMaxBytes: number;
   searchModel: string;
   searchMaxResults: number;
   webSearchTimeoutMs: number;
@@ -696,6 +704,198 @@ declare class XaiOAuthSearchProvider {
   search(request: SearchRequest, signal?: AbortSignal): Promise<SearchResult>;
 }
 //#endregion
+//#region src/video-core.d.ts
+type VideoTaskState = 'pending' | 'downloading' | 'done' | 'failed' | 'interrupted' | 'submission-unknown';
+/** Safe-to-JSON task summary: no tokens, no remote URLs, no request ids. */
+interface VideoTaskResult {
+  taskId: string;
+  state: VideoTaskState;
+  model: string;
+  createdAt: string;
+  updatedAt: string;
+  prompt: string;
+  duration?: number;
+  resolution?: string;
+  attachment?: FileAttachmentRef;
+  error?: string;
+}
+interface VideoCapabilityEvent {
+  state: 'available' | 'restricted' | 'temporary-error';
+  checkedAt: string;
+  model: string;
+  httpStatus?: number;
+  message?: string;
+}
+interface VideoTaskManagerOptions {
+  tokens: XaiOAuthTokenSource;
+  resolveAttachments: () => AttachmentStore | undefined;
+  /**
+   * Stable OAuth account identity used to partition persisted tasks. Production
+   * must supply it; without one every operation fails closed (list() returns []).
+   */
+  identity?: () => Promise<string | undefined>;
+  fetch?: typeof fetch;
+  /** Explicit store file; identities are still filtered per record. Default: DSH_HOME/dsh-grok-kit/. */
+  storePath?: string;
+  model?: string;
+  maxVideoBytes?: number;
+  onCapability?: (event: VideoCapabilityEvent) => void;
+}
+/** Optional caller-provided source-image context (the tool layer supplies the sandboxed host fs). */
+interface VideoSourceContext {
+  cwd?: string;
+  readFile?: (path: string, signal?: AbortSignal) => Promise<Uint8Array>;
+}
+declare class VideoTaskManager {
+  private readonly options;
+  private readonly fetchImpl;
+  private readonly model;
+  private readonly maxVideoBytes;
+  private readonly disposeController;
+  private readonly polls;
+  private disposed;
+  constructor(options: VideoTaskManagerOptions);
+  /** Submit one image-to-video task. POSTs exactly once; never re-POSTs an unknown outcome. */
+  generate(input: {
+    prompt: string;
+    image: string;
+    duration?: number;
+    resolution?: string;
+  }, signal?: AbortSignal, source?: VideoSourceContext): Promise<VideoTaskResult>;
+  /** One status poll (concurrent calls for one task merge into a single poll/download). */
+  status(taskId: string, signal?: AbortSignal): Promise<VideoTaskResult>;
+  /** Resume is the same single-poll continuation as status (frozen contract). */
+  resume(taskId: string, signal?: AbortSignal): Promise<VideoTaskResult>;
+  /** Local-only listing: reads the store, never the network. */
+  list(): Promise<VideoTaskResult[]>;
+  /**
+   * Cancel local operations only. The remote generation is NOT cancelled and
+   * may still complete and bill the account; persisted tasks stay for restart.
+   */
+  dispose(): Promise<void>;
+  private assertNotDisposed;
+  private optionalIdentity;
+  /** Fail closed: without a stable account identity no task data may be touched. */
+  private requireIdentity;
+  /** Re-check the identity; a mid-operation account switch aborts the operation. */
+  private assertIdentity;
+  private emitCapability;
+  private storeFileFor;
+  /** Bounded, lock-free read of one identity's records (others' records are never returned). */
+  private readRecordsFor;
+  /** Read-modify-write under the cross-process lock, with identity partitioning and retention. */
+  private persistRecord;
+  private readAllRecords;
+  private runStatus;
+  /** Download the finished MP4 (token-free, allowlisted host, bounded, signature-checked) and store it. */
+  private downloadCompleted;
+  /** Best-effort interrupted mark used on cancellation paths (an identity switch just drops it). */
+  private markInterruptedQuietly;
+}
+//#endregion
+//#region src/video-tools.d.ts
+interface GrokVideoToolOptions {
+  manager: VideoTaskManager;
+}
+/**
+ * Register the three video tools. The manager is supplied by the host entry
+ * (feature-flagged there); this layer only adapts tool IO.
+ */
+declare function applyGrokVideoTools(ctx: Context, options: GrokVideoToolOptions): void;
+//#endregion
+//#region src/capabilities.d.ts
+/** Features reported by the capabilities snapshot. */
+type CapabilityFeatureId = 'video' | 'voice' | 'code' | 'image-generation';
+/** What the plugin observed for one feature. */
+interface CapabilityObservation {
+  state: 'available' | 'restricted' | 'temporary-error';
+  checkedAt: string;
+  model: string;
+  httpStatus?: number;
+  message?: string;
+}
+/** One feature row in the snapshot. */
+interface CapabilityFeatureState {
+  id: CapabilityFeatureId;
+  state: 'unverified' | 'available' | 'restricted' | 'temporary-error';
+  checkedAt?: string;
+  model?: string;
+  httpStatus?: number;
+  message?: string;
+}
+/** Quota block: first version has no located source, so it is always unavailable. */
+interface CapabilityQuotaState {
+  state: 'unavailable';
+  message: string;
+}
+interface CapabilitySnapshot {
+  features: CapabilityFeatureState[];
+  quota: CapabilityQuotaState;
+  videoEnabled: boolean;
+}
+/** Injectable clock: returns the ISO timestamp stored as `checkedAt`. */
+type CapabilityClock = () => string;
+/**
+ * Process-local owner of the observed capability states. Records are memory
+ * only (never persisted, never sent anywhere), and `reset()` drops them so
+ * history does not survive a sign-out or a plugin reload.
+ */
+declare class CapabilityTracker {
+  private readonly observations;
+  private readonly clock;
+  constructor(clock?: CapabilityClock);
+  /** Record one observation. Only the video path calls this in the first version. */
+  observe(feature: CapabilityFeatureId, event: {
+    state: 'available' | 'restricted' | 'temporary-error';
+    checkedAt: string;
+    model: string;
+    httpStatus?: number;
+    message?: string;
+  }): void;
+  /** Drop every recorded observation (sign-out, dispose, tests). */
+  reset(): void;
+  /**
+   * Build the Web-facing snapshot. `videoEnabled` gates the video row: with
+   * the feature flag off, stale observations are not reported.
+   */
+  snapshot(videoEnabled: boolean): CapabilitySnapshot;
+}
+//#endregion
+//#region src/capability-routes.d.ts
+interface GrokCapabilityRouteOptions {
+  tracker: CapabilityTracker;
+  videoEnabled: boolean;
+  authenticated: () => Promise<boolean>;
+  /** Optional for legacy callers; production supplies the stable OAuth partition. */
+  identity?: () => Promise<string | undefined>;
+  /** Local-only, already account-partitioned task summaries; never performs upstream probes. */
+  tasks: () => Promise<unknown[]>;
+  /** Queries/downloads one task already owned by the current account, never generates. */
+  resume: (taskId: string, signal?: AbortSignal) => Promise<unknown>;
+}
+declare function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabilityRouteOptions): void;
+//#endregion
+//#region src/video-file-route.d.ts
+declare const GROK_VIDEO_FILE_PATH = "/plugins/dsh-grok-kit/video/file";
+interface DownloadTask {
+  taskId: string;
+  state: string;
+  attachment?: FileAttachmentRef;
+}
+interface VideoFileRouteOptions {
+  enabled: boolean;
+  identity: () => Promise<string | undefined>;
+  tasks: () => Promise<readonly DownloadTask[]>;
+  resolveAttachments: () => AttachmentStore | undefined;
+  maxBytes?: number;
+}
+declare function registerGrokVideoFileRoute(ctx: Context, options: VideoFileRouteOptions): void;
+//#endregion
+//#region src/video-config.d.ts
+/** Opt-in video defaults shared by host configuration and settings presentation. */
+declare const DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5";
+declare const DEFAULT_VIDEO_MAX_BYTES: number;
+//#endregion
 //#region src/lock-rescue.d.ts
 /**
  * Writer-lock helpers. Supplementary plugin-level stale-lock recovery is
@@ -802,6 +1002,12 @@ interface Config {
   editMaxSourceImages?: number;
   /** Per-source byte cap for grok_imagine_edit. Defaults to 20 MiB. */
   editMaxImageBytes?: number;
+  /** Register video task tools. Opt-in only; generation consumes subscription usage. */
+  videoTool?: boolean;
+  /** Supported single-image video model. */
+  videoModel?: string;
+  /** Hard streamed download ceiling, defaults to 100 MiB. */
+  videoMaxBytes?: number;
 }
 declare const Config: z<Config>;
 /** Resolve nested-tool registration. `nestedSearchTools` omit stays undefined until here. */
@@ -814,4 +1020,4 @@ declare function resolveStatefulResponses(config: Config): boolean;
 /** Register the xai-oauth LLM route, OAuth routes, Imagine, and search wiring. */
 declare function apply(ctx: Context, config: Config): void;
 //#endregion
-export { type CatalogSource, Config, DEFAULT_EDIT_MODEL, DEFAULT_IMAGINE_MODEL, DEFAULT_SEARCH_MAX_RESULTS, DEFAULT_WEB_SEARCH_TIMEOUT_MS, DEFAULT_XAI_OAUTH_MODEL, DEFAULT_XAI_SEARCH_MODEL, DEFAULT_X_SEARCH_TIMEOUT_MS, MAX_N as EDIT_MAX_N, type EffectivePluginOptions, GROK_46_MODEL, GROK_XAI_CLIENT_ID, GROK_XAI_SLOT_KEY, type GrokImportProbe, type LoginChallenge, type OptionValueSource, PREFERRED_XAI_OAUTH_MODEL, type PresentedPluginOptions, type ResponseChainRecord, type ResponseChainStore, type SearchRequest, type SearchResult, type SearchSource, type StoredPluginOptions, XAI_BUILTIN_SEARCH_FUNCTION_NAMES, XAI_IMAGES_EDIT_URL, XAI_IMAGES_URL, XAI_MODELS_URL, XAI_OAUTH_AUTH_FILENAME, XAI_OAUTH_AUTH_IMPORT_PATH, XAI_OAUTH_AUTH_LOGIN_PATH, XAI_OAUTH_AUTH_LOGOUT_PATH, XAI_OAUTH_AUTH_MODELS_PATH, XAI_OAUTH_AUTH_OPTIONS_PATH, XAI_OAUTH_AUTH_PROXY_PATH, XAI_OAUTH_AUTH_STATUS_PATH, XAI_OAUTH_ROUTE, XAI_OAUTH_STREAM_IDLE_TIMEOUT_MS, XAI_PI_PROVIDER, XAI_RESPONSES_URL, XAI_SERVER_X_SEARCH_REJECT_NAMES, type XaiOAuthAuthStatus, XaiOAuthCredentialStore, XaiOAuthSearchError, XaiOAuthSearchProvider, XaiOAuthSession, type XaiOAuthTokenSource, type XaiOAuthWebAuthStatus, type XaiResponsesWrapOptions, type XaiSearchTool, alignExtension, apply, applyGrokImagineEditTool, applyGrokImagineTool, applyGrokSearchTools, applyStatefulContinuation, applyXaiProxy, applyXaiResponsesPayload, applyXaiServerSearchRejectTools, breakStaleWriterLock, buildEditRequestBody, buildSearchToolPayload, capSources, catalogModels, clientInputDelta, createFileResponseChainStore, createMemoryResponseChainStore, createXaiOAuthAdapter, createXaiOAuthSearchTokenSource, decodeFirstImage, extensionFor as editExtensionFor, extractClientInputItems, extractModelIds, fetchLiveModelIds, filterSelectedChatModelIds, fingerprintInputItem, formatGrokSearchOutput, grokAuthPath, imagineModelId, importGrokAuth, importXaiOAuthFromGrok, importXaiOAuthSession, includeForSearchTool, inject, installXaiFetchHook, isClientOriginatedInputItem, isComposerChatModel, isGrokAuthDocument, isGrokAuthPath, isPidAlive, isPreviousResponseError, isToolOutputInputItem, isUserInputItem, lockPathForAuthFile, loginXaiOAuth, loginXaiOAuthSession, logoutXaiOAuth, mapXaiSearchResponse, materializeLiveModel, mergeLiveCatalog, mergePluginOptions, name, normalizeDataImageUri, optionsPath, parseAttachmentSpec, parseGrokAuthDocument, parseGrokWebSearchArgs, parseLockPid, parseXSearchArgs, preferredXaiOAuthModel, preferredXaiOAuthModelFrom, presentPluginOptions, probeGrokAuth, readStoredOptions, readStoredProxyUrl, registerXaiOAuthAuthRoutes, removeGrokAuthSlot, resolveImageSources, resolveNestedSearchTools, resolveStatefulResponses, resolveXaiOAuthStorePath, resolveXaiProxyUrl, runImageEdit, safeDetail, safeMessage, sanitizeRejectToolEvent, sanitizeStoredOptions, setXaiProxyUrl, sniffEditableImageMediaType, sniffImageMediaType, stripRejectToolCalls, wrapXaiResponsesProvider, writeGrokAuthDocument, writeStoredOptions, writeStoredProxyUrl, xaiOAuthAuthPath, xaiOAuthAuthStatus, xaiProxyPath };
+export { type CapabilityFeatureState, type CapabilityObservation, type CapabilitySnapshot, CapabilityTracker, type CatalogSource, Config, DEFAULT_EDIT_MODEL, DEFAULT_IMAGINE_MODEL, DEFAULT_SEARCH_MAX_RESULTS, DEFAULT_VIDEO_MAX_BYTES, DEFAULT_VIDEO_MODEL, DEFAULT_WEB_SEARCH_TIMEOUT_MS, DEFAULT_XAI_OAUTH_MODEL, DEFAULT_XAI_SEARCH_MODEL, DEFAULT_X_SEARCH_TIMEOUT_MS, MAX_N as EDIT_MAX_N, type EffectivePluginOptions, GROK_46_MODEL, GROK_VIDEO_FILE_PATH, GROK_XAI_CLIENT_ID, GROK_XAI_SLOT_KEY, type GrokImportProbe, type LoginChallenge, type OptionValueSource, PREFERRED_XAI_OAUTH_MODEL, type PresentedPluginOptions, type ResponseChainRecord, type ResponseChainStore, type SearchRequest, type SearchResult, type SearchSource, type StoredPluginOptions, type VideoSourceContext, VideoTaskManager, type VideoTaskManagerOptions, type VideoTaskResult, type VideoTaskState, XAI_BUILTIN_SEARCH_FUNCTION_NAMES, XAI_IMAGES_EDIT_URL, XAI_IMAGES_URL, XAI_MODELS_URL, XAI_OAUTH_AUTH_FILENAME, XAI_OAUTH_AUTH_IMPORT_PATH, XAI_OAUTH_AUTH_LOGIN_PATH, XAI_OAUTH_AUTH_LOGOUT_PATH, XAI_OAUTH_AUTH_MODELS_PATH, XAI_OAUTH_AUTH_OPTIONS_PATH, XAI_OAUTH_AUTH_PROXY_PATH, XAI_OAUTH_AUTH_STATUS_PATH, XAI_OAUTH_ROUTE, XAI_OAUTH_STREAM_IDLE_TIMEOUT_MS, XAI_PI_PROVIDER, XAI_RESPONSES_URL, XAI_SERVER_X_SEARCH_REJECT_NAMES, type XaiOAuthAuthStatus, XaiOAuthCredentialStore, XaiOAuthSearchError, XaiOAuthSearchProvider, XaiOAuthSession, type XaiOAuthTokenSource, type XaiOAuthWebAuthStatus, type XaiResponsesWrapOptions, type XaiSearchTool, alignExtension, apply, applyGrokImagineEditTool, applyGrokImagineTool, applyGrokSearchTools, applyGrokVideoTools, applyStatefulContinuation, applyXaiProxy, applyXaiResponsesPayload, applyXaiServerSearchRejectTools, breakStaleWriterLock, buildEditRequestBody, buildSearchToolPayload, capSources, catalogModels, clientInputDelta, createFileResponseChainStore, createMemoryResponseChainStore, createXaiOAuthAdapter, createXaiOAuthSearchTokenSource, decodeFirstImage, extensionFor as editExtensionFor, extractClientInputItems, extractModelIds, fetchLiveModelIds, filterSelectedChatModelIds, fingerprintInputItem, formatGrokSearchOutput, grokAuthPath, imagineModelId, importGrokAuth, importXaiOAuthFromGrok, importXaiOAuthSession, includeForSearchTool, inject, installXaiFetchHook, isClientOriginatedInputItem, isComposerChatModel, isGrokAuthDocument, isGrokAuthPath, isPidAlive, isPreviousResponseError, isToolOutputInputItem, isUserInputItem, lockPathForAuthFile, loginXaiOAuth, loginXaiOAuthSession, logoutXaiOAuth, mapXaiSearchResponse, materializeLiveModel, mergeLiveCatalog, mergePluginOptions, name, normalizeDataImageUri, optionsPath, parseAttachmentSpec, parseGrokAuthDocument, parseGrokWebSearchArgs, parseLockPid, parseXSearchArgs, preferredXaiOAuthModel, preferredXaiOAuthModelFrom, presentPluginOptions, probeGrokAuth, readStoredOptions, readStoredProxyUrl, registerGrokCapabilityRoutes, registerGrokVideoFileRoute, registerXaiOAuthAuthRoutes, removeGrokAuthSlot, resolveImageSources, resolveNestedSearchTools, resolveStatefulResponses, resolveXaiOAuthStorePath, resolveXaiProxyUrl, runImageEdit, safeDetail, safeMessage, sanitizeRejectToolEvent, sanitizeStoredOptions, setXaiProxyUrl, sniffEditableImageMediaType, sniffImageMediaType, stripRejectToolCalls, wrapXaiResponsesProvider, writeGrokAuthDocument, writeStoredOptions, writeStoredProxyUrl, xaiOAuthAuthPath, xaiOAuthAuthStatus, xaiProxyPath };

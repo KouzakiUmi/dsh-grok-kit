@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DEFAULT_XAI_SEARCH_MODEL } from './search.ts'
+import { DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_MAX_BYTES, validVideoModel, validVideoMaxBytes } from './video-config.ts'
 import {
   DEFAULT_SEARCH_MAX_RESULTS,
   DEFAULT_WEB_SEARCH_TIMEOUT_MS,
@@ -31,6 +32,9 @@ export interface StoredPluginOptions {
   nestedSearchTools?: boolean
   statefulResponses?: boolean
   imagineTool?: boolean
+  videoTool?: boolean
+  videoModel?: string
+  videoMaxBytes?: number
   searchModel?: string
   searchMaxResults?: number
   webSearchTimeoutMs?: number
@@ -44,6 +48,9 @@ const OPTION_SOURCE_KEYS = [
   'nestedSearchTools',
   'statefulResponses',
   'imagineTool',
+  'videoTool',
+  'videoModel',
+  'videoMaxBytes',
   'searchModel',
   'searchMaxResults',
   'webSearchTimeoutMs',
@@ -55,6 +62,9 @@ export interface EffectivePluginOptions {
   nestedSearchTools: boolean
   statefulResponses: boolean
   imagineTool: boolean
+  videoTool: boolean
+  videoModel: string
+  videoMaxBytes: number
   searchModel: string
   searchMaxResults: number
   webSearchTimeoutMs: number
@@ -98,7 +108,7 @@ export function sanitizeStoredOptions(value: unknown): StoredPluginOptions {
   if (!isRecord(value) || value['version'] !== OPTIONS_VERSION) return {}
   const raw = isRecord(value['options']) ? value['options'] : {}
   const out: StoredPluginOptions = {}
-  for (const key of ['backendSearch', 'nestedSearchTools', 'statefulResponses', 'imagineTool'] as const) {
+  for (const key of ['backendSearch', 'nestedSearchTools', 'statefulResponses', 'imagineTool', 'videoTool'] as const) {
     if (typeof raw[key] === 'boolean') out[key] = raw[key]
   }
   if (
@@ -108,6 +118,8 @@ export function sanitizeStoredOptions(value: unknown): StoredPluginOptions {
   ) {
     out['searchModel'] = raw['searchModel'].trim()
   }
+  if (validVideoModel(raw['videoModel'])) out.videoModel = raw['videoModel']
+  if (validVideoMaxBytes(raw['videoMaxBytes'])) out.videoMaxBytes = raw['videoMaxBytes']
   const maxResults = boundedInteger(raw['searchMaxResults'], SEARCH_MAX_RESULTS_FLOOR, SEARCH_MAX_RESULTS_CEILING)
   if (maxResults !== undefined) out['searchMaxResults'] = maxResults
   const webTimeout = boundedInteger(raw['webSearchTimeoutMs'], TIMEOUT_FLOOR_MS, TIMEOUT_CEILING_MS)
@@ -152,6 +164,9 @@ export function mergePluginOptions(
     ...stored.nestedSearchTools === undefined ? {} : { nestedSearchTools: stored.nestedSearchTools },
     ...stored.statefulResponses === undefined ? {} : { statefulResponses: stored.statefulResponses },
     ...stored.imagineTool === undefined ? {} : { imagineTool: stored.imagineTool },
+    ...stored.videoTool === undefined ? {} : { videoTool: stored.videoTool },
+    ...stored.videoModel === undefined ? {} : { videoModel: stored.videoModel },
+    ...stored.videoMaxBytes === undefined ? {} : { videoMaxBytes: stored.videoMaxBytes },
     ...stored.searchModel === undefined ? {} : { searchModel: stored.searchModel },
     ...stored.searchMaxResults === undefined ? {} : { searchMaxResults: stored.searchMaxResults },
     ...stored.webSearchTimeoutMs === undefined ? {} : { webSearchTimeoutMs: stored.webSearchTimeoutMs },
@@ -181,6 +196,9 @@ export function presentPluginOptions(
       nestedSearchTools,
       statefulResponses: typeof merged['statefulResponses'] === 'boolean' ? merged['statefulResponses'] : false,
       imagineTool: typeof merged['imagineTool'] === 'boolean' ? merged['imagineTool'] : true,
+      videoTool: typeof merged['videoTool'] === 'boolean' ? merged['videoTool'] : false,
+      videoModel: validVideoModel(merged['videoModel']) ? merged['videoModel'] : DEFAULT_VIDEO_MODEL,
+      videoMaxBytes: validVideoMaxBytes(merged['videoMaxBytes']) ? merged['videoMaxBytes'] : DEFAULT_VIDEO_MAX_BYTES,
       searchModel: typeof merged['searchModel'] === 'string' && merged['searchModel'].trim().length > 0
         ? merged['searchModel']
         : DEFAULT_XAI_SEARCH_MODEL,

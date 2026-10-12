@@ -4,6 +4,7 @@
  * @module dsh-grok-kit/token-source
  */
 
+import { createHash } from 'node:crypto'
 import { XAI_PI_PROVIDER } from './ids.ts'
 import type { XaiOAuthSession } from './session.ts'
 
@@ -11,10 +12,33 @@ import type { XaiOAuthSession } from './session.ts'
 export interface XaiOAuthTokenSource {
   /** Cheap local availability check. Must not refresh or make network calls. */
   available(): boolean
+  /** Local, non-secret account partition. Missing identity must fail closed for durable tasks. */
+  identity?(): Promise<string | undefined>
   /** Resolve a current OAuth bearer. Implementations may refresh an expired token under their existing lock. */
   resolve(signal?: AbortSignal): Promise<string | undefined>
   /** Force-refresh after a server-side 401. Must stay OAuth-only and serialize refresh-token rotation. */
   refresh?(rejectedAccessToken: string, signal?: AbortSignal): Promise<string | undefined>
+}
+
+/** Account partition only, NOT JWT signature verification or an authorization decision. */
+export function oauthIdentityOf(credential: { type: string; accountId?: string; access?: string } | undefined): string | undefined {
+  if (credential?.type !== 'oauth') return undefined
+  let subject = credential.accountId
+  if (subject === undefined && typeof credential.access === 'string' && credential.access.length <= 32_768) {
+    const parts = credential.access.split('.')
+    if (parts.length === 3 && /^[A-Za-z0-9_-]+$/.test(parts[1] ?? '')) {
+      try {
+        const claims: unknown = JSON.parse(Buffer.from(parts[1]!, 'base64url').toString('utf8'))
+        if (typeof claims === 'object' && claims !== null && !Array.isArray(claims)
+          && 'iss' in claims && claims.iss === 'https://auth.x.ai'
+          && 'sub' in claims && typeof claims.sub === 'string') subject = claims.sub
+      } catch {
+        // Opaque or malformed tokens cannot identify durable tasks.
+      }
+    }
+  }
+  if (typeof subject !== 'string' || subject.trim().length === 0 || subject.length > 1024) return undefined
+  return createHash('sha256').update(`xai-oauth-account:${subject}`).digest('hex')
 }
 
 const inFlightRefresh = new Map<string, Map<string, Promise<string | undefined>>>()
@@ -38,6 +62,9 @@ function waitForRefresh(pending: Promise<string | undefined>, signal?: AbortSign
 export function createXaiOAuthSearchTokenSource(session: XaiOAuthSession): XaiOAuthTokenSource {
   return {
     available: () => session.store.exists(),
+    async identity(): Promise<string | undefined> {
+      return oauthIdentityOf(await session.store.read(XAI_PI_PROVIDER))
+    },
     async resolve(signal?: AbortSignal): Promise<string | undefined> {
       signal?.throwIfAborted()
       const credential = await session.store.read(XAI_PI_PROVIDER)
@@ -86,7 +113,10 @@ async function refreshRejected(
     refreshSignal.throwIfAborted()
     if (candidate?.type !== 'oauth') return undefined
     if (candidate.access !== rejectedAccessToken || candidate.refresh !== current.refresh) return undefined
-    return rotated
+    // Refresh rotates a credential for the same account, not a new login.
+    return rotated.accountId === undefined && candidate.accountId !== undefined
+      ? { ...rotated, accountId: candidate.accountId }
+      : rotated
   })
   refreshSignal.throwIfAborted()
   if (credential?.type !== 'oauth') return undefined

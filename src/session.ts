@@ -113,6 +113,27 @@ function requestProvider(provider: Provider): Provider {
   }
 }
 
+/** xAI refresh responses omit account metadata; retain it only across that same-account refresh. */
+function withStableOAuthAccount(provider: Provider): Provider {
+  const oauth = provider.auth?.oauth
+  if (oauth === undefined) return provider
+  return {
+    ...provider,
+    auth: {
+      ...provider.auth,
+      oauth: {
+        ...oauth,
+        async refresh(credential, signal) {
+          const refreshed = await oauth.refresh(credential, signal)
+          return refreshed.accountId === undefined && credential.accountId !== undefined
+            ? { ...refreshed, accountId: credential.accountId }
+            : refreshed
+        },
+      },
+    },
+  }
+}
+
 /** One process-local owner of the credential and the account model list. */
 export class XaiOAuthSession {
   readonly store: XaiOAuthCredentialStore
@@ -141,7 +162,7 @@ export class XaiOAuthSession {
   ) {
     this.store = store
     this.cacheFile = modelsCachePath()
-    this.baseline = xaiProvider()
+    this.baseline = withStableOAuthAccount(xaiProvider())
     this.models = createModels({ credentials: store })
     this.models.setProvider(this.baseline)
     this.onCatalogChange = onCatalogChange

@@ -47,6 +47,9 @@ describe('Config schema nestedSearchTools has no default', () => {
     const parsed = Config({ backendSearch: true } as never)
     expect(parsed.nestedSearchTools).toBeUndefined()
     expect(parsed.backendSearch).toBe(true)
+    expect(parsed.videoTool).toBe(false)
+    expect(parsed.videoModel).toBe('grok-imagine-video-1.5')
+    expect(parsed.videoMaxBytes).toBe(104_857_600)
   })
 })
 
@@ -108,5 +111,15 @@ describe('apply() registration', () => {
     expect(names).toContain('grok_web_search')
     expect(names).toContain('x_search')
     for (const name of XAI_SERVER_X_SEARCH_REJECT_NAMES) expect(names).not.toContain(name)
+    expect(names).not.toContain('grok_video_generate')
+    expect(names).not.toContain('grok_video_status')
+    expect(names).not.toContain('grok_video_resume')
+  })
+
+  it('registers video tools only after explicit opt-in', () => {
+    const names = applyCollecting({ videoTool: true })
+    expect(names).toContain('grok_video_generate')
+    expect(names).toContain('grok_video_status')
+    expect(names).toContain('grok_video_resume')
   })
 })
