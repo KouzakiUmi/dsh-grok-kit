@@ -301,11 +301,11 @@ describe('POST /video/resume', () => {
     expect(resume).not.toHaveBeenCalled()
   })
 
-  it('accepts shell-forwarded writes (no Origin, no sec-fetch-site → desktop shape)', async () => {
+  it('accepts shell-forwarded writes (no Origin, no sec-fetch-site, Fetch-Metadata marker → desktop shape)', async () => {
     const { handlers, resume } = setup()
     const { status } = await call(
       handlers.get(GROK_VIDEO_RESUME_PATH)!,
-      mockReq({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId: UUID }) }),
+      mockReq({ method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-mode': 'cors' }, body: JSON.stringify({ taskId: UUID }) }),
       new MockResponse(),
     )
     expect(status).toBe(200)

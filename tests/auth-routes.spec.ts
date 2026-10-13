@@ -45,15 +45,22 @@ describe('isTrustedRequest (loopback + Host pin + Origin)', () => {
     expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'https://127.0.0.1:3080'), 'POST')).toBe(true)
   })
 
-  it('accepts shell-forwarded writes (no Origin, no sec-fetch-site) but keeps requiring one on browser writes', () => {
-    // The DeepSeek desktop shell strips BOTH headers before forwarding, while
-    // a browser page always sends at least one of them on a write (fetch and
-    // form POSTs include Origin).
-    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080'), 'POST')).toBe(true)
-    expect(isTrustedRequest(loopback, headers(), 'PUT')).toBe(true)
+  it('accepts desktop-shell-forwarded writes (Fetch-Metadata marker kept) on loopback hosts', () => {
+    // The shell strips origin and sec-fetch-site but keeps the renderer's
+    // sec-fetch-mode (a fetch shows cors).
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-mode': 'cors' }, 'POST')).toBe(true)
+    expect(isTrustedRequest(loopback, { host: 'localhost:3080', 'sec-fetch-mode': 'cors' }, 'PUT')).toBe(true)
+  })
+
+  it('rejects header-less legacy-form writes and browser writes without Origin', () => {
+    // Legacy browsers without Fetch Metadata send cross-site form POSTs with
+    // neither Origin nor sec-fetch-* headers; the sec-fetch-mode requirement
+    // blocks them while the shell-forwarded shape above still passes.
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, {}, 'POST')).toBe(false)
     expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-site': 'same-origin' }, 'POST')).toBe(false)
     expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' }, 'POST')).toBe(false)
-    expect(isTrustedRequest(loopback, { host: 'evil.example' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { host: 'evil.example', 'sec-fetch-mode': 'cors' }, 'POST')).toBe(false)
   })
 
   it('allows no-Origin GET status reads', () => {
@@ -75,6 +82,10 @@ describe('isTrustedRequest (loopback + Host pin + Origin)', () => {
     expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'dsh-app://evil'), 'POST')).toBe(false)
     expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'dsh-app://app/'), 'POST')).toBe(false)
     expect(isTrustedRequest('192.168.1.10', headers('127.0.0.1:3080', 'dsh-app://app'), 'GET')).toBe(false)
+    // The desktop allowance sits behind the Host pin: a dsh-app Origin on a
+    // non-loopback or missing Host is still rejected.
+    expect(isTrustedRequest(loopback, { host: 'evil.example', origin: 'dsh-app://app' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { origin: 'dsh-app://app' }, 'POST')).toBe(false)
   })
 
   it('rejects non-loopback peers, missing/malformed Host, and DNS-rebinding hosts', () => {

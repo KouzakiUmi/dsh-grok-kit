@@ -289,10 +289,24 @@ function trustedRequest(req: IncomingMessage): boolean {
 /** Trust header/remote shape for the plugin's Web routes. Exported for tests. */
 export function isTrustedRequest(
   remote: string | undefined,
-  headers: { host?: string | undefined; origin?: string | undefined; 'sec-fetch-site'?: string | undefined },
+  headers: {
+    host?: string | undefined
+    origin?: string | undefined
+    'sec-fetch-site'?: string | undefined
+    'sec-fetch-mode'?: string | undefined
+  },
   method: string,
 ): boolean {
   if (remote !== '127.0.0.1' && remote !== '::1' && remote !== '::ffff:127.0.0.1') return false
+  const host = headers.host
+  if (host === undefined) return false
+  // PIN the Host header to an explicit loopback name on every trust path
+  // below, including the desktop-shell allowances. Otherwise a DNS-rebinding
+  // page (attacker domain resolving to 127.0.0.1) satisfies the same-origin
+  // check with a same-host origin while the request really originates from a
+  // hostile page — enough to CSRF login/import/logout or to install a proxy
+  // URL that later captures the x.ai bearer.
+  if (loopbackHostname(host) === undefined) return false
   const origin = headers.origin
   // The DeepSeek desktop shell serves its renderer over the custom `dsh-app`
   // scheme and forwards UI requests to the local HTTP server carrying that
@@ -303,26 +317,14 @@ export function isTrustedRequest(
   // for a custom-scheme page; the desktop origin is accepted before both.
   if (origin !== undefined && origin.trim().toLowerCase() === 'dsh-app://app') return true
   if (headers['sec-fetch-site'] === 'cross-site') return false
-  const host = headers.host
-  if (host === undefined) return false
-  // PIN the Host header to an explicit loopback name. Otherwise a DNS-rebinding
-  // page (attacker domain resolving to 127.0.0.1) satisfies the same-origin
-  // check below with a same-host origin while the request really originates
-  // from a hostile page — enough to CSRF login/import/logout or to install a
-  // proxy URL that later captures the x.ai bearer.
-  if (loopbackHostname(host) === undefined) return false
-  // Same-origin browsers send Origin on every POST; non-browser clients and
-  // some privacy modes do not. Requiring Origin on writes closes the
-  // local-process CSRF slot (a local script could otherwise POST logout /
-  // set-proxy with a forged host). Status GETs stay open.
   if (origin === undefined) {
     if (method === 'GET') return true
-    // The DeepSeek desktop shell forwards UI requests after stripping BOTH
-    // `origin` and `sec-fetch-site`, so shell-forwarded writes carry neither.
-    // A browser page always sends at least one of the two on a write (fetch
-    // and form POSTs include Origin; cross-site is rejected above), so a
-    // write carrying neither cannot be browser-originated CSRF.
-    return headers['sec-fetch-site'] === undefined
+    // The DeepSeek desktop shell forwards UI requests after stripping `origin`
+    // and `sec-fetch-site` but keeping the renderer's `sec-fetch-mode` (a
+    // fetch shows `cors`). A legacy browser without Fetch Metadata sends
+    // cross-site form POSTs carrying neither Origin nor any sec-fetch-* header;
+    // requiring the marker blocks that while the shell-forwarded shape passes.
+    return (headers['sec-fetch-mode'] ?? '') !== ''
   }
   try {
     return new URL(origin).host === new URL(`http://${host}`).host
