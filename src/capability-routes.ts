@@ -11,7 +11,7 @@ export const GROK_VIDEO_RESUME_PATH = '/plugins/dsh-grok-kit/video/resume'
 
 export interface GrokCapabilityRouteOptions {
   tracker: CapabilityTracker
-  videoEnabled: boolean
+  videoEnabled: boolean | (() => boolean)
   authenticated: () => Promise<boolean>
   /** Optional for legacy callers; production supplies the stable OAuth partition. */
   identity?: () => Promise<string | undefined>
@@ -77,7 +77,8 @@ function publicTask(value: unknown): Record<string, unknown> {
 }
 
 export function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabilityRouteOptions): void {
-  const { tracker, videoEnabled } = options
+  const { tracker } = options
+  const videoEnabled = (): boolean => typeof options.videoEnabled === 'function' ? options.videoEnabled() : options.videoEnabled
   const resumeAborts = new Set<AbortController>()
   const unchanged = async (identity: string | undefined): Promise<boolean> =>
     options.identity === undefined || (identity !== undefined && await options.identity() === identity)
@@ -89,7 +90,7 @@ export function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabili
           if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
           if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
           if (!await options.authenticated()) tracker.reset()
-          json(res, 200, tracker.snapshot(videoEnabled))
+          json(res, 200, tracker.snapshot(videoEnabled()))
         }),
       }),
       ctx.webServer.register({
@@ -97,6 +98,7 @@ export function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabili
         handler: guarded(async (req, res) => {
           if (req.method !== 'GET') return json(res, 405, { error: 'method not allowed' })
           if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+          if (!videoEnabled()) return json(res, 409, { error: 'video is disabled by the plugin configuration' })
           if (!await options.authenticated()) {
             tracker.reset()
             return json(res, 403, { error: 'forbidden' })
@@ -112,7 +114,7 @@ export function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabili
         handler: guarded(async (req, res) => {
           if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
           if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
-          if (!videoEnabled) return json(res, 409, { error: 'video is disabled by the plugin configuration' })
+          if (!videoEnabled()) return json(res, 409, { error: 'video is disabled by the plugin configuration' })
           if (!await options.authenticated()) {
             tracker.reset()
             return json(res, 403, { error: 'forbidden' })
@@ -121,6 +123,7 @@ export function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabili
           if (parsed === undefined) return json(res, 400, { error: 'body must be exactly { taskId: <uuid> }' })
           const identity = await options.identity?.()
           if (!await unchanged(identity)) return json(res, 403, { error: 'account cannot be identified' })
+          if (!videoEnabled()) return json(res, 409, { error: 'video is disabled by the plugin configuration' })
           const abort = new AbortController()
           resumeAborts.add(abort)
           const onClose = () => { if (!res.writableEnded) abort.abort(new Error('client disconnected')) }

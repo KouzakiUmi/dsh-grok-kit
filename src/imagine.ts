@@ -10,6 +10,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { XaiOAuthSession } from './session.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 import { safeMessage } from './redact.ts'
+import { assertMediaEnabled } from './media-options.ts'
 
 export const XAI_IMAGES_URL = 'https://api.x.ai/v1/images/generations'
 export const DEFAULT_IMAGINE_MODEL = 'grok-imagine-image-2.0'
@@ -85,6 +86,8 @@ export interface GrokImagineOptions {
   session: XaiOAuthSession
   resolveAttachments: () => AttachmentStore | undefined
   fetch?: typeof fetch
+  /** Current effective local media switch; checked for every new call. */
+  enabled?: () => boolean
 }
 
 async function requestImage(
@@ -167,6 +170,7 @@ export function applyGrokImagineTool(ctx: Context, options: GrokImagineOptions):
       }
     },
     async execute(args, exec) {
+      assertMediaEnabled(options.enabled, 'grok_imagine')
       const prompt = typeof args.prompt === 'string' ? args.prompt.trim() : ''
       if (prompt.length === 0) throw new Error('prompt must be a non-empty string')
       const n = args.n ?? 1
@@ -188,6 +192,7 @@ export function applyGrokImagineTool(ctx: Context, options: GrokImagineOptions):
           : {},
         ...resolution !== undefined ? { resolution } : {},
       }
+      assertMediaEnabled(options.enabled, 'grok_imagine')
       const response = await requestImage(options.tokens, body, fetchImpl, exec.signal)
       if (!response.ok) {
         const detail = safeMessage(await response.text().catch(() => '')).slice(0, 300)

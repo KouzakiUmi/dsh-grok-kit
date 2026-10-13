@@ -1,0 +1,256 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const hooks = vi.hoisted(() => ({
+  values: [] as unknown[], cursor: 0, collectEffects: true, effects: [] as Array<() => unknown>,
+  dependencies: [] as Array<readonly unknown[] | undefined>,
+}))
+vi.mock('react', () => ({
+  useCallback: (fn: unknown) => fn,
+  useEffect: (fn: () => unknown, dependencies?: readonly unknown[]) => {
+    if (hooks.collectEffects) { hooks.effects.push(fn); hooks.dependencies.push(dependencies) }
+  },
+  useMemo: (fn: () => unknown) => fn(),
+  useRef: (initial: unknown) => ({ current: initial }),
+  useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
+  useState: (initial: unknown) => {
+    const index = hooks.cursor++
+    if (!(index in hooks.values)) hooks.values[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+    return [hooks.values[index], (next: unknown) => {
+      hooks.values[index] = typeof next === 'function' ? (next as (value: unknown) => unknown)(hooks.values[index]) : next
+    }]
+  },
+}))
+vi.mock('react/jsx-runtime', () => {
+  const jsx = (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key })
+  return { jsx, jsxs: jsx, Fragment: Symbol.for('Fragment') }
+})
+
+import { XaiSettings } from '../src/client/XaiSettings.tsx'
+import { en, zh } from '../src/client/locales.ts'
+import { CapabilitiesView, VideoTasksView } from '../src/client/capabilities-view.tsx'
+
+interface Element { type: unknown; props: Record<string, unknown>; key?: unknown }
+function elements(node: unknown, predicate: (value: Element) => boolean): Element[] {
+  if (Array.isArray(node)) return node.flatMap(child => elements(child, predicate))
+  if (node === null || typeof node !== 'object' || !('props' in node)) return []
+  const value = node as Element
+  // The subject is XaiSettings, not its independent account capability panel.
+  if (typeof value.type === 'function') return predicate(value) ? [value] : []
+  return [...(predicate(value) ? [value] : []), ...elements(value.props.children, predicate)]
+}
+function text(node: unknown): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(text).join('')
+  if (node === null || typeof node !== 'object' || !('props' in node)) return ''
+  return text((node as Element).props.children)
+}
+
+afterEach(() => {
+  hooks.values = []; hooks.cursor = 0; hooks.collectEffects = true; hooks.effects = []
+  hooks.dependencies = []
+  vi.unstubAllGlobals()
+})
+
+async function fixture(initial: Record<string, unknown> = {}) {
+  const defaults = { imagineTool: false, editTool: false, videoTool: false, mediaRiskAcknowledged: false, backendSearch: false }
+  let options: Record<string, unknown> = { ...defaults, ...initial }
+  const posts: Record<string, unknown>[] = []
+  const confirm = vi.fn(() => true)
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.endsWith('/options')) {
+      if (init?.method === 'POST') {
+        const patch = JSON.parse(String(init.body)) as Record<string, unknown>
+        posts.push(patch)
+        for (const [key, value] of Object.entries(patch)) options[key] = value === null ? defaults[key as keyof typeof defaults] : value
+      }
+      return new Response(JSON.stringify({ effective: options, stored: options }))
+    }
+    return new Response(JSON.stringify(path.endsWith('/proxy') ? { proxyUrl: '' } : { status: 'signed-out' }))
+  })
+  vi.stubGlobal('fetch', fetch)
+  vi.stubGlobal('window', { confirm })
+  const render = () => { hooks.cursor = 0; return XaiSettings({ t: key => en[key] }) }
+  render()
+  hooks.collectEffects = false
+  for (const effect of hooks.effects) effect()
+  await vi.waitFor(() => expect(hooks.values[6]).toHaveProperty('imagineTool', options.imagineTool))
+  const input = (label: string) => {
+    const row = elements(render(), element => element.type === 'label' && text(element.props.children) === label)[0]!
+    expect(row).toBeDefined()
+    return elements(row, element => element.type === 'input')[0]!
+  }
+  const change = (label: string, checked: boolean) => (input(label).props.onChange as (event: unknown) => void)({ target: { checked } })
+  const button = (label: string) => elements(render(), element => element.type === 'button' && text(element.props.children) === label)[0]!
+  const save = async () => {
+    const count = posts.length
+    const saveButton = button(en.optionsSave)
+    expect(saveButton.props.disabled).toBe(false)
+    ;(saveButton.props.onClick as () => void)()
+    await vi.waitFor(() => expect(posts).toHaveLength(count + 1))
+    await vi.waitFor(() => expect((hooks.values[8] as Set<unknown>).size).toBe(0))
+  }
+  return { render, input, change, button, save, confirm, posts }
+}
+
+describe('settings-only media risk confirmation', () => {
+  it('cancels without changing selections or writing and does not add consent to an unrelated save', async () => {
+    const f = await fixture()
+    f.confirm.mockReturnValue(false)
+    f.change(en.imagineTool, true)
+    expect(f.confirm).toHaveBeenCalledWith(en.confirmMediaEnable)
+    expect(f.input(en.imagineTool).props.checked).toBe(false)
+    expect(f.button(en.optionsSave).props.disabled).toBe(true)
+    expect(f.posts).toEqual([])
+    f.change(en.backendSearch, true)
+    await f.save()
+    expect(f.posts[0]).toEqual({ backendSearch: true })
+    expect(f.confirm).toHaveBeenCalledOnce()
+  })
+
+  it('confirms both image tools, closes without a prompt, then confirms a reopening again', async () => {
+    const f = await fixture()
+    f.change(en.imagineTool, true)
+    await f.save()
+    expect(f.posts[0]).toEqual({ imagineTool: true, editTool: true, videoTool: false, mediaRiskAcknowledged: true })
+    expect(f.input(en.imagineTool).props.checked).toBe(true)
+    f.change(en.imagineTool, false)
+    await f.save()
+    expect(f.posts[1]).toEqual({ imagineTool: false, editTool: false })
+    expect(f.confirm).toHaveBeenCalledOnce()
+    f.change(en.imagineTool, true)
+    await f.save()
+    expect(f.confirm).toHaveBeenCalledTimes(2)
+    expect(f.posts[2].mediaRiskAcknowledged).toBe(true)
+  })
+
+  it('shows an edit-only advanced configuration and closes both flags with one switch', async () => {
+    const f = await fixture({ editTool: true, mediaRiskAcknowledged: true })
+    expect(f.input(en.imagineTool).props.checked).toBe(true)
+    expect(text(f.render())).toContain(`${en.imageGenerationSwitch}: ${en.mediaOff} · ${en.imageEditingSwitch}: ${en.mediaOn}`)
+    f.change(en.imagineTool, false)
+    await f.save()
+    expect(f.posts[0]).toEqual({ imagineTool: false, editTool: false })
+    expect(f.confirm).not.toHaveBeenCalled()
+  })
+
+  it('confirms video, leaves images off and resets consent without a prompt', async () => {
+    const f = await fixture()
+    f.change(en.videoTool, true)
+    await f.save()
+    expect(f.posts[0]).toEqual({ imagineTool: false, editTool: false, videoTool: true, mediaRiskAcknowledged: true })
+    ;(f.button(en.optionsReset).props.onClick as () => void)()
+    await vi.waitFor(() => expect(f.posts).toHaveLength(2))
+    expect(f.posts[1]).toMatchObject({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
+    expect(f.confirm).toHaveBeenCalledOnce()
+  })
+
+  it('refreshes the local capability panel after a video close or reset, without remounting on unrelated saves', async () => {
+    const f = await fixture({ videoTool: true, mediaRiskAcknowledged: true })
+    const panelKey = () => elements(f.render(), element => element.type === CapabilitiesView)[0]!.key
+    const initialKey = panelKey()
+    f.change(en.videoTool, false)
+    await f.save()
+    const closedKey = panelKey()
+    expect(closedKey).not.toBe(initialKey)
+    f.change(en.backendSearch, true)
+    await f.save()
+    expect(panelKey()).toBe(closedKey)
+    ;(f.button(en.optionsReset).props.onClick as () => void)()
+    await vi.waitFor(() => expect(panelKey()).not.toBe(closedKey))
+    expect(f.confirm).not.toHaveBeenCalled()
+  })
+
+  it('provides nonempty English and Chinese copies for the same media controls and risks', () => {
+    for (const locale of [en, zh]) {
+      for (const key of ['imagineTool', 'imagineToolHint', 'videoToolHint', 'mediaRiskHint', 'confirmMediaEnable', 'optionsHint'] as const) {
+        expect(locale[key].trim().length).toBeGreaterThan(0)
+      }
+    }
+    expect(en.confirmMediaEnable).toMatch(/unofficial.*upstream/s)
+    expect(en.confirmMediaEnable).toMatch(/subscription quota.*charges/s)
+    expect(zh.confirmMediaEnable).toMatch(/非官方.*上游/s)
+    expect(zh.confirmMediaEnable).toMatch(/订阅额度.*费用/s)
+  })
+})
+
+const OLD_TASK = {
+  taskId: '123e4567-e89b-42d3-a456-426614174000', state: 'pending',
+  model: 'grok-imagine-video-1.5', prompt: 'old task',
+  createdAt: '2026-10-12T00:00:00.000Z', updatedAt: '2026-10-12T00:00:00.000Z',
+}
+
+/** Execute effect changes and cleanups like React, without mounting media cards. */
+function taskFixture(initialEnabled: boolean) {
+  let enabled = initialEnabled
+  let dependencies: readonly unknown[] | undefined
+  let cleanup: (() => void) | undefined
+  const render = () => {
+    hooks.cursor = 0; hooks.effects = []; hooks.dependencies = []; hooks.collectEffects = true
+    const node = VideoTasksView({ t: key => en[key], videoEnabled: enabled })
+    const nextDependencies = hooks.dependencies[0]!
+    if (dependencies === undefined || nextDependencies.some((value, index) => value !== dependencies![index])) {
+      cleanup?.()
+      const returned = hooks.effects[0]!()
+      cleanup = typeof returned === 'function' ? returned as () => void : undefined
+      dependencies = nextDependencies
+    }
+    return node
+  }
+  return {
+    render,
+    setEnabled: (next: boolean) => { enabled = next; return render() },
+    dispose: () => cleanup?.(),
+  }
+}
+
+describe('disabled video task panel', () => {
+  it('does not read tasks or show loading/error/empty when disabled, then loads only after enabling', async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ tasks: [OLD_TASK] })))
+    vi.stubGlobal('fetch', fetch)
+    const f = taskFixture(false)
+    const disabled = f.render()
+    expect(fetch).not.toHaveBeenCalled()
+    expect(text(disabled)).toContain(en.videoTasksDisabled)
+    for (const label of [en.videoTasksLoading, en.videoTasksError, en.videoTasksEmpty]) expect(text(disabled)).not.toContain(label)
+    const refresh = elements(disabled, element => element.type === 'button')[0]!
+    expect(refresh.props.disabled).toBe(true)
+    ;(refresh.props.onClick as () => void)()
+    f.render()
+    expect(fetch).not.toHaveBeenCalled()
+    f.setEnabled(true)
+    await vi.waitFor(() => expect(hooks.values[0]).toMatchObject({ kind: 'ready', tasks: [OLD_TASK] }))
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls[0]).toEqual(expect.arrayContaining(['/plugins/dsh-grok-kit/video/tasks']))
+    expect(elements(f.render(), element => element.type === 'li')).toHaveLength(1)
+    f.setEnabled(false)
+    expect(hooks.values[0]).toEqual({ kind: 'disabled' })
+    expect(elements(f.render(), element => element.type === 'li')).toHaveLength(0)
+    expect(fetch).toHaveBeenCalledOnce()
+    f.dispose()
+  })
+
+  it('aborts an old task request on closing and ignores a late response from it', async () => {
+    let resolve!: (response: Response) => void
+    let signal: AbortSignal | undefined
+    const json = vi.fn(async () => ({ tasks: [OLD_TASK] }))
+    const fetch = vi.fn((_path: string, init?: RequestInit) => {
+      signal = init?.signal as AbortSignal | undefined
+      return new Promise<Response>(accept => { resolve = accept })
+    })
+    vi.stubGlobal('fetch', fetch)
+    const f = taskFixture(true)
+    f.render()
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(signal?.aborted).toBe(false)
+    const disabled = f.setEnabled(false)
+    expect(signal?.aborted).toBe(true)
+    expect(hooks.values[0]).toEqual({ kind: 'disabled' })
+    expect(text(disabled)).toContain(en.videoTasksDisabled)
+    resolve({ ok: true, json } as unknown as Response)
+    await vi.waitFor(() => expect(json).toHaveBeenCalledOnce())
+    for (let tick = 0; tick < 6; tick++) await Promise.resolve()
+    expect(hooks.values[0]).toEqual({ kind: 'disabled' })
+    expect(elements(f.render(), element => element.type === 'li')).toHaveLength(0)
+    f.dispose()
+  })
+})

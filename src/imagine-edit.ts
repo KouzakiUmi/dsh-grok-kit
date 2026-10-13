@@ -17,6 +17,7 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { XaiOAuthSession } from './session.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 import { imagineModelId } from './imagine.ts'
+import { assertMediaEnabled } from './media-options.ts'
 import {
   DEFAULT_MAX_IMAGE_BYTES,
   MAX_N,
@@ -58,6 +59,8 @@ export interface GrokImagineEditOptions {
   /** Per-source byte cap. */
   maxImageBytes?: number
   fetch?: typeof fetch
+  /** Current effective local media switch; checked for every new call. */
+  enabled?: () => boolean
 }
 
 interface ImagineEditValue {
@@ -194,6 +197,7 @@ export function applyGrokImagineEditTool(ctx: Context, options: GrokImagineEditO
       }
     },
     async execute(args, exec) {
+      assertMediaEnabled(options.enabled, 'grok_imagine_edit')
       const prompt = isNonEmptyString(args?.prompt) ? args.prompt.trim() : ''
       if (prompt.length === 0) throw new Error('prompt must be a non-empty string')
       const primary = isNonEmptyString(args?.image) ? args.image.trim() : ''
@@ -220,6 +224,7 @@ export function applyGrokImagineEditTool(ctx: Context, options: GrokImagineEditO
       const aspectRatio = isNonEmptyString(args?.aspect_ratio) ? args.aspect_ratio.trim() : undefined
       const cwd = exec.agent?.session?.header?.cwd
 
+      assertMediaEnabled(options.enabled, 'grok_imagine_edit')
       const result = await runImageEdit({
         tokens: options.tokens,
         prompt,

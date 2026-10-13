@@ -23,6 +23,8 @@
 >
 > OAuth 可用性可能受订阅档位、地区、xAI 条款、账户资格、速率限制和后续服务变更影响。用户应自行确认其账户与用途获准；本项目不保证持续可用性或兼容性，也不提供 xAI/Grok 账号、订阅或官方支持。
 
+> 当前源码待发布：下文的图片/视频默认关闭、设置页风险确认及视频任务功能属于当前源码候选，不表示已发布的 npm `0.2.2` 包已有这些行为。下方固定版本安装命令仍安装已发布的版本。
+
 ## 不止于 OAuth 登录
 
 `dsh-grok-kit` 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 增加独立的 `xai-oauth` 路由。它不要求 `XAI_API_KEY`，也不修改 dsh 源码；重点不只是“能登录”，而是把服务端搜索和连续 reasoning 所需的请求字段接进主聊天路径。
@@ -30,7 +32,7 @@
 - **搜索融入主循环：** 网页与 X 检索发生在 grok-4.6 的同一轮 Think 中，推理可以直接使用刚搜到的材料
 - **多轮推理衔接：** 默认使用 high effort，并保留 `reasoning.encrypted_content`，让后续回合能够带回加密推理上下文
 - **登录状态与 Grok CLI 同步：** 直接共用并回写 `~/.grok/auth.json`，不是只复制一次后各自轮换 refresh token
-- **Imagine 文生图与图生图：** `grok_imagine` 与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启，非聊天模型不会混进对话模型列表；生成图与编辑图统一通过 DSH 附件库保存并保留归一化 metadata，在会话图片卡片中直观展示提示词、输入图与结果，并支持下载与再次生成/编辑
+- **Imagine 文生图与图生图：** `grok_imagine` 与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认关闭，在设置页确认风险后可开启；非聊天模型不会混进对话模型列表。生成图与编辑图统一通过 DSH 附件库保存并保留归一化 metadata，在会话图片卡片中直观展示提示词、输入图与结果，并支持下载与再次生成/编辑
 
 此外还包括 xAI 专用代理、聊天 401 强制刷新重试、凭据原子写入与诊断脱敏等支撑能力。
 
@@ -120,7 +122,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 
 - 模型选择器只展示主线 Grok 聊天模型；Imagine、video、embedding、build/code 变体会被隐藏
 - 默认 grok-4.6 描述符使用 high reasoning，并请求 `reasoning.encrypted_content`，以便后续回合带回加密推理上下文
-- `grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启。图片保存到 DSH 附件库并在会话图片卡片中直接渲染。可从卡片下载，或使用宿主文件工具导出；两工具的 `save_path` 参数均不再支持直接写盘
+- `grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认关闭，需在设置页确认风险后开启。图片保存到 DSH 附件库并在会话图片卡片中直接渲染。可从卡片下载，或使用宿主文件工具导出；两工具的 `save_path` 参数均不再支持直接写盘
 - dsh 原生 `web_search` 仍保留在宿主工具列表中，但会从启用 backend search 的 xAI payload 中移除，避免工具重名
 
 模型列表来自登录账号的 `GET /v1/models` 结果，并在本地缓存。服务端能力或模型要求发生变化时，仍可能需要更新插件；不会把“模型 id 可见”等同于“所有能力一定可用”。
@@ -136,7 +138,15 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 
 ### 开发版：可选视频任务与能力状态
 
-当前源码新增默认关闭的 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，支持单图生视频、持久任务恢复与账号隔离下载。设置页展示本地能力观察和任务；额度来源尚未核验，不显示估算余额。启用需重启，生成消耗订阅额度，停止等待不等于取消上游任务。此说明不代表 npm 0.2.2 已包含功能；用法、配置及限制见 [视频说明](VIDEO.zh.md)。
+当前源码新增默认关闭的 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，支持单图生视频、持久任务恢复与账号隔离下载。设置页展示本地能力观察和任务；额度来源尚未核验，不显示估算余额。启用需确认风险并重启，生成可能消耗订阅额度或产生费用，停止等待不等于取消上游任务。此说明不代表 npm 0.2.2 已包含功能；用法、配置及限制见 [视频说明](VIDEO.zh.md)。
+
+### 媒体工具的开启与风险
+
+图片生成、图片编辑和视频均默认关闭。在 DeepSeek Harness 设置 → xAI Grok →「搜索与功能选项」中，选择图片或视频开关时会弹出风险确认；取消不改动设置，确认后保存，再重启 DSH 宿主以注册工具。图片开关同时控制生成和编辑，两项所选状态会分别显示。正常生成、再次生成/编辑、查询和下载不会再弹确认；关闭后重新开启时才再次确认。开启只保存设置，不生成媒体或探测额度。
+
+这是第三方非官方接入，账户资格和功能受上游服务规则影响，访问可能受限或暂停；确认不代表获得官方授权。生成可能消耗订阅额度或产生费用。文本和输入图片会发送上游，请勿上传敏感内容或无权使用的内容。停止等待不等于取消已提交的生成，也不能保证停止消耗。
+
+新版不继承旧媒体启用值，首次图片生成、编辑和视频一律关闭；首次确认只保存本次明确选择的媒体，其余保持关闭。确认后的新选择会持久保留，不会每次重启重置；账号、模型、代理和搜索设置不受此规则影响。高级配置可分别选择 `imagineTool`、`editTool`、`videoTool`，需阅读上述风险并显式设置 `mediaRiskAcknowledged: true`；它只是本机的知情设置，不是凭据或官方许可。重置会撤销媒体确认，即使 profile/Cordis 留有 `true` 也不会自动开启。关闭并保存后会阻止后续调用（包括旧卡片发起的调用），不会撤销已提交的上游任务；视频关闭时，本地任务列表、恢复和视频下载接口也停用，已有任务及附件继续保留。
 
 ## 配置
 
@@ -149,8 +159,10 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 | `searchMaxResults` | `8` | 嵌套搜索返回来源的上限 |
 | `webSearchTimeoutMs` | `60000` | 嵌套网页搜索的协作式超时预算 |
 | `xSearchTimeoutMs` | `120000` | 嵌套 X 搜索的协作式超时预算 |
-| `imagineTool` | `true` | 注册 `grok_imagine`（文生图） |
-| `editTool` | `true` | 注册 `grok_imagine_edit`（图生图；独立于 `imagineTool`，复用主 OAuth session） |
+| `imagineTool` | `false` | 确认媒体风险后注册 `grok_imagine`（文生图） |
+| `editTool` | `false` | 确认媒体风险后注册 `grok_imagine_edit`（高级配置可独立于 `imagineTool`，设置页图片开关控制两项） |
+| `videoTool` | `false` | 确认媒体风险后注册视频生成、查询和恢复工具 |
+| `mediaRiskAcknowledged` | `false` | 显式确认上述媒体风险；需与所选媒体开关均为 `true` 才启用 |
 | `editModel` | `''` | 固定图生图模型；为空时跟随线上目录自动选择（优先 `grok-imagine-image-2.0`，fallback `grok-imagine-image`） |
 | `editMaxSourceImages` | `5` | `grok_imagine_edit` 单次请求源图片上限，插件最多接受 5 张 |
 | `editMaxImageBytes` | `20971520` | `grok_imagine_edit` 单张源图片体积上限（默认 20 MiB） |
@@ -158,7 +170,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 
 本 bundle 的组合默认值来自 `cordis.patch.yml`。手工拆分或重组配置时，可用 `dsh --profile web --dump-config` 核对最终值。
 
-设置页 → xAI Grok →「搜索与功能选项」也能显式覆盖上表中的搜索/功能键（保存后重启生效；未修改的键继续跟随组合默认值，不会固化）。`proxyUrl` 例外：设置页保存即生效。
+设置页 → xAI Grok →「搜索与功能选项」也能显式覆盖上表中的搜索/功能键（新工具注册及其他功能变化需重启；未修改的键继续跟随组合默认值）。关闭媒体保存后会阻止后续调用；`proxyUrl` 保存即生效。
 
 ## 登录文件、代理与安全边界
 

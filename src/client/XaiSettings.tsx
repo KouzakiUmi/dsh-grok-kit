@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { XaiOAuthSettingsKey } from './locales.ts'
 import { CapabilitiesView } from './capabilities-view.tsx'
+import { mediaTogglePatch } from './media-options.ts'
 
 const STATUS_PATH = '/plugins/dsh-grok-kit/auth/status'
 const LOGIN_PATH = '/plugins/dsh-grok-kit/auth/login'
@@ -27,7 +28,9 @@ type OptionKey =
   | 'nestedSearchTools'
   | 'statefulResponses'
   | 'imagineTool'
+  | 'editTool'
   | 'videoTool'
+  | 'mediaRiskAcknowledged'
   | 'videoModel'
   | 'videoMaxBytes'
   | 'searchModel'
@@ -42,7 +45,9 @@ const ALL_OPTION_KEYS: readonly OptionKey[] = [
   'nestedSearchTools',
   'statefulResponses',
   'imagineTool',
+  'editTool',
   'videoTool',
+  'mediaRiskAcknowledged',
   'videoModel',
   'videoMaxBytes',
   'searchModel',
@@ -200,6 +205,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   // task rows or diagnostics carried over from the previous account — even an
   // A→B import that stays "signed-in" gets a new key.
   const [accountGeneration, setAccountGeneration] = useState(0)
+  // A saved video choice/revocation also invalidates the local runtime
+  // capability snapshot, without probing upstream or reloading the account.
+  const [capabilityGeneration, setCapabilityGeneration] = useState(0)
 
   type OptionsPayload = {
     options?: Partial<Record<OptionKey, OptionValue>>
@@ -219,6 +227,14 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     setOptionsFeedback('idle')
   }
 
+  const markMedia = (group: 'images' | 'video', enabled: boolean): void => {
+    const patch = mediaTogglePatch(options, group, enabled, () => window.confirm(t('confirmMediaEnable')))
+    if (patch === undefined) return
+    setOptions(previous => ({ ...previous, ...patch }))
+    setOptionsDirty(previous => new Set([...previous, ...(Object.keys(patch) as OptionKey[])]))
+    setOptionsFeedback('idle')
+  }
+
   const loadOptions = useCallback(async () => {
     try {
       applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH))
@@ -233,6 +249,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       const patch: Record<string, unknown> = {}
       for (const key of optionsDirty) patch[key] = options[key] ?? null
       applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch))
+      if (optionsDirty.has('videoTool') || optionsDirty.has('mediaRiskAcknowledged')) setCapabilityGeneration(generation => generation + 1)
       setOptionsFeedback('saved')
     } catch {
       setOptionsFeedback('error')
@@ -246,7 +263,10 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     try {
       const patch: Record<string, unknown> = {}
       for (const key of ALL_OPTION_KEYS) patch[key] = null
+      // Consent revocation must override even an old opt-in Cordis config.
+      patch.mediaRiskAcknowledged = false
       applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch))
+      setCapabilityGeneration(generation => generation + 1)
       setOptionsFeedback('saved')
     } catch {
       setOptionsFeedback('error')
@@ -547,6 +567,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
           </button>
         </div>
         <p style={bodyStyle}>{t('optionsHint')}</p>
+        <p style={bodyStyle}>{t('mediaRiskHint')}</p>
 
         <label style={optionRowStyle}>
           <input
@@ -573,20 +594,23 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
         <label style={optionRowStyle}>
           <input
             type="checkbox"
-            checked={optBool(options.imagineTool, true)}
+            checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
             disabled={optionsBusy}
-            onChange={(event) => markOption('imagineTool', event.target.checked)}
+            onChange={(event) => markMedia('images', event.target.checked)}
           />
           <span>{t('imagineTool')}</span>
         </label>
         <p style={optionHintStyle}>{t('imagineToolHint')}</p>
+        <p style={optionHintStyle}>
+          {`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}
+        </p>
 
         <label style={optionRowStyle}>
           <input
             type="checkbox"
             checked={optBool(options.videoTool, false)}
             disabled={optionsBusy}
-            onChange={(event) => markOption('videoTool', event.target.checked)}
+            onChange={(event) => markMedia('video', event.target.checked)}
           />
           <span>{t('videoTool')}</span>
         </label>
@@ -688,7 +712,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
           The key remounts the panel on every account change, so a previous
           account's tasks/diagnostics and blob URLs never survive a switch. */}
       <CapabilitiesView
-        key={`${status.status}:${String(accountGeneration)}`}
+        key={`${status.status}:${String(accountGeneration)}:${String(capabilityGeneration)}`}
         t={t}
         signedIn={status.status === 'signed-in'}
       />

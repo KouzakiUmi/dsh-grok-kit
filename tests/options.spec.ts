@@ -156,6 +156,35 @@ describe('video options', () => {
   })
 })
 
+describe('effective media consent', () => {
+  it('starts with all media off and retains gated legacy switches without deleting them', () => {
+    expect(presentPluginOptions({}, {}).effective).toMatchObject({ imagineTool: false, editTool: false, videoTool: false, mediaRiskAcknowledged: false })
+    const stored = { imagineTool: true, editTool: true, videoTool: true }
+    const view = presentPluginOptions({}, stored)
+    expect(view.stored).toEqual(stored)
+    expect(view.effective).toMatchObject({ imagineTool: false, editTool: false, videoTool: false })
+    expect(presentPluginOptions(stored, {}).effective).toMatchObject({ imagineTool: false, editTool: false, videoTool: false })
+  })
+
+  it('requires exact boolean consent and honors each image flag independently', () => {
+    expect(presentPluginOptions({ imagineTool: true, editTool: true, mediaRiskAcknowledged: 'true' }, {}).effective)
+      .toMatchObject({ imagineTool: false, editTool: false })
+    const view = presentPluginOptions({ imagineTool: true, editTool: true, mediaRiskAcknowledged: true }, { editTool: false })
+    expect(view.effective).toMatchObject({ imagineTool: true, editTool: false, videoTool: false, mediaRiskAcknowledged: true })
+    expect(view.sources.editTool).toBe('stored')
+    expect(view.sources.mediaRiskAcknowledged).toBe('cordis')
+  })
+
+  it('persists consent and edit choices, and reset consent overrides a Cordis true', async () => {
+    await tempHome()
+    await writeStoredOptions({ editTool: true, mediaRiskAcknowledged: true })
+    expect(readStoredOptions()).toEqual({ editTool: true, mediaRiskAcknowledged: true })
+    const reset = mergeStoredOptionsPatch(readStoredOptions(), { editTool: null, mediaRiskAcknowledged: null })
+    expect(reset).toEqual({ mediaRiskAcknowledged: false })
+    expect(presentPluginOptions({ editTool: true, mediaRiskAcknowledged: true }, reset).effective.editTool).toBe(false)
+  })
+})
+
 describe('presentPluginOptions', () => {
   it('shows Cordis backendSearch when there is no stored override (GROK-SETTINGS-001)', () => {
     const view = presentPluginOptions({ backendSearch: true }, {})

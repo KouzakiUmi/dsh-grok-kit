@@ -17,6 +17,7 @@ import type { CatalogSource } from './catalog.ts'
 import { probeGrokAuth } from './grok-import.ts'
 import { readStoredProxyUrl, setXaiProxyUrl, validProxyUrl, writeStoredProxyUrl } from './proxy.ts'
 import { safeMessage } from './redact.ts'
+import { MEDIA_TOOL_KEYS, mediaEnableNeedsConfirmation } from './media-options.ts'
 import {
   presentPluginOptions,
   readStoredOptions,
@@ -40,7 +41,9 @@ const OPTION_KEYS: ReadonlyArray<keyof StoredPluginOptions> = [
   'nestedSearchTools',
   'statefulResponses',
   'imagineTool',
+  'editTool',
   'videoTool',
+  'mediaRiskAcknowledged',
   'videoModel',
   'videoMaxBytes',
   'searchModel',
@@ -59,7 +62,9 @@ export function mergeStoredOptionsPatch(
   for (const key of OPTION_KEYS) {
     if (!(key in patch)) continue
     const value = (patch as Record<string, unknown>)[key]
-    if (value === null || value === undefined || value === '') delete next[key]
+    // Reset revokes consent even if an old Cordis/profile config says true.
+    if (key === 'mediaRiskAcknowledged' && (value === null || value === undefined || value === '')) next[key] = false
+    else if (value === null || value === undefined || value === '') delete next[key]
     else next[key] = value
   }
   // Return next directly — spreading current again would resurrect deleted keys.
@@ -380,6 +385,31 @@ export function registerXaiOAuthAuthRoutes(
   cordisConfig: Record<string, unknown> = {},
 ): void {
   const auth = new XaiOAuthWebAuth(session)
+  // Keep merge/check/write in order across tabs: a stale unrelated save must
+  // not resurrect switches that another request just closed.
+  let optionsWrite = Promise.resolve()
+  const saveOptionsPatch = (body: unknown): Promise<StoredPluginOptions> => {
+    const pending = optionsWrite.then(async () => {
+      const current = readStoredOptions()
+      const previous = presentPluginOptions(cordisConfig, current).effective
+      const merged = sanitizeStoredOptions({ version: 1, options: mergeStoredOptionsPatch(current, body) })
+      if (!previous.mediaRiskAcknowledged && typeof body === 'object' && body !== null
+        && !Array.isArray(body) && 'mediaRiskAcknowledged' in body && body.mediaRiskAcknowledged === true) {
+        // A first confirmation starts with all media off, ignoring old stored
+        // and Cordis true switches. Only choices explicit in this request win.
+        for (const key of MEDIA_TOOL_KEYS) merged[key] = key in body && (body as Record<string, unknown>)[key] === true
+      }
+      if (mediaEnableNeedsConfirmation(
+        previous,
+        presentPluginOptions(cordisConfig, merged).effective,
+        body,
+      )) throw new BadRequestError('Enabling media tools requires explicit mediaRiskAcknowledged: true in this request after reviewing the media risks.')
+      await writeStoredOptions(merged)
+      return merged
+    })
+    optionsWrite = pending.then(() => undefined, () => undefined)
+    return pending
+  }
   ctx.effect(() => {
     const routes = [
       ctx.webServer.register({
@@ -479,11 +509,7 @@ export function registerXaiOAuthAuthRoutes(
           if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
           try {
             const body = await readJson(req)
-            const merged = sanitizeStoredOptions({
-              version: 1,
-              options: mergeStoredOptionsPatch(readStoredOptions(), body),
-            })
-            await writeStoredOptions(merged)
+            const merged = await saveOptionsPatch(body)
             // Respond with effective values so the UI matches runtime, plus
             // the sanitized stored document (invalid/out-of-range dropped).
             json(res, 200, optionsResponse(cordisConfig, merged))

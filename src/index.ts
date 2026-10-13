@@ -31,6 +31,7 @@ import { createFileResponseChainStore } from './response-chain.ts'
 import { XaiOAuthSession } from './session.ts'
 import { XaiOAuthCredentialStore } from './store.ts'
 import { mergePluginOptions, readStoredOptions } from './options.ts'
+import { resolveMediaOptions, type MediaToolKey } from './media-options.ts'
 import { applyGrokImagineTool } from './imagine.ts'
 import { applyGrokImagineEditTool } from './imagine-edit.ts'
 import { DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_MAX_BYTES, validVideoModel, validVideoMaxBytes } from './video-config.ts'
@@ -240,12 +241,12 @@ export interface Config {
    * omit means false. Do not enable while DSH is still in a toolUse step.
    */
   statefulResponses?: boolean
-  /** Register grok_imagine. Default true. */
+  /** Register grok_imagine after explicit media consent. Default false. */
   imagineTool?: boolean
   /**
    * Register grok_imagine_edit (image-to-image over POST /v1/images/edits),
-   * merged from the former dsh-grok-imagine-edit plugin. Default true;
-   * independent of imagineTool.
+   * merged from the former dsh-grok-imagine-edit plugin. Default false;
+   * independent advanced config; the settings page controls both image tools.
    */
   editTool?: boolean
   /** Pin the edit model; '' follows the live catalog (grok-imagine-image-2.0, fallback grok-imagine-image). */
@@ -256,6 +257,8 @@ export interface Config {
   editMaxImageBytes?: number
   /** Register video task tools. Opt-in only; generation consumes subscription usage. */
   videoTool?: boolean
+  /** Explicit local acknowledgement of the documented media risks; not official authorization. Default false. */
+  mediaRiskAcknowledged?: boolean
   /** Supported single-image video model. */
   videoModel?: string
   /** Hard streamed download ceiling, defaults to 100 MiB. */
@@ -271,12 +274,13 @@ export const Config: z<Config> = z.object({
   backendSearch: z.boolean().default(false),
   nestedSearchTools: z.boolean(),
   statefulResponses: z.boolean(),
-  imagineTool: z.boolean().default(true),
-  editTool: z.boolean().default(true),
+  imagineTool: z.boolean().default(false),
+  editTool: z.boolean().default(false),
   editModel: z.string().default(''),
   editMaxSourceImages: z.number().default(EDIT_MAX_SOURCE_IMAGES),
   editMaxImageBytes: z.number().default(DEFAULT_EDIT_MAX_IMAGE_BYTES),
   videoTool: z.boolean().default(false),
+  mediaRiskAcknowledged: z.boolean().default(false),
   videoModel: z.string().default(DEFAULT_VIDEO_MODEL),
   videoMaxBytes: z.number().default(DEFAULT_VIDEO_MAX_BYTES),
 })
@@ -300,6 +304,13 @@ export function apply(ctx: Context, config: Config): void {
     config as unknown as Record<string, unknown>,
     readStoredOptions(),
   ) as unknown as Config
+  const media = resolveMediaOptions(effectiveConfig as unknown as Record<string, unknown>)
+  // Registration remains a startup decision. A saved close/revocation also
+  // blocks subsequent calls through already registered tools and video routes.
+  const mediaEnabled = (key: MediaToolKey): boolean => media[key] && resolveMediaOptions(mergePluginOptions(
+    config as unknown as Record<string, unknown>,
+    readStoredOptions(),
+  ))[key]
   // Proxy hook FIRST: every later x.ai request (OAuth, models, chat, search)
   // goes through globalThis.fetch and is routed by the hook. Registered as an
   // effect so the hook is restored and the ProxyAgent closed on dispose.
@@ -329,7 +340,7 @@ export function apply(ctx: Context, config: Config): void {
     const credential = await session.store.read(XAI_PI_PROVIDER)
     return credential?.type === 'oauth'
   }
-  const videoEnabled = effectiveConfig.videoTool === true
+  const videoEnabled = media.videoTool
   const video = videoEnabled ? new VideoTaskManager({
     tokens,
     identity: currentIdentity,
@@ -343,21 +354,21 @@ export function apply(ctx: Context, config: Config): void {
   }) : undefined
   if (video !== undefined) {
     ctx.effect(() => () => video.dispose(), 'dsh-grok-kit: video task lifecycle')
-    ctx.inject(['tools'], toolCtx => applyGrokVideoTools(toolCtx, { manager: video }))
+    ctx.inject(['tools'], toolCtx => applyGrokVideoTools(toolCtx, { manager: video, enabled: () => mediaEnabled('videoTool') }))
   }
   ctx.inject(['webServer'], webCtx => registerGrokCapabilityRoutes(webCtx, {
     tracker: capabilities,
-    videoEnabled,
+    videoEnabled: () => mediaEnabled('videoTool'),
     authenticated,
     identity: currentIdentity,
     tasks: () => video?.list() ?? Promise.resolve([]),
     resume: (taskId, signal) => {
-      if (video === undefined) return Promise.reject(new Error('video generation is disabled'))
+      if (video === undefined || !mediaEnabled('videoTool')) return Promise.reject(new Error('video generation is disabled'))
       return video.resume(taskId, signal)
     },
   }))
   ctx.inject(['webServer'], webCtx => registerGrokVideoFileRoute(webCtx, {
-    enabled: videoEnabled,
+    enabled: () => mediaEnabled('videoTool'),
     identity: currentIdentity,
     tasks: () => video?.list() ?? Promise.resolve([]),
     resolveAttachments: () => ctx.get('attachments'),
@@ -415,18 +426,20 @@ export function apply(ctx: Context, config: Config): void {
   if (backendSearch) {
     ctx.inject(['tools', 'systemPrompt'], toolCtx => applyXaiServerSearchRejectTools(toolCtx))
   }
-  if (effectiveConfig.imagineTool !== false) {
+  if (media.imagineTool) {
     ctx.inject(['tools'], toolCtx => applyGrokImagineTool(toolCtx, {
       tokens,
       session,
       resolveAttachments: () => ctx.get('attachments'),
+      enabled: () => mediaEnabled('imagineTool'),
     }))
   }
-  if (effectiveConfig.editTool !== false) {
+  if (media.editTool) {
     ctx.inject(['tools'], toolCtx => applyGrokImagineEditTool(toolCtx, {
       tokens,
       session,
       resolveAttachments: () => ctx.get('attachments'),
+      enabled: () => mediaEnabled('editTool'),
       editModel: effectiveConfig.editModel,
       maxSourceImages: effectiveConfig.editMaxSourceImages,
       maxImageBytes: effectiveConfig.editMaxImageBytes,

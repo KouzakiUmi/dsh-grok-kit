@@ -23,6 +23,8 @@
 >
 > OAuth availability may depend on subscription tier, region, xAI terms, account entitlement, rate limits, and future service changes. Users are responsible for confirming that their account and use are permitted. This project does not guarantee continued access or compatibility and does not provide xAI/Grok accounts, subscriptions, or official support.
 
+> Current source, not yet released: the media-off defaults, Settings risk confirmation and video task features below belong to this source candidate. They do not describe the already published npm `0.2.2` package; the fixed-version installation commands below still install that published version.
+
 ## More than OAuth sign-in
 
 `dsh-grok-kit` adds a separate `xai-oauth` route to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It does not require `XAI_API_KEY` or patch dsh source code. The point is not only to sign in, but to bring server-side search and the fields required for continuous reasoning into the main chat path.
@@ -30,7 +32,7 @@
 - **Search in the main loop:** web and X lookup occurs inside grok-4.6's current Think turn, so reasoning can use newly found material immediately
 - **Continuous multi-turn reasoning:** high effort is the default, with `reasoning.encrypted_content` preserved for the next turn
 - **Sign-in stays in sync with Grok CLI:** the plugin shares and writes back `~/.grok/auth.json` instead of copying once and rotating refresh tokens separately
-- **Imagine text-to-image and image-to-image:** `grok_imagine` and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are enabled by default, while non-chat models stay out of the conversation picker; generated and edited images are stored in the DSH attachment library preserving normalized metadata, rendered in session image cards with prompt and inputs, and support download and re-generation/editing
+- **Imagine text-to-image and image-to-image:** `grok_imagine` and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are off by default and can be enabled after risk confirmation in Settings. Non-chat models stay out of the conversation picker; generated and edited images are stored in the DSH attachment library preserving normalized metadata, rendered in session image cards with prompt and inputs, and support download and re-generation/editing
 
 Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, and diagnostic redaction.
 
@@ -120,7 +122,7 @@ See [INSTALL.md](INSTALL.md) for installation, migration, removal, and troublesh
 
 - The picker shows only mainline Grok chat models; Imagine, video, embedding, build, and code variants are hidden
 - The default grok-4.6 descriptor uses high reasoning and requests `reasoning.encrypted_content` so encrypted reasoning context can be carried into later turns
-- `grok_imagine` (text-to-image) and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are enabled by default. Images are stored in the DSH attachment library and rendered directly in session image cards. Images can be downloaded from the card or exported with host file tools; direct disk writing via `save_path` is no longer supported for either tool
+- `grok_imagine` (text-to-image) and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are off by default and require risk confirmation in Settings to enable. Images are stored in the DSH attachment library and rendered directly in session image cards. Images can be downloaded from the card or exported with host file tools; direct disk writing via `save_path` is no longer supported for either tool
 - DSH's native `web_search` remains in the host tool list, but is removed from an xAI payload with backend search enabled to avoid duplicate tool names
 
 The model list comes from the signed-in account's `GET /v1/models` response and is cached locally. Service or model requirements may still require a plugin update; a visible model id does not imply that every capability is available to the account.
@@ -136,7 +138,15 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 
 ### Development version: optional video tasks and capabilities
 
-Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings show local capability observations and tasks; quota is unverified, not estimated. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. This does not imply the published npm 0.2.2 package includes the feature. See the [video guide](VIDEO.md) for configuration and limitations.
+Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings show local capability observations and tasks; quota is unverified, not estimated. Confirm the risks and restart after enabling. Generation may use subscription quota or incur charges; stopping the wait does not cancel the upstream job. This does not imply the published npm 0.2.2 package includes the feature. See the [video guide](VIDEO.md) for configuration and limitations.
+
+### Enabling media tools and understanding the risks
+
+Image generation, image editing and video are all off by default. In DeepSeek Harness Settings → xAI Grok → “Search & feature options”, selecting an image or video switch opens a risk confirmation. Cancelling leaves the settings unchanged; after confirming, save and restart the DSH host to register the tools. The image switch controls generation and editing together, with each selected state shown separately. Normal generation, regeneration/editing, queries and downloads do not repeat the prompt; reopening after a close asks again. Enabling saves settings only, without generating media or probing quota.
+
+This is third-party unofficial access. Account eligibility and features depend on upstream service rules; access may be restricted or suspended, and confirmation is not official authorization. Generation may use subscription quota or incur charges. Text and input images are sent upstream: do not upload sensitive content or content you have no right to use. Stopping the wait does not cancel submitted generation or guarantee that usage stops.
+
+The new version does not inherit old media enablement: image generation, editing and video all start off. First confirmation saves only the media explicitly selected in that request, keeping the rest off. The new confirmed choices persist across restarts; account, model, proxy and search settings are unaffected by this rule. Advanced configuration can select `imagineTool`, `editTool` and `videoTool` separately; read the risks above and explicitly set `mediaRiskAcknowledged: true`. It is a local informed choice, not a credential or official permission. Reset revokes media consent even if profile/Cordis still contains `true`. Saving a close blocks subsequent calls, including those requested by old result cards, without cancelling submitted upstream jobs. When video is off, its local task list, resume and video download routes are also disabled; existing tasks and attachments remain stored.
 
 ## Configuration
 
@@ -149,8 +159,10 @@ Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_v
 | `searchMaxResults` | `8` | Maximum number of sources returned by nested search |
 | `webSearchTimeoutMs` | `60000` | Cooperative budget for nested web search |
 | `xSearchTimeoutMs` | `120000` | Cooperative budget for nested X search |
-| `imagineTool` | `true` | Register `grok_imagine` (text-to-image) |
-| `editTool` | `true` | Register `grok_imagine_edit` (image-to-image; independent of `imagineTool`, reusing the main OAuth session) |
+| `imagineTool` | `false` | Register `grok_imagine` (text-to-image) after media risk confirmation |
+| `editTool` | `false` | Register `grok_imagine_edit` after media risk confirmation (independent advanced config; the Settings image switch controls both tools) |
+| `videoTool` | `false` | Register video generation, status and resume tools after media risk confirmation |
+| `mediaRiskAcknowledged` | `false` | Explicit acknowledgement of the media risks above; both it and the selected media switch must be `true` |
 | `editModel` | `''` | Pin the image-edit model; empty string follows live catalog (prefers `grok-imagine-image-2.0`, fallback `grok-imagine-image`) |
 | `editMaxSourceImages` | `5` | Per-request source-image cap for `grok_imagine_edit` (plugin accepts up to 5) |
 | `editMaxImageBytes` | `20971520` | Per-source byte cap for `grok_imagine_edit` (default 20 MiB) |
@@ -158,7 +170,7 @@ Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_v
 
 The bundle defaults come from `cordis.patch.yml`. For a manually reduced or recomposed setup, inspect the final values with `dsh --profile web --dump-config`.
 
-The “Search & feature options” card on Settings → xAI Grok can also override the search/feature keys above (restart to apply; untouched keys keep following the bundle defaults instead of being pinned). `proxyUrl` is the exception — it applies immediately on save.
+The “Search & feature options” card on Settings → xAI Grok can also override the search/feature keys above (new tool registration and other feature changes require restart; untouched keys keep following the bundle defaults). Saving a media close blocks subsequent calls; `proxyUrl` applies immediately on save.
 
 ## Sign-in document, proxy, and security boundaries
 

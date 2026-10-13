@@ -265,50 +265,64 @@ function chunkToBytes(value: unknown): Uint8Array {
  * (`ftyp`/`styp`/`moov` at offset 4) before yielding anything, so a non-MP4
  * payload never reaches the attachment store.
  */
-async function* verifiedMp4Chunks(reader: ChunkReader, maxBytes: number): AsyncGenerator<Uint8Array> {
+function verifiedMp4Stream(reader: ChunkReader, maxBytes: number): {
+  data: AsyncGenerator<Uint8Array>
+  close: () => Promise<void>
+} {
   const tooLarge = () => new Error(`video exceeds the ${String(maxBytes)}-byte download limit`)
-  try {
-    const head: Uint8Array[] = []
-    let headLength = 0
-    let total = 0
-    while (headLength < 12) {
-      const { done, value } = await reader.read()
-      if (done) break
-      const chunk = chunkToBytes(value)
-      total += chunk.byteLength
-      if (total > maxBytes) throw tooLarge()
-      head.push(chunk)
-      headLength += chunk.byteLength
+  let completed = false
+  let closed = false
+  const close = async (): Promise<void> => {
+    if (closed) return
+    closed = true
+    try {
+      // Also called by the consumer boundary: an async generator's finally
+      // does not run if the attachment store fails before its first read.
+      if (!completed) await reader.cancel?.(new Error('video stream consumption ended early')).catch(() => undefined)
+    } finally {
+      reader.releaseLock?.()
     }
-    const prefix = new Uint8Array(Math.min(headLength, 12))
-    let offset = 0
-    for (const chunk of head) {
-      const take = Math.min(chunk.byteLength, prefix.byteLength - offset)
-      prefix.set(chunk.subarray(0, take), offset)
-      offset += take
-      if (offset >= prefix.byteLength) break
-    }
-    const box = String.fromCharCode(...prefix.subarray(4, 8))
-    if (prefix.byteLength < 12 || (box !== 'ftyp' && box !== 'styp' && box !== 'moov')) {
-      throw new Error('downloaded video is not an MP4 file (missing ISO-BMFF signature)')
-    }
-    for (const chunk of head) yield chunk
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) return
-      const chunk = chunkToBytes(value)
-      total += chunk.byteLength
-      if (total > maxBytes) throw tooLarge()
-      yield chunk
-    }
-  } catch (error) {
-    // Cut the upstream connection on any failure (cap, signature, consumer
-    // error) instead of merely letting go of the reader.
-    await reader.cancel?.(error).catch(() => undefined)
-    throw error
-  } finally {
-    reader.releaseLock?.()
   }
+  async function* chunks(): AsyncGenerator<Uint8Array> {
+    try {
+      const head: Uint8Array[] = []
+      let headLength = 0
+      let total = 0
+      while (headLength < 12) {
+        const { done, value } = await reader.read()
+        if (done) { completed = true; break }
+        const chunk = chunkToBytes(value)
+        total += chunk.byteLength
+        if (total > maxBytes) throw tooLarge()
+        head.push(chunk)
+        headLength += chunk.byteLength
+      }
+      const prefix = new Uint8Array(Math.min(headLength, 12))
+      let offset = 0
+      for (const chunk of head) {
+        const take = Math.min(chunk.byteLength, prefix.byteLength - offset)
+        prefix.set(chunk.subarray(0, take), offset)
+        offset += take
+        if (offset >= prefix.byteLength) break
+      }
+      const box = String.fromCharCode(...prefix.subarray(4, 8))
+      if (prefix.byteLength < 12 || (box !== 'ftyp' && box !== 'styp' && box !== 'moov')) {
+        throw new Error('downloaded video is not an MP4 file (missing ISO-BMFF signature)')
+      }
+      for (const chunk of head) yield chunk
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) { completed = true; return }
+        const chunk = chunkToBytes(value)
+        total += chunk.byteLength
+        if (total > maxBytes) throw tooLarge()
+        yield chunk
+      }
+    } finally {
+      await close()
+    }
+  }
+  return { data: chunks(), close }
 }
 
 /** Allowlist check for signed video download URLs (exact official https hosts only). */
@@ -972,6 +986,7 @@ export class VideoTaskManager {
     // The caller's signal rides along so a dropped client cancels the download
     // instead of leaving it running on the manager's account.
     const timed = withTimeout([signal, this.disposeController.signal], VIDEO_DOWNLOAD_TIMEOUT_MS, 'video download')
+    let stream: ReturnType<typeof verifiedMp4Stream> | undefined
     try {
       // Token-free fetch on purpose: the signed URL must not travel with the
       // OAuth bearer, and redirects stay disabled (redirect: 'error').
@@ -991,9 +1006,9 @@ export class VideoTaskManager {
         await discardBody(response)
         throw new Error('video download body is not streamable; refusing unbounded buffering')
       }
-      const data = verifiedMp4Chunks(reader, this.maxVideoBytes)
+      stream = verifiedMp4Stream(reader, this.maxVideoBytes)
       const attachment = await attachments.saveFileStream({
-        data,
+        data: stream.data,
         name: `grok-video-${record.taskId.slice(0, 8)}.mp4`,
         ...timed.signal === undefined ? {} : { signal: timed.signal },
       })
@@ -1026,7 +1041,7 @@ export class VideoTaskManager {
       await this.persistRecord(identity, updated)
       return toResult(updated)
     } finally {
-      timed.cancel()
+      try { await stream?.close() } finally { timed.cancel() }
     }
   }
 

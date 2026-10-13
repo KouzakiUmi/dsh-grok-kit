@@ -159,6 +159,7 @@ const STATE_TONE: Record<CapabilityFeatureState, string> = {
 // ---------------------------------------------------------------------------
 
 type TasksStatus =
+  | { kind: 'disabled' }
   | { kind: 'loading' }
   | { kind: 'error'; detail: string }
   | { kind: 'ready'; tasks: VideoTaskResult[] }
@@ -170,10 +171,14 @@ type TasksStatus =
  * locally applied query/resume result.
  */
 export function VideoTasksView({ t, videoEnabled }: { t: SettingsTranslate; videoEnabled: boolean }) {
-  const [status, setStatus] = useState<TasksStatus>({ kind: 'loading' })
+  const [status, setStatus] = useState<TasksStatus>({ kind: videoEnabled ? 'loading' : 'disabled' })
   const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
+    if (!videoEnabled) {
+      setStatus({ kind: 'disabled' })
+      return
+    }
     const abort = new AbortController()
     let live = true
     setStatus({ kind: 'loading' })
@@ -188,28 +193,28 @@ export function VideoTasksView({ t, videoEnabled }: { t: SettingsTranslate; vide
       live = false
       abort.abort()
     }
-  }, [reloadKey])
+  }, [reloadKey, videoEnabled])
 
   return (
     <section aria-label={t('videoTasksTitle')} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div style={rowStyle}>
         <h4 style={{ ...titleStyle, fontSize: 13 }}>{t('videoTasksTitle')}</h4>
-        <button type="button" style={buttonStyle} disabled={status.kind === 'loading'} onClick={() => { setReloadKey(key => key + 1) }}>
+        <button type="button" style={buttonStyle} disabled={!videoEnabled || status.kind === 'loading'} onClick={() => { if (videoEnabled) setReloadKey(key => key + 1) }}>
           {t('videoTasksRefresh')}
         </button>
       </div>
-      <p style={hintStyle}>{t('videoTasksIntro')}</p>
+      {videoEnabled ? <p style={hintStyle}>{t('videoTasksIntro')}</p> : null}
       {videoEnabled ? null : <p style={hintStyle}>{t('videoTasksDisabled')}</p>}
-      <p style={hintStyle}>{t('resumeHint')}</p>
-      {status.kind === 'loading' ? <p style={bodyStyle}>{t('videoTasksLoading')}</p> : null}
-      {status.kind === 'error' ? (
+      {videoEnabled ? <p style={hintStyle}>{t('resumeHint')}</p> : null}
+      {videoEnabled && status.kind === 'loading' ? <p style={bodyStyle}>{t('videoTasksLoading')}</p> : null}
+      {videoEnabled && status.kind === 'error' ? (
         <>
           <p style={errorStyle}>{t('videoTasksError')}</p>
           {status.detail === '' ? null : <p style={errorStyle}>{status.detail}</p>}
         </>
       ) : null}
-      {status.kind === 'ready' && status.tasks.length === 0 ? <p style={bodyStyle}>{t('videoTasksEmpty')}</p> : null}
-      {status.kind === 'ready' && status.tasks.length > 0 ? (
+      {videoEnabled && status.kind === 'ready' && status.tasks.length === 0 ? <p style={bodyStyle}>{t('videoTasksEmpty')}</p> : null}
+      {videoEnabled && status.kind === 'ready' && status.tasks.length > 0 ? (
         <ul style={listStyle}>
           {status.tasks.map(task => (
             <li key={task.taskId} style={{ listStyle: 'none' }}>

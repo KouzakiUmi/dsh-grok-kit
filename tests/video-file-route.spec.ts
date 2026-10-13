@@ -17,7 +17,7 @@ afterEach(async () => {
   })))
 })
 
-async function fixture(options: { enabled?: boolean; bytes?: number; maxBytes?: number; state?: string } = {}) {
+async function fixture(options: { enabled?: boolean | (() => boolean); bytes?: number; maxBytes?: number; state?: string } = {}) {
   let identity: string | undefined = 'account-a'
   const data = new Uint8Array(options.bytes ?? 16)
   const ref = { attachmentId: `sha256:${'a'.repeat(64)}`, name: 'unsafe-name.mp4', bytes: data.byteLength } as FileAttachmentRef
@@ -51,6 +51,15 @@ async function fixture(options: { enabled?: boolean; bytes?: number; maxBytes?: 
 }
 
 describe('task-scoped video download route', () => {
+  it('blocks history downloads after the current media switch closes', async () => {
+    let enabled = true
+    const f = await fixture({ enabled: () => enabled })
+    enabled = false
+    expect((await f.request()).status).toBe(409)
+    expect(f.tasks).not.toHaveBeenCalled()
+    expect(f.readFileStream).not.toHaveBeenCalled()
+  })
+
   it('streams only the owned saved attachment with attachment-only headers and backpressure', async () => {
     const f = await fixture({ bytes: 256 * 1024 })
     const response = await f.request()

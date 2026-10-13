@@ -45,13 +45,15 @@ function routeFetch(handlers: FetchHandlers) {
 }
 
 /** saveFileStream mock that CONSUMES the stream like the real store does. */
-function saver(options: { fail?: boolean } = {}) {
+function saver(options: { fail?: boolean; failBeforeRead?: boolean; failAfterFirstChunk?: boolean } = {}) {
   const chunkCounts = { chunks: 0 }
   const fn = vi.fn(async (input: { data: AsyncIterable<Uint8Array>; name?: string; signal?: AbortSignal }) => {
+    if (options.failBeforeRead) throw new Error('attachment store write failed')
     let bytes = 0
     for await (const chunk of input.data) {
       chunkCounts.chunks += 1
       bytes += chunk.byteLength
+      if (options.failAfterFirstChunk) throw new Error('attachment store write failed')
     }
     if (options.fail) throw new Error('attachment store write failed')
     return { attachmentId: `sha256:${'b'.repeat(64)}`, name: input.name ?? 'grok-video-test.mp4', bytes }
@@ -745,6 +747,51 @@ describe('status / resume', () => {
     const resumed = await recovered.manager.resume(one.taskId)
     expect(resumed.state).toBe('done')
     expect(resumed.attachment).toMatchObject({ bytes: MP4.byteLength })
+  })
+
+  it.each(['before first read', 'after first chunk'] as const)('cancels and releases an unfinished download when the saver fails %s', async stage => {
+    const read = vi.fn(async () => ({ done: false, value: MP4 }))
+    const cancel = vi.fn(async () => undefined)
+    const releaseLock = vi.fn()
+    const response = { ok: true, status: 200, body: { getReader: () => ({ read, cancel, releaseLock }) } } as unknown as Response
+    const failing = saver({ failBeforeRead: stage === 'before first read', failAfterFirstChunk: stage === 'after first chunk' })
+    const harness = makeHarness({
+      storePath: await newStorePath(),
+      saveFileStream: failing,
+      fetchMock: routeFetch({
+        poll: () => json({ status: 'done', video: { url: 'https://vidgen.x.ai/v.mp4' } }),
+        download: () => response,
+      }),
+    })
+    const submitted = await harness.manager.generate({ prompt: 'p', image: PNG_DATA_URI })
+    const result = await harness.manager.status(submitted.taskId)
+    expect(result.state).toBe('interrupted')
+    expect(result.error).toMatch(/attachment store write failed/)
+    expect(result.attachment).toBeUndefined()
+    expect(read).toHaveBeenCalledTimes(stage === 'before first read' ? 0 : 1)
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(releaseLock).toHaveBeenCalledOnce()
+    expect(harness.fetchMock.mock.calls.filter(call => String(call[0]) === XAI_VIDEO_GENERATIONS_URL)).toHaveLength(1)
+    expect(harness.fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('releases a completely consumed download without cancelling it', async () => {
+    const read = vi.fn()
+      .mockResolvedValueOnce({ done: false, value: MP4 })
+      .mockResolvedValueOnce({ done: false, value: new Uint8Array([0, 1, 2, 3]) })
+      .mockResolvedValueOnce({ done: true })
+    const cancel = vi.fn(async () => undefined)
+    const releaseLock = vi.fn()
+    const response = { ok: true, status: 200, body: { getReader: () => ({ read, cancel, releaseLock }) } } as unknown as Response
+    const one = await pendingTask()
+    const harness = makeHarness({ storePath: one.storePath, fetchMock: routeFetch({
+      poll: () => json({ status: 'done', video: { url: 'https://vidgen.x.ai/v.mp4' } }),
+      download: () => response,
+    }) })
+    expect((await harness.manager.status(one.taskId)).state).toBe('done')
+    expect(read).toHaveBeenCalledTimes(3)
+    expect(cancel).not.toHaveBeenCalled()
+    expect(releaseLock).toHaveBeenCalledOnce()
   })
 
   it('keeps tokens and signed URLs out of the store, results and errors', async () => {

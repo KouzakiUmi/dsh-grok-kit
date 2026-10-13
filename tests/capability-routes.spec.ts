@@ -183,6 +183,17 @@ describe('route account and response boundaries', () => {
 })
 
 describe('GET /video/tasks', () => {
+  it('disables capabilities, history and resume after the current media switch closes', async () => {
+    let enabled = true
+    const { handlers, tasks, resume } = setup({ videoEnabled: () => enabled })
+    enabled = false
+    expect((await call(handlers.get(GROK_CAPABILITIES_PATH)!, mockReq(), new MockResponse())).body).toMatchObject({ videoEnabled: false })
+    expect((await call(handlers.get(GROK_VIDEO_TASKS_PATH)!, mockReq(), new MockResponse())).status).toBe(409)
+    expect((await call(handlers.get(GROK_VIDEO_RESUME_PATH)!, mockReq({ method: 'POST', headers: POST_HEADERS, body: JSON.stringify({ taskId: UUID }) }), new MockResponse())).status).toBe(409)
+    expect(tasks).not.toHaveBeenCalled()
+    expect(resume).not.toHaveBeenCalled()
+  })
+
   it('serves the local task list without any upstream probe', async () => {
     const { handlers, tasks, resume } = setup()
     const { status, body } = await call(handlers.get(GROK_VIDEO_TASKS_PATH)!, mockReq(), new MockResponse())
