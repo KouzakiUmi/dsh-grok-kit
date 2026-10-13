@@ -203,7 +203,7 @@ function rewriteBackendSearchError(event: AssistantMessageEvent, backendSearch: 
       error: {
         ...event.error,
         errorMessage:
-          'xAI rejected this request (HTTP 403). Server-side web_search/x_search may be disabled for this SuperGrok tier — set backendSearch: false in the dsh-grok-kit plugin config.',
+          'xAI rejected this request (HTTP 403). Server-side web/X search looks unavailable on this account — turn off backendSearch in the plugin settings and retry.',
       },
     }
   }
@@ -213,7 +213,7 @@ function rewriteBackendSearchError(event: AssistantMessageEvent, backendSearch: 
       error: {
         ...event.error,
         errorMessage:
-          'xAI rejected mixed server-side search tools (HTTP 400). Set backendSearch: false in the dsh-grok-kit plugin config.'
+          'xAI rejected this request (HTTP 400): the payload mixed server-side search tools. Turn off backendSearch in the plugin settings and retry.'
           + (message.length > 0 ? ` Original: ${message}` : ''),
       },
     }

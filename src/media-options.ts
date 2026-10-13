@@ -36,6 +36,6 @@ export function mediaEnableNeedsConfirmation(
 /** Check at execution time too, including calls requested by old result cards. */
 export function assertMediaEnabled(enabled: (() => boolean) | undefined, name: string): void {
   if (enabled !== undefined && !enabled()) {
-    throw new Error(`${name} is disabled; enable media tools in Settings → xAI Grok after reviewing the risks`)
+    throw new Error(`${name} is disabled — enable it in Settings → xAI Grok first`)
   }
 }
