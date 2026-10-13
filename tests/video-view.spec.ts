@@ -70,6 +70,7 @@ import {
 import { mediaCardStyles } from '../src/client/media-card.tsx'
 import { en, zh } from '../src/client/locales.ts'
 import { XaiSettings } from '../src/client/XaiSettings.tsx'
+import { GROK_VIDEO_FILE_PATH } from '../src/video-config.ts'
 
 interface Registration {
   spec: { name: string; key?: string; id?: string }
@@ -620,6 +621,7 @@ describe('download contract', () => {
   afterEach(() => { vi.unstubAllGlobals() })
 
   it('only ever targets the plugin file route by taskId', () => {
+    expect(videoFileUrl(TASK_ID)).toBe(`${GROK_VIDEO_FILE_PATH}?taskId=${TASK_ID}`)
     expect(videoFileUrl(TASK_ID)).toBe(`/plugins/dsh-grok-kit/video/file?taskId=${TASK_ID}`)
     expect(videoFileUrl('../etc/passwd')).toBe(`/plugins/dsh-grok-kit/video/file?taskId=${encodeURIComponent('../etc/passwd')}`)
     expect(videoFileUrl(TASK_ID)).not.toMatch(/^https?:/)

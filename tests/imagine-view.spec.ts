@@ -24,15 +24,53 @@
  *   6. slot registration contract (two toolviews + one tail, inject provides
  *      sessions + translator) and turn-tail protection: per-turn aggregation,
  *      cross-node callId dedup, null when empty, Codex source legend.
+ *   7. lightbox lifecycle: an open viewer survives a later re-render of its
+ *      own card (the close callback keeps a stable identity, so the modal
+ *      effect is not torn down and re-opened on every unrelated state change).
  */
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+/**
+ * Minimal stateful hook runtime, INERT unless a test installs it into
+ * `hookRuntime`. With no runtime active every hook keeps its stateless
+ * behaviour, so the rest of this file renders exactly as before. The runtime
+ * exists for the effect/lifecycle regressions below: it keeps hook slots
+ * across render passes, attaches host refs, and replays effect cleanups when
+ * an effect's dependencies change — the behaviour React performs on a
+ * re-render. It never re-renders by itself; the test drives the passes.
+ */
+interface HookRuntime {
+  beginPass: () => void
+  commit: (hosts: HostNode[]) => void
+  useCallback: (fn: unknown, deps?: readonly unknown[]) => unknown
+  useEffect: (fn: () => unknown, deps?: readonly unknown[]) => void
+  useRef: (initial: unknown) => { current: unknown }
+  useState: (initial: unknown) => [unknown, (next: unknown) => void]
+}
+
+interface HostNode {
+  ref: unknown
+  node: Record<string, unknown>
+  onClose?: unknown
+}
+
+interface HookSlot {
+  value?: unknown
+  deps?: readonly unknown[]
+  cleanup?: () => void
+  fn?: () => unknown
+}
+
+const hookRuntime = vi.hoisted(() => ({ current: null as HookRuntime | null }))
 
 vi.mock('react', () => ({
-  useCallback: (fn: unknown) => fn,
-  useEffect: () => undefined,
+  useCallback: (fn: unknown, deps?: readonly unknown[]) => hookRuntime.current === null ? fn : hookRuntime.current.useCallback(fn, deps),
+  useEffect: (fn: () => unknown, deps?: readonly unknown[]) => { hookRuntime.current?.useEffect(fn, deps) },
   useMemo: (fn: () => unknown) => fn(),
-  useRef: (initial: unknown) => ({ current: initial }),
-  useState: (initial: unknown) => [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => undefined],
+  useRef: (initial: unknown) => hookRuntime.current === null ? { current: initial } : hookRuntime.current.useRef(initial),
+  useState: (initial: unknown) => hookRuntime.current === null
+    ? [typeof initial === 'function' ? (initial as () => unknown)() : initial, () => undefined]
+    : hookRuntime.current.useState(initial),
   useSyncExternalStore: (_subscribe: unknown, getSnapshot: () => unknown) => getSnapshot(),
 }))
 vi.mock('react/jsx-runtime', () => {
@@ -549,4 +587,189 @@ it('aggregates the actual DSH ChatNodeStore values from owner turn', () => {
   ] } })
   const out = renderDeep(tail({ owner: { turn: { turn: 1 }, seq: 5 }, useChat }))
   expect(out.texts.filter(text => text === 'tail prompt')).toHaveLength(1)
+})
+
+// ---------------------------------------------------------------------------
+// Effect / lifecycle harness (used only by the lightbox regression below)
+// ---------------------------------------------------------------------------
+
+function createHookRuntime(): HookRuntime {
+  const slots: HookSlot[] = []
+  let cursor = 0
+  let pending: HookSlot[] = []
+  let effects: HookSlot[] = []
+  const changed = (before: readonly unknown[] | undefined, after: readonly unknown[] | undefined): boolean => {
+    if (before === undefined || after === undefined) return true
+    return before.length !== after.length || after.some((value, index) => !Object.is(value, before[index]))
+  }
+  const slot = (): HookSlot => {
+    const index = cursor++
+    slots[index] ??= {} as HookSlot
+    return slots[index]!
+  }
+  return {
+    beginPass: () => { cursor = 0; pending = [] },
+    commit: hosts => {
+      for (const host of hosts) {
+        host.node['onclose'] = host.onClose
+        const ref = host.ref
+        if (typeof ref === 'function') (ref as (node: unknown) => void)(host.node)
+        else if (ref !== null && typeof ref === 'object') (ref as { current: unknown }).current = host.node
+      }
+      for (const [index, next] of pending.entries()) {
+        const previous = effects[index]
+        // React keeps a mounted effect in place while its dependencies hold.
+        if (previous !== undefined && !changed(previous.deps, next.deps)) continue
+        previous?.cleanup?.()
+        const returned = next.fn?.()
+        next.cleanup = typeof returned === 'function' ? (returned as () => void) : undefined
+      }
+      effects = pending
+    },
+    useCallback: (fn, deps) => {
+      const current = slot()
+      if (!('deps' in current) || deps === undefined || changed(current.deps, deps)) {
+        current.deps = deps
+        current.value = fn
+      }
+      return current.value
+    },
+    useEffect: (fn, deps) => { pending.push({ fn, deps }) },
+    useRef: initial => {
+      const current = slot()
+      if (!('value' in current)) current.value = { current: initial }
+      return current.value as { current: unknown }
+    },
+    useState: initial => {
+      const current = slot()
+      if (!('value' in current)) current.value = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      return [current.value, (next: unknown) => {
+        current.value = typeof next === 'function' ? (next as (previous: unknown) => unknown)(current.value) : next
+      }]
+    },
+  }
+}
+
+interface FakeDialog {
+  open: boolean
+  closes: number
+  showModal: () => void
+  close: () => void
+  addEventListener: () => void
+  removeEventListener: () => void
+  onclose?: () => void
+}
+
+function createFakeDialog(): FakeDialog {
+  const dialog: FakeDialog = {
+    open: false,
+    closes: 0,
+    showModal: () => { dialog.open = true },
+    close: () => {
+      if (!dialog.open) return
+      dialog.open = false
+      dialog.closes += 1
+      dialog.onclose?.()
+    },
+    addEventListener: () => { undefined },
+    removeEventListener: () => { undefined },
+  }
+  return dialog
+}
+
+interface Pass {
+  dialog: (FakeDialog & Record<string, unknown>) | undefined
+  button: (label: string) => (() => void) | undefined
+}
+
+/**
+ * One render pass: expand every component exactly once, then attach the host
+ * refs and replay the effects. Host nodes are keyed by their position in the
+ * tree and kept between passes, the way React reuses the DOM nodes it already
+ * created — a re-render therefore acts on the very same `<dialog>` the viewer
+ * opened, which is what makes the lifecycle assertion meaningful.
+ */
+function renderPass(runtime: HookRuntime, view: (props: Record<string, unknown>) => unknown, props: Record<string, unknown>, nodes: Map<string, Record<string, unknown>>): Pass {
+  runtime.beginPass()
+  const hosts: HostNode[] = []
+  const buttons = new Map<string, () => void>()
+  const expand = (node: unknown, path: string): void => {
+    if (Array.isArray(node)) { node.forEach((child, index) => { expand(child, `${path}.${String(index)}`) }); return }
+    if (node === null || node === undefined || typeof node !== 'object') return
+    const element = node as { type: unknown; props: Record<string, unknown>; ref?: unknown }
+    if (typeof element.type === 'function') { expand((element.type as (inner: Record<string, unknown>) => unknown)(element.props), path); return }
+    const key = `${path}:${String(element.type)}`
+    if (element.type === 'button' && typeof element.props.children === 'string' && typeof element.props.onClick === 'function') {
+      buttons.set(element.props.children, element.props.onClick as () => void)
+    }
+    const host = nodes.get(key) ?? (element.type === 'dialog' ? createFakeDialog() as unknown as Record<string, unknown> : {})
+    nodes.set(key, host)
+    hosts.push({
+      // The automatic JSX runtime keeps `ref` beside props, not inside them.
+      ref: element.ref ?? element.props.ref,
+      node: host,
+      onClose: element.props.onClose,
+    })
+    expand(element.props.children, key)
+  }
+  expand(view(props), '')
+  runtime.commit(hosts)
+  const dialog = hosts.find(host => host.node['open'] !== undefined)?.node
+  return {
+    dialog: dialog as (FakeDialog & Record<string, unknown>) | undefined,
+    button: label => buttons.get(label),
+  }
+}
+
+const settle = (): Promise<void> => new Promise(resolve => { setTimeout(resolve, 0) })
+
+describe('image lightbox lifecycle', () => {
+  afterEach(() => {
+    hookRuntime.current = null
+    vi.restoreAllMocks()
+  })
+
+  it('keeps an open lightbox open when its own card re-renders', async () => {
+    vi.spyOn(URL, 'createObjectURL').mockImplementation(() => 'blob:imagine/1')
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => { undefined })
+    const sessions = {
+      binding: () => ({
+        session: {
+          readAttachment: (attachmentId: string) => Promise.resolve({
+            ok: true,
+            value: { attachment: { attachmentId, mediaType: 'image/png' }, data: new Uint8Array([1, 2, 3]) },
+          }),
+        },
+      }),
+    }
+    const runtime = createHookRuntime()
+    const nodes = new Map<string, Record<string, unknown>>()
+    hookRuntime.current = runtime
+    const view = toolViewFor(captureRegistrations(), 'grok_imagine')
+    const props = {
+      block: settledBlock('grok_imagine', { prompt: 'a lighthouse' }, [{ type: 'image', attachment: IMAGE_REF }]),
+      sessionId: 's1',
+      sessions,
+    }
+
+    // First paint: the result card, no viewer yet.
+    const first = renderPass(runtime, view, props, nodes)
+    expect(first.dialog).toBeUndefined()
+
+    // Explicit user action opens the viewer.
+    const open = first.button(en.imageUiViewLarge)
+    expect(open).toBeDefined()
+    open!()
+    await settle()
+
+    const opened = renderPass(runtime, view, props, nodes)
+    expect(opened.dialog?.['open']).toBe(true)
+
+    // An unrelated re-render of the same card (a second image finishing its
+    // load, the copy hint resetting, a turn-store update) must leave the open
+    // viewer alone: its modal effect is keyed on a stable close callback.
+    const again = renderPass(runtime, view, props, nodes)
+    expect(again.dialog?.['closes']).toBe(0)
+    expect(again.dialog?.['open']).toBe(true)
+  })
 })

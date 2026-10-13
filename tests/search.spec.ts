@@ -250,8 +250,10 @@ describe('XaiOAuthSearchProvider', () => {
       expect(rejectedAccessToken).toBe('old-token')
       return 'new-token'
     })
+    const rejectedResponse = jsonResponse({ error: { message: 'expired' } }, 401)
+    const cancel = vi.spyOn(rejectedResponse.body!, 'cancel')
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse({ error: { message: 'expired' } }, 401))
+      .mockResolvedValueOnce(rejectedResponse)
       .mockResolvedValueOnce(jsonResponse({
         output: [{ type: 'web_search_call', action: { sources: [{ url: 'https://fresh.example/' }] } }],
       }))
@@ -262,6 +264,7 @@ describe('XaiOAuthSearchProvider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect((fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe('Bearer old-token')
     expect((fetchMock.mock.calls[1]?.[1]?.headers as Record<string, string>).authorization).toBe('Bearer new-token')
+    expect(cancel).toHaveBeenCalledOnce()
   })
 
   it('never loops refresh when the retry also returns HTTP 401', async () => {
@@ -279,15 +282,19 @@ describe('XaiOAuthSearchProvider', () => {
 
   it('does not retry when a forced refresh cannot rotate the rejected bearer', async () => {
     const refresh = vi.fn(async () => 'old-token')
-    const fetchMock = vi.fn(async () => jsonResponse({ error: { message: 'invalid bearer' } }, 401)) as typeof fetch
+    const response = jsonResponse({ error: { message: 'invalid bearer' } }, 401)
+    const cancel = vi.spyOn(response.body!, 'cancel')
+    const fetchMock = vi.fn(async () => response)
     const provider = new XaiOAuthSearchProvider(tokens('old-token', refresh), 'web_search', { fetch: fetchMock })
 
     await expect(provider.search({ query: 'x' })).rejects.toMatchObject({
       code: 'WEB_PROVIDER_ERROR',
-      message: expect.stringContaining('HTTP 401'),
+      message: expect.stringMatching(/HTTP 401.*invalid bearer/),
     })
     expect(refresh).toHaveBeenCalledOnce()
     expect(fetchMock).toHaveBeenCalledOnce()
+    expect(cancel).not.toHaveBeenCalled()
+    expect(response.bodyUsed).toBe(true)
   })
 
   it('surfaces xAI HTTP and in-band errors', async () => {
@@ -306,6 +313,27 @@ describe('XaiOAuthSearchProvider', () => {
       code: 'WEB_PROVIDER_ERROR',
       message: expect.stringContaining('subscription limit'),
     })
+  })
+
+  it('releases the unused unauthorized response when credential refresh fails', async () => {
+    const response = jsonResponse({ error: { message: 'expired' } }, 401)
+    const cancel = vi.spyOn(response.body!, 'cancel')
+    const fetch = vi.fn(async () => response)
+    const provider = new XaiOAuthSearchProvider(tokens('old-token', async () => { throw new Error('synthetic rotation failure') }), 'web_search', { fetch })
+    await expect(provider.search({ query: 'test' })).rejects.toMatchObject({ code: 'WEB_PROVIDER_ERROR' })
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each(['web_search', 'x_search'] as const)('does not return a late successful %s result after cancellation', async tool => {
+    const caller = new AbortController()
+    const response = jsonResponse({ output: [] })
+    vi.spyOn(response, 'json').mockImplementation(async () => {
+      caller.abort(new Error('cancelled before result projection'))
+      return { output: [{ type: 'message', content: [{ type: 'output_text', text: 'late result' }] }] }
+    })
+    const provider = new XaiOAuthSearchProvider(tokens('synthetic-access'), tool, { fetch: vi.fn(async () => response) })
+    await expect(provider.search({ query: 'test' }, caller.signal)).rejects.toMatchObject({ code: 'WEB_ABORTED' })
   })
 
   it('maps AbortError to WEB_ABORTED', async () => {

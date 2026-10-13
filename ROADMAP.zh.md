@@ -31,10 +31,33 @@
 
 官方能力存在不代表当前账号或所有订阅档位都可用，不以解除模型过滤宣称获得专属模型。
 
+### 2026-10-13 接口取证与订阅权限边界
+
+本插件面向 SuperGrok 等 **Grok 订阅 OAuth**，不是 xAI API-key / PAYG 接入。官方 API 文档只用于发现接口契约，不证明订阅权益；不增加 API key 回退、独立管理密钥或额外 API 计费后端。
+
+- [官方代码执行文档](<https://docs.x.ai/developers/tools/code-execution>)确认 Responses 工具类型为 `code_interpreter`；[官方主循环图片文档](<https://docs.x.ai/developers/tools/image-generation>)确认 `image_generation`，成品位于 `image_generation_call.result`，为无 data-URL 前缀的 base64。示例使用 API key，不能据此认定本插件的 OAuth 订阅令牌拥有对应权限。
+- 当前锁定的 pi-ai 0.87.1 的 Responses 解析层仅为 reasoning、message、function_call、custom_tool_call 建立输出槽；尚无主循环图片输出项承载。不要仅注入图片工具就宣称实现图片展示/附件保存；先补齐宿主/上游契约，不新建平行请求管道。Python 最终文本与执行过程展示也须区分。
+- [官方 STT 文档](<https://docs.x.ai/developers/model-capabilities/audio/speech-to-text>)提供 `/v1/stt` 接口；当前 OAuth 适用性未验证。真实探测、录音权限、音频上传与计费需分别明确授权，未实现空入口。
+- [Grok Build](<https://docs.x.ai/build/overview>)有 ACP 形态，但不等于能复用本插件凭据。[权限](<https://docs.x.ai/build/features/permissions>)默认 Ask；[沙箱](<https://docs.x.ai/build/features/sandbox>)默认关闭，文档只列 Linux/macOS 的隔离机制，不能宣称 Windows 上获得相同隔离。ACP 通用[取消规范](<https://agentclientprotocol.com/protocol/v1/cancellation>)允许实现可选取消，不能将发送通知等同于上游任务已停止；具体 prompt-turn 与进程生命周期还须核验。
+- 云端 [Files](<https://docs.x.ai/developers/files>) / [Collections](<https://docs.x.ai/developers/files/collections>) 官方示例使用 API key；OAuth 是否可用仍未知，不自动上传或转公开。[ZDR 视频存储](<https://docs.x.ai/build/settings/zdr-video-storage>)只说明生成视频的存储安排，不能作为整个代码仓库或遥测的零保留证明。
+- 接口存在、订阅 OAuth 权限、解析兼容与真实验收分别记录。STT/Python 的最小订阅 OAuth 探测因本地/网络异常未取得 HTTP 权限结果，仍不宣称可用或不可用；没有自动重试、改用 API key 或切换后端。
+
 ## 验收与发布边界
 
 - 本地隔离回归 → 双端类型检查 → 构建并同步 lib → 独立核查 → 单次提交与推送。
 - 模拟请求与开发界面预览不冒充真实账号调用或已安装生效；未覆盖项在交付说明中明确列出。
 - 本轮源码实现完成；双端类型检查、构建与全量隔离回归通过：37 个测试文件、487 项通过、1 项既有平台跳过。独立复核未发现确定的 P1/P2。
 - 使用实际构建产物及模拟账号/额度的独立浏览器预览，验证五页归属、390px 宽度无横向溢出、滚动后顶部保持可见、深浅色和英文文案、错误/退出后不残留额度。此预览不等于宿主内安装生效或真实额度端到端验证。
-- 本轮未安装或重启，未发起真实额度/付费生成测试；远端 CI 结论另行核验。后续安装、重启、发布以及新的提交/推送均需相应当次授权。
+- 上述基础版随后按单次授权完成本地打包及桌面 Profile 安装，核对了来源、锁文件完整性、启用状态与产物一致性；未自动重启。其 Node 22/24 CI 检查通过，不等于真实额度或所有宿主交互已验收。
+
+## 后续功能完善与回归
+
+- 设置：未保存导航标记、可访问保存反馈、账号加载期间的额度状态；迟到初始读取不覆盖草稿、已保存值或重置结果。
+- 共享凭据：读取与 getAuth 等待可被调用者取消，不中断其他调用者的共享操作；搜索在凭据阶段取消返回 WEB_ABORTED，不开始上游搜索。
+- 媒体：图片灯箱保持稳定；视频刷新/任务替换取消旧的本地查询等待，迟到响应不能覆盖最新任务状态。任务替换后的旧播放/下载成功或失败不能污染新卡片，保留当前任务的正常下载与错误提示；删除已确证无调用且未公开导出的旧下载 hook。
+- 视频下载路径使用既有浏览器安全共享模块中的唯一常量，保留原 Host/Client 导出名；双端分别验证共享路径，未将 Host 或 Node 导入客户端，也未放宽 JSX/类型检查配置。
+- 请求收尾：搜索、生成与编辑在 401 重试或续约失败时释放被丢弃的响应体；无法轮换时保留原响应诊断。搜索解码后再次复检取消状态，不返回迟到成功。
+- 账号状态：账号操作与新的状态读取使旧读取失效，迟到成功或失败不覆盖退出/导入后的界面；新增退出迟到成功及导入迟到失败回归，退出用例已在修复前实跑失败。
+- 当前双端类型检查、构建与隔离回归通过：38 个测试文件、521 项通过、1 项既有平台跳过；差异格式检查通过。真实浏览器/宿主中的这些最新交互尚未复测。
+- 最新本地构建已通过 Desktop 专用入口安装；来源、锁文件 integrity、bundle 启用及关键源码/lib 一致性核验通过，无账号的隔离装载与适配器契约检查通过。安装器有 peer dependency 警告，未升级其它 Profile 依赖；本地安装包及核验资料不提交到仓库。
+- 未重启，不宣称当前进程已激活新代码；真实交互验收尚待进行。提交、推送、安装与重启分别按当次授权处理。

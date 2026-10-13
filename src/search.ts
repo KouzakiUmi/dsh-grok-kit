@@ -457,12 +457,16 @@ export class XaiOAuthSearchProvider {
       try {
         refreshed = await this.tokens.refresh(accessToken, signal)
       } catch (error) {
+        // The discarded 401 body must not retain its connection on auth failure.
+        void response.body?.cancel().catch(() => undefined)
         if (signal?.aborted || isAbortError(error)) {
           throw new XaiOAuthSearchError('xAI search aborted', 'WEB_ABORTED', { cause: error })
         }
         throw new XaiOAuthSearchError('Could not refresh the SuperGrok OAuth credential after HTTP 401', 'WEB_PROVIDER_ERROR', { cause: error })
       }
       if (refreshed !== undefined && refreshed.length > 0 && refreshed !== accessToken) {
+        // Only discard when retrying; otherwise retain the actionable 401 detail.
+        void response.body?.cancel().catch(() => undefined)
         accessToken = refreshed
         response = await this.request(accessToken, request, signal)
       }
@@ -481,6 +485,7 @@ export class XaiOAuthSearchProvider {
       }
       throw new XaiOAuthSearchError('xAI search returned invalid JSON', 'WEB_PROVIDER_ERROR', { cause: error })
     }
+    if (signal?.aborted) throw new XaiOAuthSearchError('xAI search aborted', 'WEB_ABORTED')
     const apiError = xaiApiErrorMessage(body)
     if (apiError !== undefined) {
       throw new XaiOAuthSearchError(`xAI search returned an error: ${safeMessage(apiError)}`, 'WEB_PROVIDER_ERROR')

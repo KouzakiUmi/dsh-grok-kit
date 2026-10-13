@@ -2,6 +2,29 @@
 
 ## 未发布 / Unreleased
 
+- 视频任务替换后，旧播放/下载等待的迟到错误不再污染新任务卡片；保留当前任务的正常下载和错误反馈，移除未被使用且未公开导出的旧下载 hook。
+- Late playback/download failures from a replaced video task no longer pollute its replacement; current-task downloads and errors still work. Removed an unused, non-public download hook.
+- 视频文件路由改为复用既有浏览器安全共享模块中的唯一常量，保留 Host 与 Client 的原导出名，增加双端路径契约回归。
+- Video downloads now use one browser-safe shared route constant while preserving existing Host/Client export names, with contract regressions on both sides.
+
+- 账号变更使此前的状态读取失效；迟到的首屏或轮询结果、错误不再覆盖退出或导入后的账号界面。
+- Account changes invalidate older status reads; late initial/polling results and errors no longer overwrite the account UI after sign-out or import.
+
+- 搜索、图片生成和编辑在 401 续约重试或续约失败时释放被丢弃的响应体；无法轮换时保留原响应诊断。仍仅重试一次，不新增生成或刷新策略。
+- Search and image generation/editing release discarded 401 bodies on OAuth retry or refresh failure, while preserving diagnostics when no rotation occurs. Existing single-retry policies are unchanged.
+- 搜索在结果解码后复检取消状态，不再把已取消请求的迟到结果返回为成功。
+- Search re-checks cancellation after decoding a response instead of returning a late success for a cancelled call.
+
+- 凭据读取与 getAuth 等待响应调用者取消，不中断其他调用者的共享凭据操作；搜索在此阶段取消会返回 WEB_ABORTED，且不会开始上游搜索。
+- Credential reads and getAuth waits honor caller cancellation without interrupting shared operations; search cancellation at this stage returns WEB_ABORTED without starting an upstream search.
+- 图片大图预览不再因卡片无关重渲染关闭；视频任务刷新或替换会取消旧的本地查询等待并忽略迟到结果，避免最新状态回退。
+- Image lightboxes survive unrelated card re-renders; video refresh/task replacement cancels older local query waits and ignores late results so newer task states win.
+
+- 导航标记搜索、媒体和网络页的未保存修改；保存反馈可被读屏宣布，账号读取期间额度不再提前提示登录。
+- Navigation marks unsaved Search, Media and Network edits; save feedback is accessible, and quota waits for account loading instead of prematurely prompting sign-in.
+- 修复迟到的首屏选项或代理响应覆盖草稿、已保存值或重置结果；代理保存同步服务端规范化值。重启文案适用于桌面与 Web，代理说明涵盖官方额度请求。
+- Late initial option/proxy reads no longer roll back drafts, saves or resets; proxy saves synchronize normalized server values. Restart wording applies to Desktop and Web, and proxy help covers billing requests.
+
 - 设置按账号、模型、搜索与对话、媒体与任务、网络分页；公共状态与导航固定在顶部，分页保存和重置不影响其他页草稿。
 - Settings now separate Account, Models, Search & chat, Media & tasks, and Network with sticky shared status/navigation and page-scoped option saves/resets.
 - 账号页读取官方共享订阅额度，复用 OAuth 与代理；成功结果按账号缓存 60 秒，不估算未报告的额度或余额。

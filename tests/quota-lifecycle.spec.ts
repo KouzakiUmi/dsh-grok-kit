@@ -15,6 +15,20 @@ beforeEach(() => { probe.cleanups = []; probe.writes = [] })
 afterEach(() => { for (const cleanup of probe.cleanups) cleanup(); vi.unstubAllGlobals() })
 
 describe('quota view request lifecycle', () => {
+  it.each([false, true])('shows account-loading feedback without fetching quota (signedIn=%s)', signedIn => {
+    const fetch = vi.fn()
+    vi.stubGlobal('fetch', fetch)
+    const tree = QuotaView({ t, signedIn, accountLoading: true }) as unknown as { props: Record<string, unknown> }
+    expect(fetch).not.toHaveBeenCalled()
+    expect(tree.props['aria-busy']).toBe(true)
+    const children = tree.props.children as Array<{ type: unknown; props: Record<string, unknown> }>
+    const message = children[2]!
+    expect(message.type).toBe('p')
+    expect(message.props.role).toBe('status')
+    expect(message.props.children).toBe('loadingAccount')
+    const header = children[0]!.props.children as Array<{ props: Record<string, unknown> }>
+    expect(header[1]!.props.disabled).toBe(true)
+  })
   it('does not request upstream-backed quota while signed out', () => {
     const fetch = vi.fn()
     vi.stubGlobal('fetch', fetch)

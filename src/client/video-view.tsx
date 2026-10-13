@@ -48,6 +48,7 @@ import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 
 import type { Context } from '@deepseek-ai/cordis'
 import { MediaCardFrame, mediaCardStyles, type MediaCardTone } from './media-card.tsx'
 import { en } from './locales.ts'
+import { GROK_VIDEO_FILE_PATH } from '../video-config.ts'
 import type { XaiOAuthSettingsKey } from './locales.ts'
 
 /** Translator bound from the settings locale namespace and injected with the slot. */
@@ -336,7 +337,7 @@ export function formatBytes(bytes: number): string {
  * It only serves `done` tasks of the signed-in account — no arbitrary path or
  * attachment id is ever accepted by this client.
  */
-export const VIDEO_FILE_PATH = '/plugins/dsh-grok-kit/video/file'
+export const VIDEO_FILE_PATH = GROK_VIDEO_FILE_PATH
 /** Client-side ceiling; a larger reported size is refused before any request. */
 export const MAX_VIDEO_DOWNLOAD_BYTES = 100 * 1024 * 1024
 
@@ -533,51 +534,6 @@ export function useVideoBlobResource(task: VideoTaskResult | undefined): VideoBl
   // React's effect replay must still dispose loads started after that replay.
   useEffect(() => () => { resource?.dispose() }, [resource])
   return resource
-}
-
-export interface VideoDownloadHandle {
-  state: 'idle' | 'busy' | 'done' | 'error'
-  /** Human-readable failure reason; undefined while healthy. */
-  message: string | undefined
-  download: () => Promise<void>
-  disabled: boolean
-}
-
-/**
- * Lazy download state for one task: nothing is fetched until the user clicks,
- * at most one request is in flight, object URLs are revoked when the owner
- * unmounts OR when the bound task changes (a resumed/refreshed task must not
- * keep the previous task's blob alive), and failures surface as stable English
- * text for the surrounding view to translate.
- */
-export function useVideoDownload(task: VideoTaskResult | undefined): VideoDownloadHandle {
-  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle')
-  const [message, setMessage] = useState<string | undefined>(undefined)
-  const resource = useVideoBlobResource(task)
-  const busy = useRef(false)
-  useEffect(() => {
-    busy.current = false
-    setState('idle')
-    setMessage(undefined)
-  }, [task?.taskId])
-  const start = async (): Promise<void> => {
-    if (task === undefined || resource === undefined || busy.current) return
-    busy.current = true
-    setState('busy')
-    setMessage(undefined)
-    try {
-      await resource.load()
-      const url = resource.objectUrl()
-      if (url !== undefined) triggerDownload(url, task.attachment?.name ?? `grok-video-${task.taskId}`)
-      setState('done')
-    } catch (error: unknown) {
-      setMessage(error instanceof Error ? error.message : String(error))
-      setState('error')
-    } finally {
-      busy.current = false
-    }
-  }
-  return { state, message, download: start, disabled: task === undefined }
 }
 
 // ---------------------------------------------------------------------------
@@ -807,11 +763,12 @@ export function VideoMediaCard({ block, task: reported, t: translate, resetToken
       abort.current?.abort()
     }
   }, [])
-  // A refreshed list must win over a locally applied query/resume result.
+  // Refresh or task replacement wins over both applied and in-flight results.
   useEffect(() => {
+    abort.current?.abort()
     setOverride(undefined)
     setContinueState('idle')
-  }, [resetToken])
+  }, [resetToken, reported?.taskId])
   useEffect(() => {
     playbackStarted.current = false
     setPlaying(false)
@@ -822,6 +779,13 @@ export function VideoMediaCard({ block, task: reported, t: translate, resetToken
 
   const task = override ?? reported
   const resource = useVideoBlobResource(task)
+  // Task identity of the currently bound media resource. A load started for one
+  // task settles after the card has been rebound to another one: the old
+  // resource is disposed, so the load can only ever end in an error, and that
+  // error belongs to a task the card no longer shows. Same isolation the
+  // query/resume path gets from the controller identity in `continueTask`.
+  const boundTaskId = useRef<string | undefined>(task?.taskId)
+  boundTaskId.current = task?.taskId
   const attachments = collectVideoAttachments(task, block)
   const resultText = textOf(block)
   const prompt = task?.prompt !== undefined && task.prompt !== '' ? task.prompt : promptOf(block)
@@ -834,17 +798,21 @@ export function VideoMediaCard({ block, task: reported, t: translate, resetToken
     && (task.state === 'pending' || task.state === 'downloading' || task.state === 'interrupted')
   const stateLabel = taskStateLabel(t, task?.state)
 
+  /** The bound task must still be the one this card renders. */
+  const stillBound = (boundId: string | undefined): boolean => mounted.current && boundTaskId.current === boundId
+
   const loadMedia = async (): Promise<void> => {
     if (resource === undefined || blobState === 'busy') return
+    const boundId = task?.taskId
     setBlobState('busy')
     setBlobError(undefined)
     try {
       await resource.load()
-      if (!mounted.current) return
+      if (!stillBound(boundId)) return
       setPlaying(true)
       setBlobState('idle')
     } catch (error: unknown) {
-      if (!mounted.current) return
+      if (!stillBound(boundId)) return
       setBlobError(error instanceof Error ? error.message : String(error))
       setBlobState('error')
     }
@@ -852,17 +820,18 @@ export function VideoMediaCard({ block, task: reported, t: translate, resetToken
 
   const download = async (): Promise<void> => {
     if (resource === undefined || task === undefined || blobState === 'busy') return
+    const boundId = task.taskId
     setBlobState('busy')
     setBlobError(undefined)
     try {
       await resource.load()
-      if (!mounted.current) return
+      if (!stillBound(boundId)) return
       const url = resource.objectUrl()
       if (url !== undefined) triggerDownload(url, task.attachment?.name ?? `grok-video-${task.taskId}`)
       setDownloaded(true)
       setBlobState('idle')
     } catch (error: unknown) {
-      if (!mounted.current) return
+      if (!stillBound(boundId)) return
       setBlobError(error instanceof Error ? error.message : String(error))
       setBlobState('error')
     }
@@ -886,7 +855,7 @@ export function VideoMediaCard({ block, task: reported, t: translate, resetToken
       const value: unknown = await response.json().catch(() => undefined)
       if (!response.ok) throw new Error(`HTTP ${String(response.status)}`)
       const updated = parseResumePayload(value)
-      if (!mounted.current) return
+      if (controller.signal.aborted || !mounted.current || abort.current !== controller) return
       if (updated !== undefined) setOverride(updated)
       setContinueState('done')
     } catch {

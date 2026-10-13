@@ -22,5 +22,5 @@
     "rewriteRelativeImportExtensions": true,
     "types": []
   },
-  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "tests/imagine-view.spec.ts", "tests/video-view.spec.ts", "tests/media-card.spec.ts", "tests/settings-pages.spec.ts", "tests/quota-view.spec.ts", "tests/quota-lifecycle.spec.ts"]
+  "include": ["src/client/**/*.ts", "src/client/**/*.tsx", "tests/imagine-view.spec.ts", "tests/video-view.spec.ts", "tests/video-refresh.spec.ts", "tests/media-card.spec.ts", "tests/settings-pages.spec.ts", "tests/quota-view.spec.ts", "tests/quota-lifecycle.spec.ts"]
 }

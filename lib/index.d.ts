@@ -878,8 +878,14 @@ interface GrokCapabilityRouteOptions {
 }
 declare function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabilityRouteOptions): void;
 //#endregion
-//#region src/video-file-route.d.ts
+//#region src/video-config.d.ts
+/** Opt-in video defaults shared by host configuration and settings presentation. */
+/** Browser-safe shared route contract; no host imports are needed by the client. */
 declare const GROK_VIDEO_FILE_PATH = "/plugins/dsh-grok-kit/video/file";
+declare const DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5";
+declare const DEFAULT_VIDEO_MAX_BYTES: number;
+//#endregion
+//#region src/video-file-route.d.ts
 interface DownloadTask {
   taskId: string;
   state: string;
@@ -893,11 +899,6 @@ interface VideoFileRouteOptions {
   maxBytes?: number;
 }
 declare function registerGrokVideoFileRoute(ctx: Context, options: VideoFileRouteOptions): void;
-//#endregion
-//#region src/video-config.d.ts
-/** Opt-in video defaults shared by host configuration and settings presentation. */
-declare const DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5";
-declare const DEFAULT_VIDEO_MAX_BYTES: number;
 //#endregion
 //#region src/lock-rescue.d.ts
 /**

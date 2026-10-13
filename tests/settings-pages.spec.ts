@@ -248,7 +248,9 @@ function stubFetch(overrides: Record<string, unknown> = {}): void {
           for (const option of Object.keys(patch)) if (patch[option] === null) delete stored[option]
           return { ...(body as object), stored, effective: { ...(body as { effective?: object }).effective, ...stored } }
         })()
-      : body
+      : key === '/auth/proxy' && init?.body !== undefined
+        ? { proxyUrl: String((JSON.parse(init.body) as { proxyUrl: string }).proxyUrl).trim() }
+        : body
     return Promise.resolve(new Response(JSON.stringify(payload), {
       status: 200,
       headers: { 'content-type': 'application/json' },
@@ -268,7 +270,7 @@ const view = (): unknown => expand(now())
 const now = (): unknown => harness.tree()
 
 function clickPage(label: string): void {
-  const button = find(now(), element => element.type === 'button' && element.props.children === label)[0]
+  const button = find(now(), element => element.type === 'button' && (element.props['aria-label'] === label || String(element.props['aria-label'] ?? '').startsWith(`${label} — `)))[0]
   expect(button, `no page button ${label}`).toBeDefined()
   const onClick = button!.props.onClick as (() => void) | undefined
   expect(typeof onClick).toBe('function')
@@ -531,6 +533,7 @@ describe('five-page settings section', () => {
     // Still in flight: the account reads as gone, so nothing re-reads it.
     expect(panels(now(), QuotaView)[0]!.key).toMatch(/^loading:/)
     expect(panels(now(), QuotaView)[0]!.props.signedIn).toBe(false)
+    expect(panels(now(), QuotaView)[0]!.props.accountLoading).toBe(true)
     clickPage(en.navMedia)
     expect(panels(now(), CapabilitiesView)[0]!.props.signedIn).toBe(false)
 
@@ -538,6 +541,44 @@ describe('five-page settings section', () => {
     clickPage(en.navAccount)
     await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toMatch(/^signed-out:/))
     expect(texts(now()).join(' ')).toContain(en.signedOut)
+  })
+
+  it('ignores a stale initial account read after sign-out commits', async () => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    let resolveStatus!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
+      if (path.endsWith('/auth/status')) {
+        return new Promise<Response>(resolve => { resolveStatus = resolve })
+      }
+      return originalFetch(path, init)
+    }))
+    mount(SIGNED_IN)
+    ;(button(now(), en.logout).props.onClick as () => void)()
+    await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toMatch(/^signed-out:/))
+    resolveStatus(new Response(JSON.stringify(SIGNED_IN), { status: 200 }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(panels(now(), QuotaView)[0]!.props.signedIn).toBe(false)
+    expect(panels(now(), QuotaView)[0]!.key).toMatch(/^signed-out:/)
+  })
+
+  it('ignores a stale account-read failure after an import commits', async () => {
+    stubFetch({ '/auth/import': SIGNED_IN })
+    const originalFetch = globalThis.fetch
+    let rejectStatus!: (error: Error) => void
+    vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
+      if (path.endsWith('/auth/status')) {
+        return new Promise<Response>((_resolve, reject) => { rejectStatus = reject })
+      }
+      return originalFetch(path, init)
+    }))
+    mount({ status: 'signed-out', grokImportAvailable: true })
+    ;(button(now(), en.importGrok).props.onClick as () => void)()
+    await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toBe('signed-in:2'))
+    rejectStatus(new Error('late status failure'))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(panels(now(), QuotaView)[0]!.props.signedIn).toBe(true)
+    expect(panels(now(), QuotaView)[0]!.key).toBe('signed-in:2')
   })
 
   it('restores the real account state when sign-out fails', async () => {
@@ -594,5 +635,109 @@ describe('five-page settings section', () => {
       }
     }
     expect(owners.size).toBe(9)
+  })
+
+  it('marks each unsaved page in navigation and clears only the saved page', async () => {
+    stubFetch()
+    mount()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const navLabel = (label: string) => find(now(), element => element.type === 'button' && String(element.props['aria-label'] ?? '').startsWith(label))[0]!.props['aria-label']
+    clickPage(en.navSearch)
+    fire(field(now(), en.searchModel), { target: { value: 'draft-model' } })
+    clickPage(en.navMedia)
+    fire(field(now(), en.videoTool), { target: { checked: true } })
+    expect(navLabel(en.navSearch)).toContain(en.unsavedChanges)
+    expect(navLabel(en.navMedia)).toContain(en.unsavedChanges)
+    expect(texts(view())).toContain(en.unsavedChangesHint)
+    ;(button(now(), en.optionsSave).props.onClick as () => void)()
+    await settled()
+    expect(navLabel(en.navMedia)).toBe(en.navMedia)
+    expect(navLabel(en.navSearch)).toContain(en.unsavedChanges)
+    expect(find(now(), node => node.props.role === 'status' && texts(node).includes(en.optionsSaved))).toHaveLength(1)
+  })
+
+  it('keeps the network marker until a successful normalized proxy save', async () => {
+    stubFetch()
+    mount()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    clickPage(en.navNetwork)
+    fire(field(now(), en.proxyTitle), { target: { value: ' http://127.0.0.1:8080 ' } })
+    expect(texts(view())).toContain(en.unsavedChangesHint)
+    clickPage(en.navSearch)
+    expect(find(now(), node => node.type === 'button' && node.props['aria-label'] === `${en.navNetwork} — ${en.unsavedChanges}`)).toHaveLength(1)
+    clickPage(en.navNetwork)
+    ;(button(now(), en.proxySave).props.onClick as () => void)()
+    await vi.waitFor(() => expect(texts(view())).toContain(en.proxySaved))
+    expect(field(now(), en.proxyTitle).props.value).toBe('http://127.0.0.1:8080')
+    expect(find(now(), node => node.type === 'button' && node.props['aria-label'] === en.navNetwork)).toHaveLength(1)
+    expect(texts(view())).not.toContain(en.unsavedChangesHint)
+  })
+
+  it('keeps proxy edits when the initial read arrives late', async () => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => url.endsWith('/auth/proxy') && init?.method !== 'POST'
+      ? new Promise<Response>(resolve => { finish = resolve }) : originalFetch(url, init)))
+    mount()
+    clickPage(en.navNetwork)
+    fire(field(now(), en.proxyTitle), { target: { value: 'http://127.0.0.1:8080' } })
+    finish(new Response(JSON.stringify({ proxyUrl: 'http://127.0.0.1:9090' })))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(field(now(), en.proxyTitle).props.value).toBe('http://127.0.0.1:8080')
+    expect(probe.bodies).toEqual([])
+    fire(field(now(), en.proxyTitle), { target: { value: 'http://127.0.0.1:9090' } })
+    expect(find(now(), node => node.type === 'button' && node.props['aria-label'] === en.navNetwork)).toHaveLength(1)
+  })
+
+  it('does not restore an old proxy baseline after a newer save commits', async () => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => url.endsWith('/auth/proxy') && init?.method !== 'POST'
+      ? new Promise<Response>(resolve => { finish = resolve }) : originalFetch(url, init)))
+    mount()
+    clickPage(en.navNetwork)
+    fire(field(now(), en.proxyTitle), { target: { value: 'http://127.0.0.1:8080' } })
+    ;(button(now(), en.proxySave).props.onClick as () => void)()
+    await vi.waitFor(() => expect(texts(view())).toContain(en.proxySaved))
+    finish(new Response(JSON.stringify({ proxyUrl: 'http://127.0.0.1:9090' })))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(field(now(), en.proxyTitle).props.value).toBe('http://127.0.0.1:8080')
+    expect(find(now(), node => node.type === 'button' && node.props['aria-label'] === en.navNetwork)).toHaveLength(1)
+  })
+
+  it.each(['save', 'reset'] as const)('does not roll committed options back when initial loading completes after %s', async action => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => url.endsWith('/auth/options') && init?.method !== 'POST'
+      ? new Promise<Response>(resolve => { finish = resolve }) : originalFetch(url, init)))
+    mount()
+    clickPage(en.navSearch)
+    fire(field(now(), en.searchModel), { target: { value: 'saved-model' } })
+    ;(button(now(), action === 'save' ? en.optionsSave : en.optionsReset).props.onClick as () => void)()
+    await settled()
+    finish(new Response(JSON.stringify({ effective: { searchModel: 'stale-model', nestedSearchTools: true }, stored: { searchModel: 'stale-model', nestedSearchTools: true } })))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(field(now(), en.searchModel).props.value).toBe(action === 'save' ? 'saved-model' : '')
+    if (action === 'reset') expect(field(now(), en.nestedSearchTools).props.value).toBe('auto')
+    expect(button(now(), en.optionsSave).props.disabled).toBe(true)
+  })
+
+  it('announces a failed save without dropping the draft or its marker', async () => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => url.endsWith('/auth/options') && init?.method === 'POST'
+      ? Promise.resolve(new Response('{}', { status: 500 })) : originalFetch(url, init)))
+    mount()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    clickPage(en.navSearch)
+    fire(field(now(), en.searchModel), { target: { value: 'keep-me' } })
+    ;(button(now(), en.optionsSave).props.onClick as () => void)()
+    await vi.waitFor(() => expect(find(now(), node => node.props.role === 'alert' && texts(node).includes(en.optionsError))).toHaveLength(1))
+    expect(field(now(), en.searchModel).props.value).toBe('keep-me')
+    expect(button(now(), en.optionsSave).props.disabled).toBe(false)
+    expect(find(now(), node => node.type === 'button' && node.props['aria-label'] === `${en.navSearch} — ${en.unsavedChanges}`)).toHaveLength(1)
   })
 })

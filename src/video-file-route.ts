@@ -4,9 +4,9 @@ import type { AttachmentStore, FileAttachmentRef } from '@deepseek-ai/dsh-attach
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { ServerResponse } from 'node:http'
 import { isTrustedRequest } from './auth-routes.ts'
-import { DEFAULT_VIDEO_MAX_BYTES } from './video-config.ts'
+import { DEFAULT_VIDEO_MAX_BYTES, GROK_VIDEO_FILE_PATH } from './video-config.ts'
 
-export const GROK_VIDEO_FILE_PATH = '/plugins/dsh-grok-kit/video/file'
+export { GROK_VIDEO_FILE_PATH } from './video-config.ts'
 interface DownloadTask {
   taskId: string
   state: string

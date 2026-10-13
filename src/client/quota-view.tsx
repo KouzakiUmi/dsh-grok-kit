@@ -79,12 +79,12 @@ export function QuotaDetails({ quota, t }: { quota: QuotaSnapshot; t: Translate 
   )
 }
 
-export function QuotaView({ t, signedIn }: { t: Translate; signedIn: boolean }) {
+export function QuotaView({ t, signedIn, accountLoading = false }: { t: Translate; signedIn: boolean; accountLoading?: boolean }) {
   const [quota, setQuota] = useState<QuotaSnapshot | undefined>()
   const [loading, setLoading] = useState(signedIn)
   const [reload, setReload] = useState(0)
   useEffect(() => {
-    if (!signedIn) { setQuota({ state: 'signed-out' }); setLoading(false); return }
+    if (!signedIn || accountLoading) { setQuota({ state: 'signed-out' }); setLoading(false); return }
     const abort = new AbortController()
     let live = true
     setQuota(undefined)
@@ -98,15 +98,15 @@ export function QuotaView({ t, signedIn }: { t: Translate; signedIn: boolean }) 
       .catch(() => { if (live && !abort.signal.aborted) setQuota({ state: 'error', reason: 'temporary' }) })
       .finally(() => { if (live) setLoading(false) })
     return () => { live = false; abort.abort() }
-  }, [signedIn, reload])
+  }, [signedIn, accountLoading, reload])
   return (
-    <section aria-label={t('quotaTitle')} style={card}>
+    <section aria-label={t('quotaTitle')} aria-busy={accountLoading || loading} style={card}>
       <div style={row}>
         <h3 style={{ margin: 0, fontSize: 14, color: 'var(--dsw-alias-label-primary)' }}>{t('quotaTitle')}</h3>
-        <button type="button" style={button} disabled={!signedIn || loading} onClick={() => setReload(value => value + 1)}>{t('quotaRefresh')}</button>
+        <button type="button" style={button} disabled={!signedIn || accountLoading || loading} onClick={() => setReload(value => value + 1)}>{t('quotaRefresh')}</button>
       </div>
       <p style={body}>{t('quotaIntro')}</p>
-      {loading ? <p role="status" style={body}>{t('quotaLoading')}</p> : <QuotaDetails quota={signedIn ? quota ?? { state: 'unavailable' } : { state: 'signed-out' }} t={t} />}
+      {accountLoading || loading ? <p role="status" style={body}>{t(accountLoading ? 'loadingAccount' : 'quotaLoading')}</p> : <QuotaDetails quota={signedIn ? quota ?? { state: 'unavailable' } : { state: 'signed-out' }} t={t} />}
     </section>
   )
 }

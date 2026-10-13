@@ -3,14 +3,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { createXaiOAuthSearchTokenSource } from '../src/index.ts'
 import type { XaiOAuthSession } from '../src/session.ts'
 import { oauthIdentityOf } from '../src/token-source.ts'
+import { XaiOAuthSearchProvider } from '../src/search.ts'
 
-interface OAuthCredential {
-  type: 'oauth'
-  access: string
-  refresh: string
-  expires: number
-  accountId?: string
-}
+type OAuthCredential = Extract<Awaited<ReturnType<XaiOAuthSession['store']['read']>>, { type: 'oauth' }> & { accountId?: string }
 
 function fakeSession(options: {
   credential?: OAuthCredential
@@ -71,6 +66,96 @@ describe('durable OAuth account identity', () => {
 })
 
 describe('createXaiOAuthSearchTokenSource', () => {
+  it('stops a cancelled caller while getAuth is still pending', async () => {
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1 }
+    const fixture = fakeSession({ credential })
+    let release!: (value: { source: string; auth: { apiKey: string } }) => void
+    const gate = new Promise<{ source: string; auth: { apiKey: string } }>(resolve => { release = resolve })
+    fixture.getAuth.mockImplementation(() => gate)
+    const caller = new AbortController()
+    const reason = new Error('cancelled credential waiter')
+    let failure: unknown
+    const pending = createXaiOAuthSearchTokenSource(fixture.session).resolve(caller.signal)
+    const observed = pending.catch(error => { failure = error })
+    await vi.waitFor(() => expect(fixture.getAuth).toHaveBeenCalledOnce())
+    caller.abort(reason)
+    try {
+      await vi.waitFor(() => expect(failure).toBe(reason), { timeout: 100 })
+    } finally {
+      release({ source: 'OAuth', auth: { apiKey: 'late-token' } })
+      await observed
+    }
+  })
+
+  it('stops a cancelled credential read without starting getAuth', async () => {
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1 }
+    const fixture = fakeSession({ credential })
+    let release!: (value: OAuthCredential) => void
+    const gate = new Promise<OAuthCredential>(resolve => { release = resolve })
+    vi.spyOn(fixture.session.store, 'read').mockImplementation(() => gate)
+    const caller = new AbortController()
+    const reason = new Error('cancelled store waiter')
+    let failure: unknown
+    const observed = createXaiOAuthSearchTokenSource(fixture.session).resolve(caller.signal).catch(error => { failure = error })
+    caller.abort(reason)
+    try {
+      await vi.waitFor(() => expect(failure).toBe(reason), { timeout: 100 })
+      expect(fixture.getAuth).not.toHaveBeenCalled()
+    } finally {
+      release(credential)
+      await observed
+    }
+  })
+
+  it('cancels one auth waiter without cancelling another caller or leaking its listener', async () => {
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1 }
+    const fixture = fakeSession({ credential })
+    let release!: (value: { source: string; auth: { apiKey: string } }) => void
+    const gate = new Promise<{ source: string; auth: { apiKey: string } }>(resolve => { release = resolve })
+    fixture.getAuth.mockImplementation(() => gate)
+    const caller = new AbortController()
+    const cleanup = vi.spyOn(caller.signal, 'removeEventListener')
+    const source = createXaiOAuthSearchTokenSource(fixture.session)
+    const cancelled = source.resolve(caller.signal)
+    const rejected = expect(cancelled).rejects.toThrow('cancelled auth waiter')
+    const other = source.resolve()
+    await vi.waitFor(() => expect(fixture.getAuth).toHaveBeenCalledTimes(2))
+    caller.abort(new Error('cancelled auth waiter'))
+    await rejected
+    expect(cleanup.mock.calls.filter(([event]) => event === 'abort')).toHaveLength(2)
+    release({ source: 'OAuth', auth: { apiKey: 'current-token' } })
+    await expect(other).resolves.toBe('current-token')
+  })
+
+  it('observes a late rejection when getAuth aborts its caller before returning', async () => {
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1 }
+    const fixture = fakeSession({ credential })
+    const caller = new AbortController()
+    const reason = new Error('cancelled during auth call')
+    fixture.getAuth.mockImplementation(() => {
+      caller.abort(reason)
+      return Promise.reject(new Error('late auth failure'))
+    })
+    await expect(createXaiOAuthSearchTokenSource(fixture.session).resolve(caller.signal)).rejects.toBe(reason)
+    // Vitest also fails the suite if the late operation becomes unhandled.
+    await new Promise(resolve => setTimeout(resolve, 0))
+  })
+
+  it.each(['web_search', 'x_search'] as const)('returns WEB_ABORTED during credential resolution for %s without starting a search', async tool => {
+    const credential: OAuthCredential = { type: 'oauth', access: 'old', refresh: 'r', expires: 1 }
+    const fixture = fakeSession({ credential })
+    fixture.getAuth.mockImplementation(() => new Promise<never>(() => undefined))
+    const fetch = vi.fn()
+    const caller = new AbortController()
+    const provider = new XaiOAuthSearchProvider(createXaiOAuthSearchTokenSource(fixture.session), tool, { fetch })
+    const result = provider.search({ query: 'synthetic query' }, caller.signal)
+    const rejected = expect(result).rejects.toMatchObject({ code: 'WEB_ABORTED' })
+    await vi.waitFor(() => expect(fixture.getAuth).toHaveBeenCalledOnce())
+    caller.abort(new Error('cancelled search'))
+    await rejected
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('does not let ambient XAI_API_KEY become a fallback when OAuth is absent', async () => {
     const { session, getAuth } = fakeSession({
       auth: { source: 'XAI_API_KEY', auth: { apiKey: 'paid-key' } },

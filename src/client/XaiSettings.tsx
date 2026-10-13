@@ -230,8 +230,13 @@ async function jsonRequest<T>(path: string, method = 'GET', body?: unknown): Pro
 export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   if (t === undefined) throw new Error('xAI Grok settings requires its translation function')
   const [status, setStatus] = useState<AccountStatus>({ status: 'loading' })
+  // Account mutations invalidate older status reads, including login polling.
+  const statusRequestRef = useRef(0)
   const [busy, setBusy] = useState(false)
   const [proxyUrl, setProxyUrl] = useState('')
+  const [savedProxyUrl, setSavedProxyUrl] = useState('')
+  const proxyEditedRef = useRef(false)
+  const proxySavedRef = useRef(false)
   const [proxyBusy, setProxyBusy] = useState(false)
   const [proxyFeedback, setProxyFeedback] = useState<'idle' | 'saved' | 'error'>('idle')
   const [popupBlocked, setPopupBlocked] = useState(false)
@@ -241,6 +246,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   // Mirror of the dirty set: the initial load lands asynchronously and must not
   // overwrite a field the user already edited while it was in flight.
   const optionsDirtyRef = useRef<ReadonlySet<OptionKey>>(new Set())
+  // Keep touched keys after saving/resetting as well: a late initial GET must
+  // not roll a committed value back to the snapshot from before that write.
+  const optionsTouchedRef = useRef<ReadonlySet<OptionKey>>(new Set())
   const [optionsBusy, setOptionsBusy] = useState(false)
   // Feedback is bound to the page whose request produced it: a late 'saved'
   // from the media page can never be shown on the search page while that
@@ -267,7 +275,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   /**
    * Apply a server payload.
    *
-   * The initial load replaces everything. A page-scoped save or reset passes
+   * The initial load replaces untouched fields. A page-scoped save or reset passes
    * `clearedKeys` and then moves ONLY those keys: another page's unsaved draft
    * is never overwritten by a response that did not cover it, its dirty flag
    * survives, and a key the server no longer reports as an override is dropped
@@ -278,19 +286,27 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     const stored = value.stored ?? {}
     if (clearedKeys === undefined) {
       const drafts = optionsDirtyRef.current
+      const protectedKeys = optionsTouchedRef.current
       setOptions(previous => {
         const next = { ...effective }
-        for (const key of drafts) if (key in previous) next[key] = previous[key]
+        for (const key of protectedKeys) {
+          if (key in previous) next[key] = previous[key]
+          else delete next[key]
+        }
         return next
       })
       setStoredOptions(previous => {
         const next = { ...stored }
-        for (const key of drafts) if (key in previous) next[key] = previous[key]
+        for (const key of protectedKeys) {
+          if (key in previous) next[key] = previous[key]
+          else delete next[key]
+        }
         return next
       })
       setOptionsDirty(new Set(drafts))
       return
     }
+    optionsTouchedRef.current = new Set([...optionsTouchedRef.current, ...clearedKeys])
     setOptions(previous => {
       const next = { ...previous }
       for (const key of clearedKeys) {
@@ -318,6 +334,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     setOptions(previous => ({ ...previous, [key]: value }))
     setOptionsDirty(previous => new Set(previous).add(key))
     optionsDirtyRef.current = new Set(optionsDirtyRef.current).add(key)
+    optionsTouchedRef.current = new Set(optionsTouchedRef.current).add(key)
     const owner = SETTINGS_PAGES.find(pageId => PAGE_OPTION_KEYS[pageId].includes(key))
     setOptionsFeedback(previous => previous?.page === owner ? undefined : previous)
   }
@@ -339,7 +356,8 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const pageHasDraft = (pageId: SettingsPageId): boolean =>
-    PAGE_OPTION_KEYS[pageId].some(key => optionsDirty.has(key))
+    pageId === 'network' ? proxyUrl.trim() !== savedProxyUrl
+      : PAGE_OPTION_KEYS[pageId].some(key => optionsDirty.has(key))
 
   /** Feedback visible on one page: its own, or a page-independent load error. */
   const feedbackFor = (pageId: SettingsPageId): 'saved' | 'error' | undefined =>
@@ -398,7 +416,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const loadProxy = useCallback(async () => {
     try {
       const value = await jsonRequest<{ proxyUrl: string }>(PROXY_PATH)
-      setProxyUrl(value.proxyUrl ?? '')
+      // Still learn the baseline after an edit, but never replace a newer save.
+      if (!proxySavedRef.current) setSavedProxyUrl(value.proxyUrl ?? '')
+      if (!proxyEditedRef.current) setProxyUrl(value.proxyUrl ?? '')
     } catch {
       setProxyFeedback('error')
     }
@@ -407,7 +427,11 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const saveProxy = async (): Promise<void> => {
     setProxyBusy(true)
     try {
-      await jsonRequest<{ proxyUrl: string }>(PROXY_PATH, 'POST', { proxyUrl })
+      const value = await jsonRequest<{ proxyUrl: string }>(PROXY_PATH, 'POST', { proxyUrl })
+      proxyEditedRef.current = true
+      proxySavedRef.current = true
+      setProxyUrl(value.proxyUrl ?? '')
+      setSavedProxyUrl(value.proxyUrl ?? '')
       setProxyFeedback('saved')
     } catch {
       setProxyFeedback('error')
@@ -417,10 +441,14 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const refresh = useCallback(async () => {
+    const request = ++statusRequestRef.current
     try {
-      setStatus(await jsonRequest<AccountStatus>(STATUS_PATH))
+      const value = await jsonRequest<AccountStatus>(STATUS_PATH)
+      if (request === statusRequestRef.current) setStatus(value)
     } catch (error: unknown) {
-      setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+      if (request === statusRequestRef.current) {
+        setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+      }
     }
   }, [t])
 
@@ -441,6 +469,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       if (!window.confirm(t('confirmLoginShared'))) return
     }
     // Only once the user actually committed to a sign-in.
+    ++statusRequestRef.current
     setAccountGeneration(generation => generation + 1)
     const popup = window.open('about:blank', '_blank')
     if (popup !== null) popup.opener = null
@@ -471,11 +500,13 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const importGrok = async (): Promise<void> => {
     // Hide old account data during import and remount again after it commits.
     // A pre-request bump alone could mount a panel that fetches the old account.
+    ++statusRequestRef.current
     setAccountGeneration(generation => generation + 1)
     setStatus({ status: 'loading' })
     setBusy(true)
     try {
       const imported = await jsonRequest<AccountStatus>(IMPORT_PATH, 'POST')
+      ++statusRequestRef.current
       setAccountGeneration(generation => generation + 1)
       setStatus(imported)
     } catch (error: unknown) {
@@ -486,6 +517,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const saveModels = async (selected: string[]): Promise<void> => {
+    ++statusRequestRef.current
     setBusy(true)
     try {
       setStatus(await jsonRequest<AccountStatus>(MODELS_PATH, 'POST', { selected }))
@@ -504,6 +536,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     // and task panels: while the sign-out is still in flight they would
     // otherwise re-read the account that is on its way out.
     setStatus({ status: 'loading' })
+    ++statusRequestRef.current
     setAccountGeneration(generation => generation + 1)
     setBusy(true)
     try {
@@ -541,6 +574,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   /** Save / reset row: always names the page whose own options it acts on. */
   const optionActions = (pageId: SettingsPageId) => (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {pageHasDraft(pageId) ? <p role="status" style={{ ...bodyStyle, margin: 0, width: '100%' }}>{t('unsavedChangesHint')}</p> : null}
       <button type="button" style={buttonStyle} disabled={optionsBusy || !pageHasDraft(pageId)} onClick={() => { void saveOptions(pageId) }}>
         {optionsBusy ? t('working') : `${t('optionsSave')} · ${t(PAGE_LABEL_KEYS[pageId])}`}
       </button>
@@ -548,10 +582,10 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
         {`${t('optionsReset')} · ${t(PAGE_LABEL_KEYS[pageId])}`}
       </button>
       {feedbackFor(pageId) === 'saved'
-        ? <p style={{ ...bodyStyle, margin: 0, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('optionsSaved')}</p>
+        ? <p role="status" style={{ ...bodyStyle, margin: 0, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('optionsSaved')}</p>
         : null}
       {feedbackFor(pageId) === 'error'
-        ? <p style={{ ...errorStyle, margin: 0 }}>{t('optionsError')}</p>
+        ? <p role="alert" style={{ ...errorStyle, margin: 0 }}>{t('optionsError')}</p>
         : null}
     </div>
   )
@@ -581,9 +615,13 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
               type="button"
               style={page === id ? activeTabStyle : tabStyle}
               aria-current={page === id ? 'page' : undefined}
+              aria-label={pageHasDraft(id) ? `${t(PAGE_LABEL_KEYS[id])} — ${t('unsavedChanges')}` : t(PAGE_LABEL_KEYS[id])}
+              title={pageHasDraft(id) ? t('unsavedChangesHint') : undefined}
               onClick={() => { setPage(id) }}
             >
-              {t(PAGE_LABEL_KEYS[id])}
+              {pageHasDraft(id)
+                ? <>{t(PAGE_LABEL_KEYS[id])}<span aria-hidden="true"> •</span></>
+                : t(PAGE_LABEL_KEYS[id])}
             </button>
           ))}
         </nav>
@@ -593,7 +631,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       {page === 'account'
         ? (
             <div style={pageStyleInner}>
-              <QuotaView key={accountKey} t={t} signedIn={status.status === 'signed-in'} />
+              <QuotaView key={accountKey} t={t} signedIn={status.status === 'signed-in'} accountLoading={status.status === 'loading' || status.status === 'signing-in'} />
               <div style={cardStyle}>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                   {status.status === 'loading'
@@ -870,6 +908,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                     disabled={proxyBusy}
                     aria-label={t('proxyTitle')}
                     onChange={(event) => {
+                      proxyEditedRef.current = true
                       setProxyUrl(event.target.value)
                       setProxyFeedback('idle')
                     }}
@@ -890,10 +929,11 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                   </button>
                 </div>
                 <p style={bodyStyle}>{t('proxyHint')}</p>
+                {pageHasDraft('network') ? <p role="status" style={bodyStyle}>{t('unsavedChangesHint')}</p> : null}
                 {proxyFeedback === 'saved'
-                  ? <p style={{ ...bodyStyle, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('proxySaved')}</p>
+                  ? <p role="status" style={{ ...bodyStyle, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('proxySaved')}</p>
                   : null}
-                {proxyFeedback === 'error' ? <p style={errorStyle}>{t('proxyError')}</p> : null}
+                {proxyFeedback === 'error' ? <p role="alert" style={errorStyle}>{t('proxyError')}</p> : null}
               </div>
             </div>
           )

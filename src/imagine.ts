@@ -111,8 +111,14 @@ async function requestImage(
   })
   let response = await post(access)
   if (response.status === 401 && tokens.refresh !== undefined) {
-    const refreshed = await tokens.refresh(access, signal)
+    let refreshed: string | undefined
+    try { refreshed = await tokens.refresh(access, signal) } catch (error) {
+      // Best-effort cleanup; propagate the original credential failure.
+      void response.body?.cancel().catch(() => undefined)
+      throw error
+    }
     if (refreshed !== undefined && refreshed.length > 0 && refreshed !== access) {
+      void response.body?.cancel().catch(() => undefined)
       response = await post(refreshed)
     }
   }
