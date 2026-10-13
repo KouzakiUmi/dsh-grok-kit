@@ -74,12 +74,12 @@ function makeHarness(overrides: {
   identity?: () => Promise<string | undefined>
   storePath?: string
   maxVideoBytes?: number
-  resolveToken?: () => Promise<string | undefined>
+  resolveToken?: (signal?: AbortSignal) => Promise<string | undefined>
   refresh?: (rejected: string, signal?: AbortSignal) => Promise<string | undefined>
   attachments?: unknown
 } = {}): Harness {
   const saveFileStream = overrides.saveFileStream ?? saver()
-  const resolve = vi.fn(async () => overrides.resolveToken?.() ?? 'tok')
+  const resolve = vi.fn(async (signal?: AbortSignal) => overrides.resolveToken?.(signal) ?? 'tok')
   const refresh = vi.fn(async (rejected: string, signal?: AbortSignal) => overrides.refresh?.(rejected, signal))
   const tokens: XaiOAuthTokenSource = {
     available: () => true,
@@ -244,6 +244,32 @@ describe('generate', () => {
     expect(result.state).toBe('pending')
     expect(seen).toEqual(['Bearer tok1', 'Bearer tok2'])
     expect(harness.refresh).toHaveBeenCalledWith('tok1', harness.fetchMock.mock.calls[0][1]?.signal)
+  })
+
+  it.each(['deadline', 'dispose', 'caller'])('settles stalled credential resolution on %s without submitting', async mode => {
+    const storePath = await newStorePath()
+    let finish: ((token: string) => void) | undefined
+    const harness = makeHarness({ storePath, resolveToken: () => new Promise<string>(resolve => { finish = resolve }) })
+    const controller = new AbortController()
+    if (mode === 'deadline') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const pending = harness.manager.generate({ prompt: 'p', image: PNG_DATA_URI }, controller.signal)
+      const rejected = expect(pending).rejects.toThrow(mode === 'deadline' ? /timed out/ : mode === 'dispose' ? /disposed/ : /cancelled/)
+      await vi.waitFor(() => expect(finish).toBeDefined())
+      if (mode === 'deadline') await vi.advanceTimersByTimeAsync(120_000)
+      else if (mode === 'dispose') await harness.manager.dispose()
+      else controller.abort(new Error('cancelled'))
+      await rejected
+      expect(harness.resolve.mock.calls[0][0]?.aborted).toBe(true)
+      finish?.('late-token')
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(harness.fetchMock).not.toHaveBeenCalled()
+      expect(harness.events).toEqual([])
+      await expect(readFile(storePath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('maps a definite rejection to failed with a stable status-only message and no body echo', async () => {
@@ -578,6 +604,71 @@ describe('status / resume', () => {
     expect(sharedSignal?.aborted).toBe(true)
     await vi.waitFor(async () => expect((await harness.manager.list())[0].state).toBe('interrupted'))
     expect(harness.fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['transport', 'malformed', 'token'])('reports a temporary capability error on a %s poll failure', async mode => {
+    const one = await pendingTask()
+    const harness = makeHarness({ storePath: one.storePath,
+      resolveToken: async () => { if (mode === 'token') throw new Error('credential unavailable'); return 'tok' },
+      fetchMock: routeFetch({ poll: () => {
+        if (mode === 'transport') throw new Error('socket failed')
+        return new Response('invalid JSON', { headers: { 'content-type': 'application/json' } })
+      } }),
+    })
+    expect((await harness.manager.status(one.taskId)).state).toBe('interrupted')
+    expect(harness.events.at(-1)).toMatchObject({ identity: 'acc-a', state: 'temporary-error', message: 'video status check failed' })
+  })
+
+  it('times out stalled poll credentials and records a temporary observation', async () => {
+    const one = await pendingTask()
+    let entered = false
+    const harness = makeHarness({ storePath: one.storePath, resolveToken: () => {
+      entered = true
+      return new Promise<string>(() => undefined)
+    } })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const pending = harness.manager.status(one.taskId)
+      await vi.waitFor(() => expect(entered).toBe(true))
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect((await pending).state).toBe('interrupted')
+      expect(harness.events.at(-1)).toMatchObject({ state: 'temporary-error' })
+      expect(harness.fetchMock).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never persists or returns an unfamiliar upstream status value', async () => {
+    const one = await pendingTask()
+    const secretStatus = 'https://example.invalid/video?token=synthetic-secret&sig=synthetic-signature' + 'x'.repeat(200_000)
+    const harness = makeHarness({ storePath: one.storePath, fetchMock: routeFetch({ poll: () => json({ status: secretStatus }) }) })
+    const result = await harness.manager.status(one.taskId)
+    expect(result.error).toBe('unexpected video status; call resume to retry')
+    expect(harness.events.at(-1)).toMatchObject({ state: 'temporary-error', message: 'unexpected video status' })
+    const stored = await readFile(one.storePath, 'utf8')
+    expect(stored).not.toContain('synthetic-secret')
+    expect(stored).not.toContain('synthetic-signature')
+    expect(stored.length).toBeLessThan(2000)
+  })
+
+  it.each(['caller', 'dispose'])('does not report an upstream failure for local %s cancellation', async mode => {
+    const one = await pendingTask()
+    let entered = false
+    const harness = makeHarness({ storePath: one.storePath, fetchMock: routeFetch({
+      poll: init => new Promise<Response>((_resolve, reject) => {
+        entered = true
+        init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true })
+      }),
+    }) })
+    const controller = new AbortController()
+    const pending = harness.manager.status(one.taskId, controller.signal)
+    const rejected = expect(pending).rejects.toThrow(mode === 'dispose' ? /disposed/ : /cancelled/)
+    await vi.waitFor(() => expect(entered).toBe(true))
+    if (mode === 'dispose') await harness.manager.dispose()
+    else controller.abort(new Error('cancelled'))
+    await rejected
+    expect(harness.events).toEqual([])
   })
 
   it('rejects unknown task ids locally', async () => {

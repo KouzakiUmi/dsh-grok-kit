@@ -512,101 +512,104 @@ export class VideoTaskManager {
     // before every wire request, so a task can never be submitted under a
     // different account than it is filed under.
     await this.assertIdentity(identity)
-    const access = await this.options.tokens.resolve(signal)
-    if (typeof access !== 'string' || access.length === 0) {
-      throw new Error('grok_video_generate requires a SuperGrok/X OAuth sign-in (Settings → xAI Grok)')
-    }
-
     const timed = withTimeout([signal, this.disposeController.signal], VIDEO_SUBMIT_TIMEOUT_MS, 'video submission')
-    const post = (bearer: string) => this.fetchImpl(XAI_VIDEO_GENERATIONS_URL, {
-      method: 'POST',
-      redirect: 'error',
-      headers: {
-        authorization: `Bearer ${bearer}`,
-        'content-type': 'application/json',
-        accept: 'application/json',
-        'user-agent': 'dsh-grok-kit/0.2.2',
-      },
-      body: JSON.stringify(body),
-      signal: timed.signal,
-    })
-
-    const now = () => new Date().toISOString()
-    const startedAt = now()
-    const base: VideoTaskRecord = {
-      taskId: randomUUID(),
-      identity,
-      state: 'submission-unknown',
-      model: this.model,
-      createdAt: startedAt,
-      updatedAt: startedAt,
-      prompt,
-      ...duration === undefined ? {} : { duration },
-      ...resolution === undefined ? {} : { resolution },
-      error: 'submission started; outcome not recorded yet (never re-POSTed automatically)',
-    }
-    // Billing-context placeholder written BEFORE the POST: every later outcome
-    // updates this same task, so an unknown/cancelled submission is never lost
-    // and never silently retried.
-    await this.assertIdentity(identity)
-    await this.persistRecord(identity, base)
-    const update = async (patch: Partial<VideoTaskRecord> & Pick<VideoTaskRecord, 'state'>): Promise<VideoTaskResult> => {
-      const record: VideoTaskRecord = { ...base, ...patch, updatedAt: now() }
-      // The pre-submit uncertainty is no longer an error once xAI accepted an id.
-      if (record.state === 'pending') delete record.error
-      await this.assertIdentity(identity)
-      await this.persistRecord(identity, record)
-      return toResult(record)
-    }
     try {
-      await this.assertIdentity(identity)
-      let response = await post(access)
-      if (response.status === 401 && this.options.tokens.refresh !== undefined) {
-        // A 401 is an explicit rejection before generation starts, so exactly
-        // one refreshed retry is safe; 403/429 must never be treated as token faults.
-        const refreshed = await this.options.tokens.refresh(access, timed.signal)
-        if (typeof refreshed === 'string' && refreshed.length > 0 && refreshed !== access) {
-          await this.assertIdentity(identity)
-          response = await post(refreshed)
-        }
+      // getAuth may continue a shared credential rotation; stop waiting without cancelling it.
+      const access = await waitForOperation(this.options.tokens.resolve(timed.signal), timed.signal)
+      if (typeof access !== 'string' || access.length === 0) {
+        throw new Error('grok_video_generate requires a SuperGrok/X OAuth sign-in (Settings → xAI Grok)')
       }
-      if (!response.ok) {
-        // A server error may follow queued work: preserve uncertainty to avoid double billing.
-        // Publish status only, never the upstream error body.
-        await discardBody(response)
-        const detail = `HTTP ${String(response.status)}`
-        if (response.status === 403) this.emitCapability(identity, 'restricted', response.status, detail)
-        else this.emitCapability(identity, 'temporary-error', response.status, detail)
-        if (response.status >= 500) {
+      timed.signal.throwIfAborted()
+      const post = (bearer: string) => this.fetchImpl(XAI_VIDEO_GENERATIONS_URL, {
+        method: 'POST',
+        redirect: 'error',
+        headers: {
+          authorization: `Bearer ${bearer}`,
+          'content-type': 'application/json',
+          accept: 'application/json',
+          'user-agent': 'dsh-grok-kit/0.2.2',
+        },
+        body: JSON.stringify(body),
+        signal: timed.signal,
+      })
+
+      const now = () => new Date().toISOString()
+      const startedAt = now()
+      const base: VideoTaskRecord = {
+        taskId: randomUUID(),
+        identity,
+        state: 'submission-unknown',
+        model: this.model,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+        prompt,
+        ...duration === undefined ? {} : { duration },
+        ...resolution === undefined ? {} : { resolution },
+        error: 'submission started; outcome not recorded yet (never re-POSTed automatically)',
+      }
+      // Billing-context placeholder written BEFORE the POST: every later outcome
+      // updates this same task, so an unknown/cancelled submission is never lost
+      // and never silently retried.
+      await this.assertIdentity(identity)
+      await this.persistRecord(identity, base)
+      const update = async (patch: Partial<VideoTaskRecord> & Pick<VideoTaskRecord, 'state'>): Promise<VideoTaskResult> => {
+        const record: VideoTaskRecord = { ...base, ...patch, updatedAt: now() }
+        // The pre-submit uncertainty is no longer an error once xAI accepted an id.
+        if (record.state === 'pending') delete record.error
+        await this.assertIdentity(identity)
+        await this.persistRecord(identity, record)
+        return toResult(record)
+      }
+      try {
+        await this.assertIdentity(identity)
+        let response = await post(access)
+        if (response.status === 401 && this.options.tokens.refresh !== undefined) {
+          // A 401 is an explicit rejection before generation starts, so exactly
+          // one refreshed retry is safe; 403/429 must never be treated as token faults.
+          const refreshed = await this.options.tokens.refresh(access, timed.signal)
+          if (typeof refreshed === 'string' && refreshed.length > 0 && refreshed !== access) {
+            await this.assertIdentity(identity)
+            response = await post(refreshed)
+          }
+        }
+        if (!response.ok) {
+          // A server error may follow queued work: preserve uncertainty to avoid double billing.
+          // Publish status only, never the upstream error body.
+          await discardBody(response)
+          const detail = `HTTP ${String(response.status)}`
+          if (response.status === 403) this.emitCapability(identity, 'restricted', response.status, detail)
+          else this.emitCapability(identity, 'temporary-error', response.status, detail)
+          if (response.status >= 500) {
+            return await update({
+              state: 'submission-unknown',
+              error: `submission result unknown (${detail}); never re-POSTed automatically to avoid double billing`,
+            })
+          }
+          return await update({ state: 'failed', error: `xAI video submission failed (${detail})` })
+        }
+        const parsed = await readBoundedJson(response, 'video submission')
+        const requestId = typeof parsed.request_id === 'string' ? parsed.request_id.trim() : ''
+        if (!REQUEST_ID_PATTERN.test(requestId)) {
+          this.emitCapability(identity, 'available', 200, undefined)
           return await update({
             state: 'submission-unknown',
-            error: `submission result unknown (${detail}); never re-POSTed automatically to avoid double billing`,
+            error: 'submission response carried no usable request id; never re-POSTed automatically to avoid double billing',
           })
         }
-        return await update({ state: 'failed', error: `xAI video submission failed (${detail})` })
-      }
-      const parsed = await readBoundedJson(response, 'video submission')
-      const requestId = typeof parsed.request_id === 'string' ? parsed.request_id.trim() : ''
-      if (!REQUEST_ID_PATTERN.test(requestId)) {
         this.emitCapability(identity, 'available', 200, undefined)
-        return await update({
+        return await update({ state: 'pending', requestId })
+      } catch (error) {
+        // The request may have reached xAI: keep the unknown outcome on the SAME
+        // task and never re-POST. A caller abort is rethrown only after the
+        // record is safe on disk.
+        const record = await update({
           state: 'submission-unknown',
-          error: 'submission response carried no usable request id; never re-POSTed automatically to avoid double billing',
+          error: `submission result unknown (${errorText(error)}); never re-POSTed automatically to avoid double billing`,
         })
+        this.emitCapability(identity, 'temporary-error', undefined, 'video submission outcome unknown')
+        if (signal?.aborted === true) throw signal.reason
+        return record
       }
-      this.emitCapability(identity, 'available', 200, undefined)
-      return await update({ state: 'pending', requestId })
-    } catch (error) {
-      // The request may have reached xAI: keep the unknown outcome on the SAME
-      // task and never re-POST. A caller abort is rethrown only after the
-      // record is safe on disk.
-      const record = await update({
-        state: 'submission-unknown',
-        error: `submission result unknown (${errorText(error)}); never re-POSTed automatically to avoid double billing`,
-      })
-      this.emitCapability(identity, 'temporary-error', undefined, 'video submission outcome unknown')
-      if (signal?.aborted === true) throw signal.reason
-      return record
     } finally {
       timed.cancel()
     }
@@ -831,7 +834,7 @@ export class VideoTaskManager {
     let parsed: Record<string, unknown>
     try {
       await this.assertIdentity(identity)
-      const access = await this.options.tokens.resolve(pollTimed.signal)
+      const access = await waitForOperation(this.options.tokens.resolve(pollTimed.signal), pollTimed.signal)
       if (typeof access !== 'string' || access.length === 0) {
         throw new Error('grok_video_status requires a SuperGrok/X OAuth sign-in (Settings → xAI Grok)')
       }
@@ -875,10 +878,11 @@ export class VideoTaskManager {
       }
       parsed = await readBoundedJson(response, 'video status')
     } catch (error) {
-      if (signal?.aborted === true) {
+      if (signal?.aborted === true || this.disposeController.signal.aborted) {
         await this.markInterruptedQuietly(identity, record, `cancelled locally (${errorText(error)}); the remote generation is NOT cancelled`)
-        throw signal.reason
+        throw signal?.aborted ? signal.reason : this.disposeController.signal.reason
       }
+      this.emitCapability(identity, 'temporary-error', undefined, 'video status check failed')
       const updated: VideoTaskRecord = {
         ...record,
         state: 'interrupted',
@@ -914,11 +918,12 @@ export class VideoTaskManager {
         await this.persistRecord(identity, updated)
         return toResult(updated)
       }
+      this.emitCapability(identity, 'temporary-error', undefined, 'unexpected video status')
       const updated: VideoTaskRecord = {
         ...record,
         state: 'interrupted',
         updatedAt: new Date().toISOString(),
-        error: `unexpected video status ${JSON.stringify(remoteStatus)}; call resume to retry`,
+        error: 'unexpected video status; call resume to retry',
       }
       await this.assertIdentity(identity)
       await this.persistRecord(identity, updated)
