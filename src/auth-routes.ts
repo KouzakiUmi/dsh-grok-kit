@@ -293,6 +293,15 @@ export function isTrustedRequest(
   method: string,
 ): boolean {
   if (remote !== '127.0.0.1' && remote !== '::1' && remote !== '::ffff:127.0.0.1') return false
+  const origin = headers.origin
+  // The DeepSeek desktop shell serves its renderer over the custom `dsh-app`
+  // scheme and forwards UI requests to the local HTTP server carrying that
+  // Origin. It can never satisfy the HTTP same-origin check below, and a
+  // browser page cannot forge this value (browsers only emit their own
+  // http(s) origin), so an exact allow-list entry is safe. Some shell proxy
+  // paths also forward `sec-fetch-site: cross-site`, which is not meaningful
+  // for a custom-scheme page; the desktop origin is accepted before both.
+  if (origin !== undefined && origin.trim().toLowerCase() === 'dsh-app://app') return true
   if (headers['sec-fetch-site'] === 'cross-site') return false
   const host = headers.host
   if (host === undefined) return false
@@ -302,7 +311,6 @@ export function isTrustedRequest(
   // from a hostile page — enough to CSRF login/import/logout or to install a
   // proxy URL that later captures the x.ai bearer.
   if (loopbackHostname(host) === undefined) return false
-  const origin = headers.origin
   // Same-origin browsers send Origin on every POST; non-browser clients and
   // some privacy modes do not. Requiring Origin on writes closes the
   // local-process CSRF slot (a local script could otherwise POST logout /
