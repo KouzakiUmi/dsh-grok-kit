@@ -315,7 +315,15 @@ export function isTrustedRequest(
   // some privacy modes do not. Requiring Origin on writes closes the
   // local-process CSRF slot (a local script could otherwise POST logout /
   // set-proxy with a forged host). Status GETs stay open.
-  if (origin === undefined) return method === 'GET'
+  if (origin === undefined) {
+    if (method === 'GET') return true
+    // The DeepSeek desktop shell forwards UI requests after stripping BOTH
+    // `origin` and `sec-fetch-site`, so shell-forwarded writes carry neither.
+    // A browser page always sends at least one of the two on a write (fetch
+    // and form POSTs include Origin; cross-site is rejected above), so a
+    // write carrying neither cannot be browser-originated CSRF.
+    return headers['sec-fetch-site'] === undefined
+  }
   try {
     return new URL(origin).host === new URL(`http://${host}`).host
   } catch {

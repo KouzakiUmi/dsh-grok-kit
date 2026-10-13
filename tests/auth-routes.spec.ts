@@ -45,9 +45,15 @@ describe('isTrustedRequest (loopback + Host pin + Origin)', () => {
     expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'https://127.0.0.1:3080'), 'POST')).toBe(true)
   })
 
-  it('requires Origin on writes (local-process CSRF slot)', () => {
-    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080'), 'POST')).toBe(false)
-    expect(isTrustedRequest(loopback, headers(), 'PUT')).toBe(false)
+  it('accepts shell-forwarded writes (no Origin, no sec-fetch-site) but keeps requiring one on browser writes', () => {
+    // The DeepSeek desktop shell strips BOTH headers before forwarding, while
+    // a browser page always sends at least one of them on a write (fetch and
+    // form POSTs include Origin).
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080'), 'POST')).toBe(true)
+    expect(isTrustedRequest(loopback, headers(), 'PUT')).toBe(true)
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-site': 'same-origin' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { host: 'evil.example' }, 'POST')).toBe(false)
   })
 
   it('allows no-Origin GET status reads', () => {

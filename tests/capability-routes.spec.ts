@@ -290,15 +290,26 @@ describe('POST /video/resume', () => {
     expect(tracker.snapshot(true).features[0]!.state).toBe('unverified')
   })
 
-  it('requires the same-origin gate on writes (no Origin → 403)', async () => {
+  it('keeps the write gate for browser writes (sec-fetch-site present, no Origin → 403)', async () => {
+    const { handlers, resume } = setup()
+    const { status } = await call(
+      handlers.get(GROK_VIDEO_RESUME_PATH)!,
+      mockReq({ method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ taskId: UUID }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(403)
+    expect(resume).not.toHaveBeenCalled()
+  })
+
+  it('accepts shell-forwarded writes (no Origin, no sec-fetch-site → desktop shape)', async () => {
     const { handlers, resume } = setup()
     const { status } = await call(
       handlers.get(GROK_VIDEO_RESUME_PATH)!,
       mockReq({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId: UUID }) }),
       new MockResponse(),
     )
-    expect(status).toBe(403)
-    expect(resume).not.toHaveBeenCalled()
+    expect(status).toBe(200)
+    expect(resume).toHaveBeenCalled()
   })
 
   it('redacts upstream error messages', async () => {
