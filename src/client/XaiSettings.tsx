@@ -123,6 +123,14 @@ const mediaConfirmStyle: CSSProperties = {
   padding: '8px 10px',
   margin: '6px 0',
 }
+const experimentalTagStyle: CSSProperties = {
+  fontSize: 11,
+  lineHeight: '18px',
+  padding: '0 6px',
+  borderRadius: 4,
+  border: '1px solid currentColor',
+  color: 'var(--dsw-alias-label-secondary, inherit)',
+}
 const codeBoxStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '10px 14px', border: '1px dashed var(--dsw-alias-border-l2)', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1)' }
 const codeStyle: CSSProperties = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 20, letterSpacing: '0.08em', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
 const linkStyle: CSSProperties = { color: 'var(--dsw-alias-brand-primary)', wordBreak: 'break-all' }
@@ -624,29 +632,35 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
         </label>
         <p style={optionHintStyle}>{t('statefulResponsesHint')}</p>
 
-        <label style={optionRowStyle}>
-          <input
-            type="checkbox"
-            checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
-            disabled={optionsBusy}
-            onChange={(event) => markMedia('images', event.target.checked)}
-          />
-          <span>{t('imagineTool')}</span>
-        </label>
+        <div style={optionRowStyle}>
+          <label style={optionRowStyle}>
+            <input
+              type="checkbox"
+              checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
+              disabled={optionsBusy}
+              onChange={(event) => markMedia('images', event.target.checked)}
+            />
+            <span>{t('imagineTool')}</span>
+          </label>
+          <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+        </div>
         <p style={optionHintStyle}>{t('imagineToolHint')}</p>
         <p style={optionHintStyle}>
           {`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}
         </p>
 
-        <label style={optionRowStyle}>
-          <input
-            type="checkbox"
-            checked={optBool(options.videoTool, false)}
-            disabled={optionsBusy}
-            onChange={(event) => markMedia('video', event.target.checked)}
-          />
-          <span>{t('videoTool')}</span>
-        </label>
+        <div style={optionRowStyle}>
+          <label style={optionRowStyle}>
+            <input
+              type="checkbox"
+              checked={optBool(options.videoTool, false)}
+              disabled={optionsBusy}
+              onChange={(event) => markMedia('video', event.target.checked)}
+            />
+            <span>{t('videoTool')}</span>
+          </label>
+          <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+        </div>
         <p style={optionHintStyle}>{t('videoToolHint')}</p>
         {/* Read-only presentation of the remaining video parameters: the first
             version edits videoTool only, so these stay informational. */}

@@ -171,10 +171,13 @@ describe('settings-only media risk confirmation', () => {
 
   it('provides nonempty English and Chinese copies for the same media controls and risks', () => {
     for (const locale of [en, zh]) {
-      for (const key of ['imagineTool', 'imagineToolHint', 'videoToolHint', 'mediaRiskHint', 'mediaConfirmPrompt', 'mediaConfirmYes', 'mediaConfirmNo', 'optionsHint'] as const) {
+      for (const key of ['imagineTool', 'imagineToolHint', 'videoToolHint', 'mediaRiskHint', 'experimentalTag', 'mediaConfirmPrompt', 'mediaConfirmYes', 'mediaConfirmNo', 'optionsHint'] as const) {
         expect(locale[key].trim().length).toBeGreaterThan(0)
       }
     }
+    expect(en.experimentalTag).toMatch(/experimental/i)
+    expect(zh.experimentalTag).toMatch(/实验性/)
+    expect(en.mediaConfirmPrompt).toMatch(/experimental/i)
     expect(en.mediaConfirmPrompt).toMatch(/xAI/i)
     expect(en.mediaConfirmPrompt).toMatch(/quota|charges/i)
     expect(en.mediaConfirmPrompt).toMatch(/restart/i)
