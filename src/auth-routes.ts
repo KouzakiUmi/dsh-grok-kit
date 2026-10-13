@@ -110,7 +110,11 @@ export class XaiOAuthWebAuth {
   private exclusive: Promise<void> = Promise.resolve()
   private exclusivePending = 0
 
-  constructor(private readonly session: XaiOAuthSession) {}
+  constructor(
+    private readonly session: XaiOAuthSession,
+    /** Invalidate account-scoped views/cache even if catalog refresh later fails. */
+    private readonly onAccountChange: () => void = () => undefined,
+  ) {}
 
   async status(): Promise<XaiOAuthWebAuthStatus> {
     if (this.operation !== undefined) return this.state
@@ -166,7 +170,8 @@ export class XaiOAuthWebAuth {
     const run = this.exclusive.then(async () => {
       this.cancellation?.abort(new Error('xAI Grok sign-in cancelled'))
       await this.operation?.catch(() => undefined)
-      await fn()
+      this.onAccountChange()
+      try { await fn() } finally { this.onAccountChange() }
     })
     this.exclusivePending += 1
     this.exclusive = run.catch(() => undefined)
@@ -174,6 +179,7 @@ export class XaiOAuthWebAuth {
   }
 
   private start(): void {
+    this.onAccountChange()
     const cancellation = new AbortController()
     this.cancellation = cancellation
     this.challenge = undefined
@@ -198,6 +204,7 @@ export class XaiOAuthWebAuth {
         }
       },
     ).finally(() => {
+      this.onAccountChange()
       this.operation = undefined
       this.cancellation = undefined
     })
@@ -378,8 +385,9 @@ export function registerXaiOAuthAuthRoutes(
   ctx: Context,
   session: XaiOAuthSession,
   cordisConfig: Record<string, unknown> = {},
+  onAccountChange?: () => void,
 ): void {
-  const auth = new XaiOAuthWebAuth(session)
+  const auth = new XaiOAuthWebAuth(session, onAccountChange)
   ctx.effect(() => {
     const routes = [
       ctx.webServer.register({

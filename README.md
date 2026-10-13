@@ -136,7 +136,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 
 ### 开发版：可选视频任务与能力状态
 
-当前源码新增默认关闭的 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，支持单图生视频、持久任务恢复与账号隔离下载。设置页展示本地能力观察和任务；额度来源尚未核验，不显示估算余额。启用需重启，生成消耗订阅额度，停止等待不等于取消上游任务。此说明不代表 npm 0.2.2 已包含功能；用法、配置及限制见 [视频说明](VIDEO.zh.md)。
+当前源码新增默认关闭的 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，支持单图生视频、持久任务恢复与账号隔离下载。设置页按账号、模型、搜索与对话、媒体与任务、网络分类，顶部公共状态和导航保持可见。账号页通过现有 OAuth 登录读取官方共享订阅额度；只显示接口实际报告的百分比、周期和可选余额，不估算 token 余额。媒体页展示本地能力观察与任务。启用需重启，生成消耗订阅额度，停止等待不等于取消上游任务。此说明不代表 npm 0.2.2 已包含功能；用法、配置及限制见 [视频说明](VIDEO.zh.md)。
 
 ## 配置
 
@@ -158,7 +158,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 
 本 bundle 的组合默认值来自 `cordis.patch.yml`。手工拆分或重组配置时，可用 `dsh --profile web --dump-config` 核对最终值。
 
-设置页 → xAI Grok →「搜索与功能选项」也能显式覆盖上表中的搜索/功能键（保存后重启生效；未修改的键继续跟随组合默认值，不会固化）。`proxyUrl` 例外：设置页保存即生效。
+开发版设置页 → xAI Grok →「搜索与对话」或「媒体与任务」可分别覆盖相关搜索/功能键；保存和重置只影响当前页，切页保留草稿（保存后重启生效；未修改的键继续跟随组合默认值，不会固化）。「网络」页的 `proxyUrl` 保存即生效。路线与后续候选见 [路线文档](ROADMAP.zh.md)。
 
 ## 登录文件、代理与安全边界
 

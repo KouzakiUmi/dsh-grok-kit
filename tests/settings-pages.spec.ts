@@ -1,0 +1,598 @@
+//
+// Part of dsh-grok-kit, Apache-2.0.
+//
+//
+
+/**
+ * Regression tests for the five-page settings section (account / models /
+ * search / media / network) and its sticky shared header.
+ *
+ * Same discipline as tests/video-view.spec.ts: the component runs against a
+ * stateful fake react (real useState slots, one effect pass per mount) and the
+ * element tree is RECURSIVELY EXPANDED, so a page that never renders cannot
+ * pass an assertion vacuously. The two account-scoped panels (QuotaView,
+ * CapabilitiesView) are expanded as opaque leaves — they own their own hooks
+ * and their own reads, which the sibling specs already cover.
+ *
+ * Covered here:
+ *   1. the sticky header renders the shared title, the account status line and
+ *      exactly five page buttons, with `aria-current` on the active one;
+ *   2. only the active page is mounted — quota belongs to the account page,
+ *      the capability / task panel to the media page, and neither page's reads
+ *      happen before it is opened;
+ *   3. switching pages issues no request of its own (status / proxy / options
+ *      stay at exactly one each);
+ *   4. drafts survive a page switch: an unsaved proxy URL and an unsaved option
+ *      are still there when the user comes back, with nothing written;
+ *   5. save / reset are scoped to the active page's keys and named after it,
+ *      and saving one page never drops the other page's unsaved draft;
+ *   6. a non-finite numeric edit is rejected instead of serialising to null,
+ *      which would silently delete the stored override;
+ *   7. the account key (status + generation) reaches both account-scoped
+ *      panels, so an account switch remounts them and drops the old rows;
+ *   8. each option field lives on exactly one page.
+ */
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const probe = vi.hoisted(() => ({
+  calls: [] as string[],
+  bodies: [] as unknown[],
+  initialStatus: undefined as { status: string; grokImportAvailable?: boolean } | undefined,
+}))
+
+vi.mock('react', () => {
+  // A tiny stateful react: hooks are slots, effects run once per hook slot per
+  // mount, and a setState re-renders. Enough to drive one controlled page
+  // component without pulling in a renderer.
+  let slots: unknown[] = []
+  let cursor = 0
+  let effectCursor = 0
+  let effects: Array<[number, () => void]> = []
+  const ranEffects = new Set<number>()
+  let draw: (() => void) | null = null
+  let lastTree: unknown = undefined
+  return {
+    __harness: {
+      reset(): void {
+        slots = []
+        cursor = 0
+        effectCursor = 0
+        effects = []
+        ranEffects.clear()
+      },
+      mount(component: (props: unknown) => unknown, props: unknown): void {
+        draw = () => {
+          cursor = 0
+          effectCursor = 0
+          effects = []
+          lastTree = component(props)
+          for (const [index, effect] of effects) {
+            if (ranEffects.has(index)) continue
+            ranEffects.add(index)
+            effect()
+          }
+        }
+        draw()
+      },
+      tree(): unknown {
+        draw?.()
+        return lastTree
+      },
+    },
+    useCallback: (fn: unknown) => fn,
+    useEffect: (effect: () => void) => {
+      effects.push([effectCursor++, effect])
+    },
+    useMemo: (fn: () => unknown) => fn(),
+    // Real ref semantics: one stable object per hook slot, kept across renders.
+    useRef: (initial: unknown) => {
+      const index = cursor++
+      if (!(index in slots)) slots[index] = { current: initial }
+      return slots[index]
+    },
+    useState: (initial: unknown) => {
+      const index = cursor++
+      if (index === 0 && !(index in slots) && probe.initialStatus !== undefined
+        && typeof initial === 'object' && initial !== null && 'status' in initial) {
+        slots[index] = probe.initialStatus
+      }
+      if (!(index in slots)) slots[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      const set = (next: unknown): void => {
+        slots[index] = typeof next === 'function' ? (next as (previous: unknown) => unknown)(slots[index]) : next
+        draw?.()
+      }
+      return [slots[index], set]
+    },
+  }
+})
+vi.mock('react/jsx-runtime', () => {
+  const jsx = (type: unknown, props: Record<string, unknown> | null, key?: unknown) => ({ type, props: props ?? {}, key })
+  return { jsx, jsxs: jsx, Fragment: Symbol.for('Fragment') }
+})
+
+import * as React from 'react'
+import { XaiSettings } from '../src/client/XaiSettings.tsx'
+import { CapabilitiesView } from '../src/client/capabilities-view.tsx'
+import { QuotaView } from '../src/client/quota-view.tsx'
+import { en } from '../src/client/locales.ts'
+
+interface FakeElement {
+  type: unknown
+  props: Record<string, unknown>
+  key?: unknown
+}
+
+/** Panels with their own hooks and reads: expanded as opaque leaves. */
+const LEAF = new Set<unknown>([QuotaView, CapabilitiesView])
+
+const harness = (React as unknown as {
+  __harness: { reset(): void; mount(component: (props: unknown) => unknown, props: unknown): void; tree(): unknown }
+}).__harness
+
+const t = (key: keyof typeof en): string => en[key]
+
+const SIGNED_IN = {
+  status: 'signed-in',
+  models: ['grok-4.6'],
+  available: ['grok-4.6', 'grok-3'],
+  selected: ['grok-4.6'],
+  catalogSource: 'live',
+}
+
+function asElement(node: unknown): FakeElement | undefined {
+  if (node === null || typeof node !== 'object' || Array.isArray(node)) return undefined
+  const element = node as FakeElement
+  return typeof element.props === 'object' && element.props !== null ? element : undefined
+}
+
+/** Recursively expand every component into its final element tree. */
+function expand(node: unknown): unknown {
+  if (Array.isArray(node)) return node.map(child => expand(child))
+  const element = asElement(node)
+  if (element === undefined) return node
+  if (element.type === typeMarker) return { type: typeMarker, props: { ...element.props, children: [] } }
+  if (typeof element.type === 'function') {
+    if (LEAF.has(element.type)) return { type: typeMarker, props: { ...element.props, children: [] } }
+    return expand((element.type as (props: Record<string, unknown>) => unknown)(element.props))
+  }
+  return { type: element.type, props: { ...element.props, children: expand(element.props.children) } }
+}
+
+const typeMarker = Symbol.for('dsh-grok-kit.tests.leaf')
+
+function texts(node: unknown, out: string[] = []): string[] {
+  if (node === null || node === undefined || typeof node === 'boolean') return out
+  if (Array.isArray(node)) {
+    for (const child of node) texts(child, out)
+    return out
+  }
+  if (typeof node === 'string' || typeof node === 'number') {
+    out.push(String(node))
+    return out
+  }
+  const element = node as FakeElement
+  if (element.type === typeMarker) return out
+  if (typeof element.type === 'function') {
+    // Leaf panels own their own hooks and reads; their spec covers them.
+    if (LEAF.has(element.type)) return out
+    return texts((element.type as (props: Record<string, unknown>) => unknown)(element.props), out)
+  }
+  return texts(element.props.children, out)
+}
+
+function find(node: unknown, match: (element: FakeElement) => boolean, out: FakeElement[] = []): FakeElement[] {
+  if (Array.isArray(node)) {
+    for (const child of node) find(child, match, out)
+    return out
+  }
+  const element = asElement(node)
+  if (element === undefined) return out
+  if (element.type === typeMarker) return out
+  if (typeof element.type === 'function') {
+    if (LEAF.has(element.type)) return out
+    find((element.type as (props: Record<string, unknown>) => unknown)(element.props), match, out)
+    return out
+  }
+  if (match(element)) out.push(element)
+  find(element.props.children, match, out)
+  return out
+}
+
+/** Component elements (QuotaView / CapabilitiesView) before expansion. */
+function panels(node: unknown, type: unknown, out: FakeElement[] = []): FakeElement[] {
+  if (Array.isArray(node)) {
+    for (const child of node) panels(child, type, out)
+    return out
+  }
+  const element = asElement(node)
+  if (element === undefined) return out
+  if (element.type === type) {
+    out.push(element)
+    return out
+  }
+  panels(element.props.children, type, out)
+  return out
+}
+
+function stubFetch(overrides: Record<string, unknown> = {}): void {
+  probe.calls = []
+  probe.bodies = []
+  const defaults: Record<string, unknown> = {
+    '/auth/status': SIGNED_IN,
+    '/auth/proxy': { proxyUrl: '' },
+    '/auth/options': {
+      options: { backendSearch: false, imagineTool: true, videoTool: false },
+      stored: {},
+      effective: { backendSearch: false, imagineTool: true, videoTool: false },
+    },
+    '/capabilities': { features: [], quota: { state: 'unavailable', message: '' }, videoEnabled: true },
+    '/video/tasks': [],
+    '/quota': { state: 'unavailable' },
+    '/auth/models': SIGNED_IN,
+    '/auth/logout': { status: 'signed-out', grokImportAvailable: true },
+  }
+  const table = { ...defaults, ...overrides }
+  vi.stubGlobal('fetch', vi.fn((path: string, init?: { body?: string }) => {
+    probe.calls.push(path)
+    if (init?.body !== undefined) probe.bodies.push(JSON.parse(init.body))
+    const key = Object.keys(table).find(candidate => path.endsWith(candidate))
+    const body = key === undefined ? {} : table[key]
+    // The options route answers with the effective values plus the sanitized
+    // stored document, so a POST echoes what it accepted and drops a cleared
+    // override from `stored` entirely.
+    const payload = key === '/auth/options' && init?.body !== undefined
+      ? (() => {
+          const patch = JSON.parse(init.body) as Record<string, unknown>
+          const stored: Record<string, unknown> = { ...(defaults['/auth/options'] as { stored?: object }).stored }
+          for (const [option, value] of Object.entries(patch)) if (value !== null) stored[option] = value
+          for (const option of Object.keys(patch)) if (patch[option] === null) delete stored[option]
+          return { ...(body as object), stored, effective: { ...(body as { effective?: object }).effective, ...stored } }
+        })()
+      : body
+    return Promise.resolve(new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+  }))
+}
+
+function mount(status: { status: string; grokImportAvailable?: boolean } = SIGNED_IN): void {
+  harness.reset()
+  probe.initialStatus = status
+  harness.mount(XaiSettings as unknown as (props: unknown) => unknown, { t })
+}
+
+const view = (): unknown => expand(now())
+
+/** Re-render and return the raw tree (child components not yet called). */
+const now = (): unknown => harness.tree()
+
+function clickPage(label: string): void {
+  const button = find(now(), element => element.type === 'button' && element.props.children === label)[0]
+  expect(button, `no page button ${label}`).toBeDefined()
+  const onClick = button!.props.onClick as (() => void) | undefined
+  expect(typeof onClick).toBe('function')
+  onClick!()
+}
+
+function field(node: unknown, label: string): FakeElement {
+  const row = find(node, element => element.type === 'label' && texts(element).includes(label))[0]
+  const control = row === undefined
+    ? undefined
+    : find(row, element => element.type === 'input' || element.type === 'select')[0]
+  if (control !== undefined) return control
+  const byLabel = find(node, element => element.type === 'input' && element.props['aria-label'] === label)[0]
+  expect(byLabel, `no control for ${label}`).toBeDefined()
+  return byLabel!
+}
+
+function button(node: unknown, text: string): FakeElement {
+  const found = find(node, element => element.type === 'button' && String(element.props.children ?? '').startsWith(text))[0]
+  expect(found, `no button ${text}`).toBeDefined()
+  return found!
+}
+
+const fire = (element: FakeElement, event: unknown): void =>
+  (element.props.onChange as (value: unknown) => void)(event)
+
+const countOf = (suffix: string): number => probe.calls.filter(call => call.endsWith(suffix)).length
+
+const buttonText = (text: string): string =>
+  String(find(now(), element => element.type === 'button' && String(element.props.children ?? '').startsWith(text))[0]?.props.children ?? '')
+
+/**
+ * Wait until an in-flight save / reset has settled. The save button is the only
+ * busy indicator in the option row, so both operations are observed through it.
+ */
+const settled = async (): Promise<void> => {
+  await vi.waitFor(() => expect(buttonText(en.optionsSave)).toContain(en.optionsSave))
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  probe.initialStatus = undefined
+})
+
+describe('five-page settings section', () => {
+  it('renders a sticky header with the shared title, status line and five pages', () => {
+    stubFetch()
+    mount()
+    const tree = view()
+    const sticky = find(tree, element => (element.props.style as Record<string, unknown> | undefined)?.position === 'sticky')[0]
+    expect(sticky).toBeDefined()
+    expect((sticky!.props.style as Record<string, unknown>).top).toBe(0)
+    expect((sticky!.props.style as Record<string, unknown>).background).toBeTruthy()
+    expect(texts(sticky!)).toContain(en.title)
+    expect(texts(sticky!)).toContain(en.statusLabel)
+    expect(find(sticky!, element => element.props.role === 'status').length).toBeGreaterThan(0)
+
+    const nav = find(sticky!, element => element.type === 'nav')[0]
+    const buttons = find(nav!, element => element.type === 'button')
+    expect(buttons.map(one => one.props.children)).toEqual([en.navAccount, en.navModels, en.navSearch, en.navMedia, en.navNetwork])
+    expect(buttons.map(one => one.props['aria-current'])).toEqual(['page', undefined, undefined, undefined, undefined])
+  })
+
+  it('mounts the quota panel on the account page and the capability panel on the media page', async () => {
+    stubFetch()
+    mount()
+    expect(panels(now(), QuotaView)).toHaveLength(1)
+    expect(panels(now(), CapabilitiesView)).toHaveLength(0)
+    // The panel owns its own read; this spec only checks that it is mounted.
+    expect(countOf('/quota')).toBe(0)
+    expect(countOf('/capabilities')).toBe(0)
+    expect(countOf('/video/tasks')).toBe(0)
+
+    clickPage(en.navMedia)
+    expect(panels(now(), QuotaView)).toHaveLength(0)
+    expect(panels(now(), CapabilitiesView)).toHaveLength(1)
+    // The panel is an opaque leaf here: its own reads (and its task list) are
+    // covered by tests/video-view.spec.ts, this spec owns the mounting rule.
+
+    clickPage(en.navAccount)
+    expect(panels(now(), CapabilitiesView)).toHaveLength(0)
+    expect(texts(harness.tree()).join(' ')).toContain(en.unofficialNotice)
+  })
+
+  it('issues no request of its own while switching pages', async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    for (const label of [en.navModels, en.navSearch, en.navNetwork, en.navAccount, en.navSearch, en.navAccount]) clickPage(label)
+    expect(countOf('/auth/status')).toBe(1)
+    expect(countOf('/auth/proxy')).toBe(1)
+    expect(countOf('/auth/options')).toBe(1)
+    expect(countOf('/capabilities')).toBe(0)
+    expect(probe.bodies).toEqual([])
+  })
+
+  it('keeps an unsaved proxy draft across a page switch and writes nothing', async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/proxy')).toBe(1))
+    clickPage(en.navNetwork)
+    fire(field(now(), en.proxyTitle), { target: { value: 'http://127.0.0.1:8080' } })
+    clickPage(en.navModels)
+    clickPage(en.navNetwork)
+    expect(field(now(), en.proxyTitle).props.value as string).toBe('http://127.0.0.1:8080')
+    expect(probe.bodies).toEqual([])
+  })
+
+  it('keeps an unsaved option draft across a page switch and writes nothing', async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navSearch)
+    fire(field(now(), en.searchModel), { target: { value: 'grok-build-9' } })
+    clickPage(en.navMedia)
+    clickPage(en.navSearch)
+    expect(field(now(), en.searchModel).props.value as string).toBe('grok-build-9')
+    expect(probe.bodies).toEqual([])
+  })
+
+  it('saves only the active page keys, named after that page', async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navSearch)
+    fire(field(now(), en.searchModel), { target: { value: 'grok-build-9' } })
+    clickPage(en.navMedia)
+    fire(field(now(), en.imagineTool), { target: { checked: false } })
+    const save = button(now(), en.optionsSave)
+    expect(String(save.props.children)).toContain(en.navMedia)
+    ;(save.props.onClick as () => void)()
+    await vi.waitFor(() => expect(probe.bodies).toHaveLength(1))
+    await settled()
+    expect(probe.bodies[0]).toEqual({ imagineTool: false })
+
+    clickPage(en.navSearch)
+    await settled()
+    expect(field(now(), en.searchModel).props.value as string).toBe('grok-build-9')
+    expect(button(now(), en.optionsSave).props.disabled as boolean).toBe(false)
+  })
+
+  it('resets only the active page keys', async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navMedia)
+    const reset = button(now(), en.optionsReset)
+    expect(String(reset.props.children)).toContain(en.navMedia)
+    ;(reset.props.onClick as () => void)()
+    await vi.waitFor(() => expect(probe.bodies).toHaveLength(1))
+    await settled()
+    expect(probe.bodies[0]).toEqual({ imagineTool: null, videoTool: null })
+  })
+
+  it("keeps both pages' drafts when one page is saved, and saves the other later", async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navSearch)
+    fire(field(now(), en.searchModel), { target: { value: 'grok-build-9' } })
+    clickPage(en.navMedia)
+    fire(field(now(), en.imagineTool), { target: { checked: false } })
+
+    ;(button(now(), en.optionsSave).props.onClick as () => void)()
+    await settled()
+    expect(probe.bodies[0]).toEqual({ imagineTool: false })
+
+    // The media save did not touch the search draft: still unsaved, still there.
+    clickPage(en.navSearch)
+    await settled()
+    expect(field(now(), en.searchModel).props.value as string).toBe('grok-build-9')
+    const searchSave = button(now(), en.optionsSave)
+    expect(searchSave.props.disabled as boolean).toBe(false)
+    ;(searchSave.props.onClick as () => void)()
+    await settled()
+    expect(probe.bodies[1]).toEqual({ searchModel: 'grok-build-9' })
+    expect(button(now(), en.optionsSave).props.disabled as boolean).toBe(true)
+  })
+
+  it("keeps the other page's draft when one page is reset", async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navMedia)
+    fire(field(now(), en.videoTool), { target: { checked: true } })
+    clickPage(en.navSearch)
+    fire(field(now(), en.backendSearch), { target: { checked: true } })
+
+    clickPage(en.navMedia)
+    ;(button(now(), en.optionsReset).props.onClick as () => void)()
+    await settled()
+    expect(probe.bodies[0]).toEqual({ imagineTool: null, videoTool: null })
+
+    clickPage(en.navSearch)
+    await settled()
+    expect(field(now(), en.backendSearch).props.checked as boolean).toBe(true)
+    expect(button(now(), en.optionsSave).props.disabled as boolean).toBe(false)
+  })
+
+  it('drops a stored override the server no longer reports, so the select falls back to auto', async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navSearch)
+    const select = field(now(), en.nestedSearchTools)
+    expect(select.props.value as string).toBe('auto')
+    fire(select, { target: { value: 'true' } })
+    ;(button(now(), en.optionsSave).props.onClick as () => void)()
+    await settled()
+    expect(probe.bodies[0]).toEqual({ nestedSearchTools: true })
+    expect(field(now(), en.nestedSearchTools).props.value as string).toBe('true')
+
+    ;(button(now(), en.optionsReset).props.onClick as () => void)()
+    await settled()
+    expect(probe.bodies[1]).toEqual({
+      backendSearch: null, statefulResponses: null, nestedSearchTools: null,
+      searchModel: null, searchMaxResults: null, webSearchTimeoutMs: null, xSearchTimeoutMs: null,
+    })
+    expect(field(now(), en.nestedSearchTools).props.value as string).toBe('auto')
+  })
+
+  it('rejects a non-finite numeric edit instead of clearing the override', async () => {
+    stubFetch()
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navSearch)
+    fire(field(now(), en.searchMaxResults), { target: { value: '1e999' } })
+    clickPage(en.navModels)
+    clickPage(en.navSearch)
+    // Rejected: nothing became dirty, so the page stays un-saveable and empty.
+    expect(field(now(), en.searchMaxResults).props.value as string).toBe('')
+    expect(button(now(), en.optionsSave).props.disabled as boolean).toBe(true)
+    expect(probe.bodies).toEqual([])
+  })
+
+  it('scopes the account key to both account-scoped panels', async () => {
+    stubFetch({ '/auth/import': { status: 'signed-in', models: ['grok-4.6'] } })
+    mount({ status: 'signed-out', grokImportAvailable: true })
+    expect(panels(now(), QuotaView)[0]!.key).toBe('signed-out:0')
+    const importButton = find(now(), element => element.type === 'button' && element.props.children === en.importGrok)[0]
+    expect(importButton).toBeDefined()
+    ;(importButton!.props.onClick as () => void)()
+    await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toBe('signed-in:2'))
+    clickPage(en.navMedia)
+    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:2')
+  })
+
+  it('hides the outgoing account before sign-out completes, then recovers', async () => {
+    stubFetch()
+    mount(SIGNED_IN)
+    clickPage(en.navMedia)
+    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:0')
+    expect(panels(now(), CapabilitiesView)[0]!.props.signedIn).toBe(true)
+
+    clickPage(en.navAccount)
+    const logout = find(now(), element => element.type === 'button' && element.props.children === en.logout)[0]
+    expect(logout).toBeDefined()
+    ;(logout!.props.onClick as () => void)()
+
+    // Still in flight: the account reads as gone, so nothing re-reads it.
+    expect(panels(now(), QuotaView)[0]!.key).toMatch(/^loading:/)
+    expect(panels(now(), QuotaView)[0]!.props.signedIn).toBe(false)
+    clickPage(en.navMedia)
+    expect(panels(now(), CapabilitiesView)[0]!.props.signedIn).toBe(false)
+
+    // The account page is the one that owns the quota panel; go back to it.
+    clickPage(en.navAccount)
+    await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toMatch(/^signed-out:/))
+    expect(texts(now()).join(' ')).toContain(en.signedOut)
+  })
+
+  it('restores the real account state when sign-out fails', async () => {
+    stubFetch({ '/auth/logout': { error: 'boom' } })
+    vi.stubGlobal('fetch', vi.fn((path: string, init?: { body?: string }) => {
+      probe.calls.push(path)
+      if (init?.body !== undefined) probe.bodies.push(JSON.parse(init.body))
+      if (path.endsWith('/auth/logout')) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'boom' }), { status: 500, headers: { 'content-type': 'application/json' } }))
+      }
+      const body = path.endsWith('/auth/status') ? SIGNED_IN
+        : path.endsWith('/auth/proxy') ? { proxyUrl: '' }
+          : path.endsWith('/auth/options') ? { options: {}, stored: {}, effective: {} }
+            : {}
+      return Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } }))
+    }))
+    mount(SIGNED_IN)
+    const logout = find(now(), element => element.type === 'button' && element.props.children === en.logout)[0]
+    ;(logout!.props.onClick as () => void)()
+    expect(panels(now(), QuotaView)[0]!.key).toMatch(/^loading:/)
+    // The refresh put the still-signed-in account back.
+    // The generation stays bumped; the refreshed status is the still-signed-in one.
+    await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toBe('signed-in:1'))
+    expect(panels(now(), QuotaView)[0]!.props.signedIn).toBe(true)
+    expect(countOf('/auth/status')).toBeGreaterThan(1)
+  })
+
+  it('gives every option field exactly one page', () => {
+    stubFetch()
+    mount()
+    const pages: Array<[string, string[]]> = [
+      [en.navAccount, []],
+      [en.navModels, []],
+      [en.navSearch, [en.backendSearch, en.statefulResponses, en.nestedSearchTools, en.searchModel, en.searchMaxResults, en.webSearchTimeoutMs, en.xSearchTimeoutMs]],
+      [en.navMedia, [en.imagineTool, en.videoTool]],
+      [en.navNetwork, []],
+    ]
+    const owners = new Map<string, string>()
+    for (const [page, labels] of pages) {
+      clickPage(page)
+      const rendered = texts(now()).join(' | ')
+      for (const label of labels) {
+        expect(rendered, `${label} missing on ${page}`).toContain(label)
+        expect(owners.has(label), `${label} is also owned by ${String(owners.get(label))}`).toBe(false)
+        owners.set(label, page)
+      }
+    }
+    for (const [page] of pages) {
+      clickPage(page)
+      const rendered = texts(now()).join(' | ')
+      for (const [other, labels] of pages) {
+        if (other === page) continue
+        for (const label of labels) expect(rendered.includes(label), `${label} leaked onto ${page}`).toBe(false)
+      }
+    }
+    expect(owners.size).toBe(9)
+  })
+})

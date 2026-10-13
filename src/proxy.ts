@@ -5,7 +5,8 @@
  * of its own (stored in `$DSH_HOME/.xai-oauth-proxy.json`, editable on its
  * settings page). Nothing global is touched except one transparent
  * `globalThis.fetch` hook that routes ONLY `x.ai` origins (api.x.ai / x.ai
- * and subdomains) through this plugin's ProxyAgent and passes every other
+ * and subdomains, plus the exact cli-chat-proxy.grok.com billing host)
+ * through this plugin's ProxyAgent and passes every other
  * request to the original fetch untouched. While the plugin is loaded the
  * hook applies to ALL x.ai requests in this process — including the catalog
  * `xai` API-key route — and it is restored on plugin dispose.
@@ -97,11 +98,12 @@ function urlHref(input: unknown): string {
   return ''
 }
 
-function isXaiUrl(input: unknown): boolean {
+/** xAI API origins plus the exact official Grok subscription billing proxy. */
+export function isXaiProxyTarget(input: unknown): boolean {
   if (input === undefined || input === null) return false
   try {
     const host = new URL(urlHref(input)).hostname.toLowerCase()
-    return host === 'x.ai' || host.endsWith('.x.ai')
+    return host === 'x.ai' || host.endsWith('.x.ai') || host === 'cli-chat-proxy.grok.com'
   } catch {
     return false
   }
@@ -147,8 +149,9 @@ export function setXaiProxyUrl(url: string): boolean {
 }
 
 /**
- * Install a transparent global-fetch hook that routes ONLY x.ai origins
- * through this plugin's ProxyAgent; every other request goes to the
+ * Install a transparent global-fetch hook that routes x.ai origins and the
+ * exact official Grok billing host through this plugin's ProxyAgent;
+ * every other request goes to the
  * original fetch untouched. Reference counted: every install returns its
  * OWN idempotent disposer, and the original fetch is restored only after
  * the LAST owner releases — and only if our wrapper is still installed
@@ -159,7 +162,7 @@ export function installXaiFetchHook(): () => void {
     originalFetch = globalThis.fetch
     const base = originalFetch.bind(globalThis)
     const wrapper = ((input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
-      if (proxyAgent !== null && isXaiUrl(input)) {
+      if (proxyAgent !== null && isXaiProxyTarget(input)) {
         return undiciFetch(input as Parameters<typeof undiciFetch>[0], {
           ...(init ?? {}),
           dispatcher: proxyAgent,

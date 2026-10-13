@@ -6,6 +6,7 @@ import { restoreEnv } from './restore-env.ts'
 import {
   applyXaiProxy,
   installXaiFetchHook,
+  isXaiProxyTarget,
   readStoredProxyUrl,
   resolveXaiProxyUrl,
   setXaiProxyUrl,
@@ -33,6 +34,17 @@ async function tempHome(): Promise<string> {
 }
 
 describe('proxy settings', () => {
+  it('includes the exact billing host without routing unrelated Grok or lookalike hosts', () => {
+    for (const url of ['https://api.x.ai/v1/models', 'https://auth.x.ai', 'https://cli-chat-proxy.grok.com/v1/billing?format=credits']) {
+      expect(isXaiProxyTarget(url)).toBe(true)
+      expect(isXaiProxyTarget(new URL(url))).toBe(true)
+      expect(isXaiProxyTarget({ url })).toBe(true)
+    }
+    for (const url of ['https://grok.com', 'https://other.grok.com', 'https://cli-chat-proxy.grok.com.evil.example', 'https://evilcli-chat-proxy.grok.com', 'not a url']) {
+      expect(isXaiProxyTarget(url)).toBe(false)
+    }
+  })
+
   it('resolves precedence: stored setting > config > DSH_XAI_PROXY env', async () => {
     const home = await tempHome()
     process.env.DSH_XAI_PROXY = 'http://env.example:7897'

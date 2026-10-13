@@ -39,6 +39,8 @@ import { applyGrokVideoTools } from './video-tools.ts'
 import { CapabilityTracker } from './capabilities.ts'
 import { registerGrokCapabilityRoutes } from './capability-routes.ts'
 import { registerGrokVideoFileRoute } from './video-file-route.ts'
+import { SuperGrokQuotaClient } from './quota.ts'
+import { registerGrokQuotaRoute } from './quota-routes.ts'
 import { DEFAULT_MAX_IMAGE_BYTES as DEFAULT_EDIT_MAX_IMAGE_BYTES, MAX_SOURCE_IMAGES as EDIT_MAX_SOURCE_IMAGES } from './imagine-edit-core.ts'
 import {
   applyGrokSearchTools,
@@ -309,18 +311,29 @@ export function apply(ctx: Context, config: Config): void {
     return dispose
   }, 'dsh-grok-kit: xAI proxy hook')
 
+  let quotaClient: SuperGrokQuotaClient | undefined
   const session = new XaiOAuthSession(new XaiOAuthCredentialStore(), () => {
+    // Login/import/logout notify through the existing catalog lifecycle.
+    // Clear account quota even if the viewer never visits the media page.
+    quotaClient?.reset()
     ctx.emit('llm/adapters-updated')
   })
   // Stop the session's background catalog retry timer on plugin unload.
   ctx.effect(() => () => session.dispose(), 'dsh-grok-kit: session retry lifecycle')
   const tokens = createXaiOAuthSearchTokenSource(session)
   const capabilities = new CapabilityTracker()
+  const quota = new SuperGrokQuotaClient({ tokens })
+  quotaClient = quota
+  ctx.effect(() => () => quota.dispose(), 'dsh-grok-kit: quota lifecycle')
+  ctx.inject(['webServer'], webCtx => registerGrokQuotaRoute(webCtx, quota))
   let capabilityIdentity: string | undefined
   const currentIdentity = async (): Promise<string | undefined> => {
     const identity = await tokens.identity?.()
     // Unknown identity is deliberately fail-closed: never retain a previous account's observations.
-    if (identity !== capabilityIdentity || identity === undefined) capabilities.reset()
+    if (identity !== capabilityIdentity || identity === undefined) {
+      capabilities.reset()
+      quota.reset()
+    }
     capabilityIdentity = identity
     return identity
   }
@@ -397,6 +410,11 @@ export function apply(ctx: Context, config: Config): void {
     webCtx,
     session,
     config as unknown as Record<string, unknown>,
+    () => {
+      quota.reset()
+      capabilities.reset()
+      capabilityIdentity = undefined
+    },
   ))
 
   const searchModel = effectiveConfig.searchModel ?? DEFAULT_XAI_SEARCH_MODEL

@@ -1,5 +1,14 @@
 # 更新记录 / Changelog
 
+## 未发布 / Unreleased
+
+- 设置按账号、模型、搜索与对话、媒体与任务、网络分页；公共状态与导航固定在顶部，分页保存和重置不影响其他页草稿。
+- Settings now separate Account, Models, Search & chat, Media & tasks, and Network with sticky shared status/navigation and page-scoped option saves/resets.
+- 账号页读取官方共享订阅额度，复用 OAuth 与代理；成功结果按账号缓存 60 秒，不估算未报告的额度或余额。
+- Account reads official shared subscription quota using existing OAuth/proxy, with a 60-second account-scoped successful-result cache and no fabricated usage or balances.
+- 保留视频默认关闭、账号隔离与不自动重复提交的计费边界；此前复审修复已覆盖凭据等待截止、查询能力状态及未知状态脱敏。
+- Video remains opt-in, account-isolated and never automatically resubmitted; review fixes cover credential deadlines, poll capability states and sanitized unknown status diagnostics.
+
 ## 0.2.2（2026-10-12）
 
 - 修复暗色模式下登录主按钮文字不清晰的问题，文字颜色跟随宿主主题。

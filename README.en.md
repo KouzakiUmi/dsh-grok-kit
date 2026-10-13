@@ -136,7 +136,7 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 
 ### Development version: optional video tasks and capabilities
 
-Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings show local capability observations and tasks; quota is unverified, not estimated. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. This does not imply the published npm 0.2.2 package includes the feature. See the [video guide](VIDEO.md) for configuration and limitations.
+Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings are separated into Account, Models, Search & chat, Media & tasks, and Network, with a sticky shared status and navigation. Account reads official shared subscription quota through the existing OAuth login; only reported percentages, periods and optional balances are displayed, never token-based estimates. Media shows local capability observations and tasks. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. This does not imply the published npm 0.2.2 package includes the feature. See the [video guide](VIDEO.md) for configuration and limitations.
 
 ## Configuration
 
@@ -158,7 +158,7 @@ Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_v
 
 The bundle defaults come from `cordis.patch.yml`. For a manually reduced or recomposed setup, inspect the final values with `dsh --profile web --dump-config`.
 
-The “Search & feature options” card on Settings → xAI Grok can also override the search/feature keys above (restart to apply; untouched keys keep following the bundle defaults instead of being pinned). `proxyUrl` is the exception — it applies immediately on save.
+Development settings split related keys between Search & chat and Media & tasks. Saves/resets apply only to the current page and drafts survive page switches (restart to apply; untouched keys still follow the bundle defaults). `proxyUrl` on Network applies immediately on save. See the [roadmap](ROADMAP.zh.md) for delivery status and future candidates.
 
 ## Sign-in document, proxy, and security boundaries
 
