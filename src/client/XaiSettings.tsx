@@ -621,15 +621,18 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
         </label>
         <p style={optionHintStyle}>{t('backendSearchHint')}</p>
 
-        <label style={optionRowStyle}>
-          <input
-            type="checkbox"
-            checked={optBool(options.statefulResponses, false)}
-            disabled={optionsBusy}
-            onChange={(event) => markOption('statefulResponses', event.target.checked)}
-          />
-          <span>{t('statefulResponses')}</span>
-        </label>
+        <div style={optionRowStyle}>
+          <label style={optionRowStyle}>
+            <input
+              type="checkbox"
+              checked={optBool(options.statefulResponses, false)}
+              disabled={optionsBusy}
+              onChange={(event) => markOption('statefulResponses', event.target.checked)}
+            />
+            <span>{t('statefulResponses')}</span>
+          </label>
+          <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+        </div>
         <p style={optionHintStyle}>{t('statefulResponsesHint')}</p>
 
         <div style={optionRowStyle}>
