@@ -117,6 +117,12 @@ const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 34, pad
 // label uses the matching foreground token instead of a hardcoded white.
 const primaryButtonStyle: CSSProperties = { ...buttonStyle, borderColor: 'var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-label-primary-foreground, white)' }
 const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
+const mediaConfirmStyle: CSSProperties = {
+  border: '1px solid var(--dsw-alias-state-error-primary)',
+  borderRadius: 6,
+  padding: '8px 10px',
+  margin: '6px 0',
+}
 const codeBoxStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '10px 14px', border: '1px dashed var(--dsw-alias-border-l2)', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1)' }
 const codeStyle: CSSProperties = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 20, letterSpacing: '0.08em', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
 const linkStyle: CSSProperties = { color: 'var(--dsw-alias-brand-primary)', wordBreak: 'break-all' }
@@ -199,6 +205,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const [optionsDirty, setOptionsDirty] = useState<ReadonlySet<OptionKey>>(new Set())
   const [optionsBusy, setOptionsBusy] = useState(false)
   const [optionsFeedback, setOptionsFeedback] = useState<'idle' | 'saved' | 'error'>('idle')
+  // An off→on media toggle parks here for the inline risk confirmation; the
+  // switch does not move until the user confirms inside the card.
+  const [pendingMediaGroup, setPendingMediaGroup] = useState<'images' | 'video' | null>(null)
   // Bumped by every account-changing action (sign-in, Grok import, sign-out).
   // Together with the account status it keys <CapabilitiesView/> so the panel
   // remounts: fresh fetches, aborted in-flight work, revoked blob URLs, and no
@@ -227,11 +236,35 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     setOptionsFeedback('idle')
   }
 
-  const markMedia = (group: 'images' | 'video', enabled: boolean): void => {
-    const patch = mediaTogglePatch(options, group, enabled, () => window.confirm(t('confirmMediaEnable')))
-    if (patch === undefined) return
+  const applyMediaPatch = (patch: Record<string, boolean>): void => {
     setOptions(previous => ({ ...previous, ...patch }))
     setOptionsDirty(previous => new Set([...previous, ...(Object.keys(patch) as OptionKey[])]))
+    setOptionsFeedback('idle')
+  }
+
+  const markMedia = (group: 'images' | 'video', enabled: boolean): void => {
+    if (enabled) {
+      // Park the toggle: the switch stays off until the inline confirmation
+      // below the media rows is accepted.
+      setPendingMediaGroup(group)
+      setOptionsFeedback('idle')
+      return
+    }
+    const patch = mediaTogglePatch(options, group, false)
+    if (patch === undefined) return
+    applyMediaPatch(patch)
+  }
+
+  const confirmPendingMedia = (): void => {
+    if (pendingMediaGroup === null) return
+    const patch = mediaTogglePatch(options, pendingMediaGroup, true)
+    setPendingMediaGroup(null)
+    if (patch === undefined) return
+    applyMediaPatch(patch)
+  }
+
+  const cancelPendingMedia = (): void => {
+    setPendingMediaGroup(null)
     setOptionsFeedback('idle')
   }
 
@@ -621,6 +654,16 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
           <span style={optionRowStyle}>{`${t('videoModelLabel')}: ${String(options.videoModel ?? '—')}`}</span>
           <span style={optionRowStyle}>{`${t('videoMaxBytesLabel')}: ${String(options.videoMaxBytes ?? '—')}`}</span>
         </div>
+
+        {pendingMediaGroup !== null ? (
+          <div style={mediaConfirmStyle}>
+            <p style={{ ...errorStyle, margin: '0 0 6px' }}>{t('mediaConfirmPrompt')}</p>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button type="button" style={primaryButtonStyle} disabled={optionsBusy} onClick={confirmPendingMedia}>{t('mediaConfirmYes')}</button>
+              <button type="button" style={buttonStyle} disabled={optionsBusy} onClick={cancelPendingMedia}>{t('mediaConfirmNo')}</button>
+            </div>
+          </div>
+        ) : null}
 
         <label style={optionRowStyle}>
           <span>{t('nestedSearchTools')}</span>

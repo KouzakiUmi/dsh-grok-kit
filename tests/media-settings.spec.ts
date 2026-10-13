@@ -55,7 +55,6 @@ async function fixture(initial: Record<string, unknown> = {}) {
   const defaults = { imagineTool: false, editTool: false, videoTool: false, mediaRiskAcknowledged: false, backendSearch: false }
   let options: Record<string, unknown> = { ...defaults, ...initial }
   const posts: Record<string, unknown>[] = []
-  const confirm = vi.fn(() => true)
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     if (path.endsWith('/options')) {
       if (init?.method === 'POST') {
@@ -68,7 +67,7 @@ async function fixture(initial: Record<string, unknown> = {}) {
     return new Response(JSON.stringify(path.endsWith('/proxy') ? { proxyUrl: '' } : { status: 'signed-out' }))
   })
   vi.stubGlobal('fetch', fetch)
-  vi.stubGlobal('window', { confirm })
+  vi.stubGlobal('window', { confirm: vi.fn() })
   const render = () => { hooks.cursor = 0; return XaiSettings({ t: key => en[key] }) }
   render()
   hooks.collectEffects = false
@@ -80,7 +79,9 @@ async function fixture(initial: Record<string, unknown> = {}) {
     return elements(row, element => element.type === 'input')[0]!
   }
   const change = (label: string, checked: boolean) => (input(label).props.onChange as (event: unknown) => void)({ target: { checked } })
-  const button = (label: string) => elements(render(), element => element.type === 'button' && text(element.props.children) === label)[0]!
+  const buttonOf = (label: string) => elements(render(), element => element.type === 'button' && text(element.props.children) === label)[0]
+  const button = (label: string) => buttonOf(label)!
+  const click = (label: string) => { (buttonOf(label)!.props.onClick as () => void)() }
   const save = async () => {
     const count = posts.length
     const saveButton = button(en.optionsSave)
@@ -89,37 +90,44 @@ async function fixture(initial: Record<string, unknown> = {}) {
     await vi.waitFor(() => expect(posts).toHaveLength(count + 1))
     await vi.waitFor(() => expect((hooks.values[8] as Set<unknown>).size).toBe(0))
   }
-  return { render, input, change, button, save, confirm, posts }
+  return { render, input, change, button, hasButton: (label: string) => buttonOf(label) !== undefined, click, save, posts }
 }
 
 describe('settings-only media risk confirmation', () => {
-  it('cancels without changing selections or writing and does not add consent to an unrelated save', async () => {
+  it('parks an enable behind the inline confirmation; cancelling changes nothing', async () => {
     const f = await fixture()
-    f.confirm.mockReturnValue(false)
     f.change(en.imagineTool, true)
-    expect(f.confirm).toHaveBeenCalledWith(en.confirmMediaEnable)
+    expect(f.input(en.imagineTool).props.checked).toBe(false)
+    expect(text(f.render())).toContain(en.mediaConfirmPrompt)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(true)
+    expect(f.hasButton(en.mediaConfirmNo)).toBe(true)
+    f.click(en.mediaConfirmNo)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
     expect(f.input(en.imagineTool).props.checked).toBe(false)
     expect(f.button(en.optionsSave).props.disabled).toBe(true)
     expect(f.posts).toEqual([])
     f.change(en.backendSearch, true)
     await f.save()
     expect(f.posts[0]).toEqual({ backendSearch: true })
-    expect(f.confirm).toHaveBeenCalledOnce()
   })
 
-  it('confirms both image tools, closes without a prompt, then confirms a reopening again', async () => {
+  it('confirms both image tools, closes without a prompt, then asks again on reopening', async () => {
     const f = await fixture()
     f.change(en.imagineTool, true)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(true)
+    f.click(en.mediaConfirmYes)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
     await f.save()
     expect(f.posts[0]).toEqual({ imagineTool: true, editTool: true, videoTool: false, mediaRiskAcknowledged: true })
     expect(f.input(en.imagineTool).props.checked).toBe(true)
     f.change(en.imagineTool, false)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
     await f.save()
     expect(f.posts[1]).toEqual({ imagineTool: false, editTool: false })
-    expect(f.confirm).toHaveBeenCalledOnce()
     f.change(en.imagineTool, true)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(true)
+    f.click(en.mediaConfirmYes)
     await f.save()
-    expect(f.confirm).toHaveBeenCalledTimes(2)
     expect(f.posts[2].mediaRiskAcknowledged).toBe(true)
   })
 
@@ -128,20 +136,22 @@ describe('settings-only media risk confirmation', () => {
     expect(f.input(en.imagineTool).props.checked).toBe(true)
     expect(text(f.render())).toContain(`${en.imageGenerationSwitch}: ${en.mediaOff} · ${en.imageEditingSwitch}: ${en.mediaOn}`)
     f.change(en.imagineTool, false)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
     await f.save()
     expect(f.posts[0]).toEqual({ imagineTool: false, editTool: false })
-    expect(f.confirm).not.toHaveBeenCalled()
   })
 
   it('confirms video, leaves images off and resets consent without a prompt', async () => {
     const f = await fixture()
     f.change(en.videoTool, true)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(true)
+    f.click(en.mediaConfirmYes)
     await f.save()
     expect(f.posts[0]).toEqual({ imagineTool: false, editTool: false, videoTool: true, mediaRiskAcknowledged: true })
     ;(f.button(en.optionsReset).props.onClick as () => void)()
     await vi.waitFor(() => expect(f.posts).toHaveLength(2))
     expect(f.posts[1]).toMatchObject({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
-    expect(f.confirm).toHaveBeenCalledOnce()
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
   })
 
   it('refreshes the local capability panel after a video close or reset, without remounting on unrelated saves', async () => {
@@ -157,19 +167,20 @@ describe('settings-only media risk confirmation', () => {
     expect(panelKey()).toBe(closedKey)
     ;(f.button(en.optionsReset).props.onClick as () => void)()
     await vi.waitFor(() => expect(panelKey()).not.toBe(closedKey))
-    expect(f.confirm).not.toHaveBeenCalled()
   })
 
   it('provides nonempty English and Chinese copies for the same media controls and risks', () => {
     for (const locale of [en, zh]) {
-      for (const key of ['imagineTool', 'imagineToolHint', 'videoToolHint', 'mediaRiskHint', 'confirmMediaEnable', 'optionsHint'] as const) {
+      for (const key of ['imagineTool', 'imagineToolHint', 'videoToolHint', 'mediaRiskHint', 'mediaConfirmPrompt', 'mediaConfirmYes', 'mediaConfirmNo', 'optionsHint'] as const) {
         expect(locale[key].trim().length).toBeGreaterThan(0)
       }
     }
-    expect(en.confirmMediaEnable).toMatch(/unofficial.*upstream/s)
-    expect(en.confirmMediaEnable).toMatch(/subscription quota.*charges/s)
-    expect(zh.confirmMediaEnable).toMatch(/非官方.*上游/s)
-    expect(zh.confirmMediaEnable).toMatch(/订阅额度.*费用/s)
+    expect(en.mediaConfirmPrompt).toMatch(/xAI/i)
+    expect(en.mediaConfirmPrompt).toMatch(/quota|charges/i)
+    expect(en.mediaConfirmPrompt).toMatch(/restart/i)
+    expect(zh.mediaConfirmPrompt).toMatch(/xAI/)
+    expect(zh.mediaConfirmPrompt).toMatch(/额度|费用/)
+    expect(zh.mediaConfirmPrompt).toMatch(/重启/)
   })
 })
 
