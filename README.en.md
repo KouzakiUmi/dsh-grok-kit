@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
-> Use Grok in DeepSeek Harness through OAuth, with fused web/X search in the main model turn, reasoning continuity across turns, Imagine image generation and editing, and an xAI-only proxy.
+> Use Grok in DeepSeek Harness through OAuth: fused web/X search in the main model turn, reasoning continuity across turns, image generation and editing, video generation (experimental), and an xAI-only proxy.
 
 > [!IMPORTANT]
 > **Unofficial project, trademark, and account-use notice**
@@ -32,9 +32,11 @@
 - **Search in the main loop:** web and X lookup occurs inside grok-4.6's current Think turn, so reasoning can use newly found material immediately
 - **Continuous multi-turn reasoning:** high effort is the default, with `reasoning.encrypted_content` preserved for the next turn
 - **Sign-in stays in sync with Grok CLI:** the plugin shares and writes back `~/.grok/auth.json` instead of copying once and rotating refresh tokens separately
-- **Imagine text-to-image and image-to-image:** `grok_imagine` and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are off by default and can be enabled after risk confirmation in Settings. Non-chat models stay out of the conversation picker; generated and edited images are stored in the DSH attachment library preserving normalized metadata, rendered in session image cards with prompt and inputs, and support download and re-generation/editing
+- **Image generation and editing (experimental):** `grok_imagine` for text-to-image and `grok_imagine_edit` for image-to-image (reusing the main OAuth session), off by default and enabled after risk confirmation in Settings. Non-chat models stay out of the conversation picker
+- **Session media cards:** generated and edited images are stored in the DSH attachment library and rendered in session cards showing the prompt, inputs, and result, with download and re-generate/re-edit actions
+- **Video generation (experimental):** image-to-video with durable tasks, resume, and account-scoped downloads; off by default, enabled after risk confirmation and a DSH restart
 
-Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, and diagnostic redaction.
+Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, a capability status page, and diagnostic redaction.
 
 ## Search in the main model turn
 
@@ -136,17 +138,17 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 - Data URI inputs are validated for decoded byte size, base64 encoding, magic-byte signatures, and MIME consistency; remote URLs are fetched upstream, and the card displays links to avoid automatic browser requests to arbitrary addresses.
 - Session card interactions: cards display the prompt and all input sources; completed runs show the result, a download entry, and a regenerate/re-edit action. Re-editing retains all input images and original render parameters.
 
-### Development version: optional video tasks and capabilities
+### Video tasks (experimental)
 
-Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings show local capability observations and tasks; quota is unverified, not estimated. Confirm the risks and restart after enabling. Generation may use subscription quota or incur charges; stopping the wait does not cancel the upstream job. This does not imply the published npm 0.2.2 package includes the feature. See the [video guide](VIDEO.md) for configuration and limitations.
+Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume`: image-to-video, durable task recovery, and account-scoped downloads. Settings show local capability observations and the task list; the quota source is unverified, so no balance is estimated. Enabling requires risk confirmation and a DSH restart; generation may use subscription quota or incur charges, and stopping the wait does not cancel an upstream job. The published npm `0.2.2` package does not include these tools yet. See the [video guide](VIDEO.md) for configuration and limitations.
 
 ### Enabling media tools and understanding the risks
 
-Image generation, image editing and video are all off by default. In DeepSeek Harness Settings → xAI Grok → “Search & feature options”, selecting an image or video switch opens a risk confirmation. Cancelling leaves the settings unchanged; after confirming, save and restart the DSH host to register the tools. The image switch controls generation and editing together, with each selected state shown separately. Normal generation, regeneration/editing, queries and downloads do not repeat the prompt; reopening after a close asks again. Enabling saves settings only, without generating media or probing quota.
+Image generation, image editing, and video are all off by default. In DeepSeek Harness Settings → xAI Grok → "Search & feature options", flipping a switch opens an inline risk confirmation inside the card: confirm and save, then restart the DSH host to register the tools; cancel or ignore it, and nothing changes. The image switch controls generation and editing together, with each state shown separately. Normal use — generating, re-editing, queries, downloads — does not ask again; only reopening after a close does. Enabling saves settings only, without generating media or probing quota.
 
-This is third-party unofficial access. Account eligibility and features depend on upstream service rules; access may be restricted or suspended, and confirmation is not official authorization. Generation may use subscription quota or incur charges. Text and input images are sent upstream: do not upload sensitive content or content you have no right to use. Stopping the wait does not cancel submitted generation or guarantee that usage stops.
+A few things to know up front: this is third-party, unofficial access. Whether it works depends on your xAI account eligibility and xAI service rules, and access can be limited or paused at any time. Generation uses subscription quota or incurs charges. Prompts and input images are uploaded to xAI — do not send sensitive content or material you have no rights to. "Stop" in the UI only stops waiting; it does not cancel a submitted task.
 
-The new version does not inherit old media enablement: image generation, editing and video all start off. First confirmation saves only the media explicitly selected in that request, keeping the rest off. The new confirmed choices persist across restarts; account, model, proxy and search settings are unaffected by this rule. Advanced configuration can select `imagineTool`, `editTool` and `videoTool` separately; read the risks above and explicitly set `mediaRiskAcknowledged: true`. It is a local informed choice, not a credential or official permission. Reset revokes media consent even if profile/Cordis still contains `true`. Saving a close blocks subsequent calls, including those requested by old result cards, without cancelling submitted upstream jobs. When video is off, its local task list, resume and video download routes are also disabled; existing tasks and attachments remain stored.
+Media switches do not inherit enablement from older versions: after updating, confirm once before first use. Confirmations persist across restarts. To control `imagineTool`, `editTool`, and `videoTool` separately, set them explicitly in config together with `mediaRiskAcknowledged: true` — a local informed choice, not a credential or permission. Reset revokes consent. Saving a close stops the tools from answering calls immediately (submitted jobs are unaffected); with video off, its local task list, resume, and download routes are disabled too, and existing tasks and attachments stay stored.
 
 ## Configuration
 
