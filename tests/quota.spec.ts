@@ -126,9 +126,60 @@ describe('normalizeSuperGrokQuota', () => {
   })
 
   it('requires a valid reported period for percentage-free subscription details', () => {
-    for (const currentPeriod of [{ type: 'USAGE_PERIOD_TYPE_WEEKLY', end: 'bad' }, { type: 'unexpected', end: '2026-10-19T00:00:00Z' }]) {
+    for (const currentPeriod of [
+      { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: 'bad' },
+      { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '0' },
+      { type: 'unexpected', end: '2026-10-19T00:00:00Z' },
+    ]) {
       expect(() => normalizeSuperGrokQuota({ config: { currentPeriod, prepaidBalance: {} } }, SETTINGS_SUCCESS)).toThrow(QuotaResponseError)
     }
+  })
+
+  it('rejects Date.parse-lenient reset strings instead of inventing a date', () => {
+    expect(() => normalizeSuperGrokQuota({ config: {
+      currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '0' },
+    } }, undefined)).toThrow(QuotaResponseError)
+    const withPercent = normalizeSuperGrokQuota({ config: {
+      creditUsagePercent: 1,
+      billingPeriodEnd: '0',
+    } }, undefined)
+    expect('resetAt' in withPercent).toBe(false)
+    // Present-but-unparseable bounds must not be labelled a monthly period.
+    expect(withPercent.period).toBe('subscription')
+  })
+
+  it('accepts RFC 3339 datetimes that omit the seconds field', () => {
+    const fromPeriod = normalizeSuperGrokQuota({ config: {
+      currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-10-19T00:00Z' },
+    } }, undefined)
+    expect(fromPeriod.resetAt).toBe('2026-10-19T00:00:00.000Z')
+    const withOffset = normalizeSuperGrokQuota({ config: {
+      creditUsagePercent: 1,
+      billingPeriodEnd: '2026-11-01T08:00+08:00',
+    } }, undefined)
+    expect(withOffset.resetAt).toBe('2026-11-01T00:00:00.000Z')
+    // A fractional part without seconds is not RFC 3339.
+    expect('resetAt' in normalizeSuperGrokQuota({ config: {
+      creditUsagePercent: 1,
+      billingPeriodEnd: '2026-10-19T00:00.5Z',
+    } }, undefined)).toBe(false)
+  })
+
+  it('only infers a legacy monthly period from parseable billing bounds', () => {
+    expect(normalizeSuperGrokQuota({ config: {
+      creditUsagePercent: 1,
+      billingPeriodStart: 'garbage',
+      billingPeriodEnd: '0',
+    } }, undefined).period).toBe('subscription')
+    // One real bound still evidences a billing period, though an unparseable
+    // end means no reset date is reported.
+    const oneBound = normalizeSuperGrokQuota({ config: {
+      creditUsagePercent: 1,
+      billingPeriodStart: '2026-10-01T00:00Z',
+      billingPeriodEnd: 'garbage',
+    } }, undefined)
+    expect(oneBound.period).toBe('month')
+    expect('resetAt' in oneBound).toBe(false)
   })
 
   it('falls back to legacy cents (used/limit) with a month period from billing bounds', () => {
@@ -502,6 +553,24 @@ describe('SuperGrokQuotaClient.get', () => {
     const pending = client.get(controller.signal)
     controller.abort(new Error('client disconnected'))
     await expect(pending).rejects.toThrow('client disconnected')
+  })
+
+  it('observes a late identity rejection after dispose instead of leaving it unhandled', async () => {
+    let rejectIdentity!: (error: Error) => void
+    const identity = () => new Promise<string>((_, reject) => { rejectIdentity = reject })
+    const client = makeClient({ tokens: makeTokens({ identity }) })
+    client.dispose()
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason) }
+    process.on('unhandledRejection', onUnhandled)
+    try {
+      expect(await client.get()).toEqual({ state: 'error', reason: 'temporary' })
+      rejectIdentity(new Error('identity failed after dispose'))
+      await new Promise<void>(resolve => { setImmediate(resolve) })
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off('unhandledRejection', onUnhandled)
+    }
   })
 
   it('immediately ends in-flight gets on dispose (hung resolve, real termination)', async () => {

@@ -335,8 +335,13 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => () => quota.dispose(), 'dsh-grok-kit: quota lifecycle')
   ctx.inject(['webServer'], webCtx => registerGrokQuotaRoute(webCtx, quota))
   let capabilityIdentity: string | undefined
+  // Last-start-wins: a late identity() from an earlier currentIdentity / auth
+  // transition must not mutate the tracker or drop a newer account's quota.
+  let identityGeneration = 0
   const currentIdentity = async (): Promise<string | undefined> => {
+    const generation = ++identityGeneration
     const identity = await tokens.identity?.()
+    if (generation !== identityGeneration) return identity
     // Unknown identity is deliberately fail-closed: never retain a previous account's observations.
     if (identity !== capabilityIdentity || identity === undefined) capabilities.reset()
     // First capability initialization does not invalidate a cached quota for
@@ -419,6 +424,7 @@ export function apply(ctx: Context, config: Config): void {
     session,
     config as unknown as Record<string, unknown>,
     () => {
+      identityGeneration += 1
       quota.reset()
       capabilities.reset()
       capabilityIdentity = undefined

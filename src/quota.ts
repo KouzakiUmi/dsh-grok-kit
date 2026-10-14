@@ -114,10 +114,21 @@ function trimmedString(value: unknown): string | undefined {
   return trimmed.length === 0 ? undefined : trimmed
 }
 
-/** Accepts ISO strings and Unix epoch seconds/milliseconds; otherwise omitted. */
+/**
+ * RFC 3339 / ISO-8601 offset datetime; the seconds field is optional per
+ * RFC 3339, but a fractional part still requires it. Date.parse alone is too
+ * lenient (`"0"` becomes 2000-01-01) and would let a percentage-free billing
+ * body cache as a partial success with an invented reset date.
+ */
+const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/u
+
+/** Accepts RFC 3339 strings and Unix epoch seconds/milliseconds; otherwise omitted. */
 function parseResetAt(raw: unknown): string | undefined {
-  if (typeof raw === 'string' && Number.isFinite(Date.parse(raw))) {
-    return new Date(Date.parse(raw)).toISOString()
+  if (typeof raw === 'string') {
+    const text = raw.trim()
+    if (!ISO_DATE_TIME.test(text)) return undefined
+    const ms = Date.parse(text)
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined
   }
   if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
     const ms = raw > 1e12 ? raw : raw * 1000
@@ -165,12 +176,15 @@ export function normalizeSuperGrokQuota(
     throw new QuotaResponseError('SuperGrok billing response has no usable usage percentage')
   }
   const periodType = period?.type
+  // Legacy billing bounds evidence a monthly period only when at least one
+  // bound is a real timestamp; present-but-garbage fields (e.g. end: "0")
+  // must not be labelled a month with no reset date.
+  const hasParseableBillingBounds = parseResetAt(config.billingPeriodStart) !== undefined
+    || parseResetAt(config.billingPeriodEnd) !== undefined
   const kind: QuotaPeriod = periodType === 'USAGE_PERIOD_TYPE_WEEKLY' ? 'week'
     : periodType === 'USAGE_PERIOD_TYPE_MONTHLY' ? 'month'
       : period !== undefined ? 'subscription'
-        : config.billingPeriodStart !== undefined || config.billingPeriodEnd !== undefined
-          ? 'month'
-          : 'subscription'
+        : hasParseableBillingBounds ? 'month' : 'subscription'
   const plan = trimmedString(isRecord(settingsBody) ? settingsBody.subscription_tier_display : undefined)
     ?? trimmedString(isRecord(body) ? body.subscription_tier : undefined)
   // Upstream free text: strip token-like strings and URL query strings, then
@@ -221,10 +235,11 @@ export async function readBoundedJson(response: Response, maxBytes: number): Pro
  * shared signal it was handed.
  */
 function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason)
   return new Promise<T>((resolve, reject) => {
     const onAbort = () => { reject(signal.reason) }
-    signal.addEventListener('abort', onAbort, { once: true })
+    // Observe the underlying promise first. get() after dispose() races an
+    // already-aborted combined signal; returning before this handler would
+    // leave a later identity/token rejection unhandled and can take down Node.
     promise.then(
       value => {
         signal.removeEventListener('abort', onAbort)
@@ -235,6 +250,11 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
         reject(error)
       },
     )
+    if (signal.aborted) {
+      onAbort()
+      return
+    }
+    signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 

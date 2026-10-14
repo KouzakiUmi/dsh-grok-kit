@@ -7,6 +7,7 @@ const captured = vi.hoisted(() => ({
   quota: undefined as SuperGrokQuotaClient | undefined,
   capabilities: undefined as GrokCapabilityRouteOptions | undefined,
   identity: 'account-a' as string | undefined,
+  identityFn: undefined as (() => Promise<string | undefined>) | undefined,
 }))
 vi.mock('../src/session.ts', async importOriginal => {
   const original = await importOriginal<typeof import('../src/session.ts')>()
@@ -16,7 +17,11 @@ vi.mock('../src/session.ts', async importOriginal => {
 })
 vi.mock('../src/token-source.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/token-source.ts')>(),
-  createXaiOAuthSearchTokenSource: () => ({ available: () => true, identity: async () => captured.identity, resolve: async () => 'synthetic-access' }),
+  createXaiOAuthSearchTokenSource: () => ({
+    available: () => true,
+    identity: async () => captured.identityFn ? captured.identityFn() : captured.identity,
+    resolve: async () => 'synthetic-access',
+  }),
 }))
 vi.mock('../src/options.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/options.ts')>(), readStoredOptions: () => ({}),
@@ -35,7 +40,7 @@ vi.mock('../src/capability-routes.ts', async importOriginal => ({
 }))
 import { apply } from '../src/index.ts'
 import { XaiOAuthSession } from '../src/session.ts'
-beforeEach(() => { captured.identity = 'account-a' })
+beforeEach(() => { captured.identity = 'account-a'; captured.identityFn = undefined })
 afterEach(() => { captured.quota?.dispose(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 function fixture() {
@@ -98,5 +103,36 @@ describe('quota account lifecycle integration', () => {
     await capabilities.identity!()
     expect(reset).toHaveBeenCalledTimes(2)
     expect(await quota.get()).toMatchObject({ state: 'unavailable', reason: 'auth' })
+  })
+
+  it('discards a stale identity completion instead of resetting the new account quota', async () => {
+    const { quota, capabilities, fetch } = fixture()
+    expect(await capabilities.identity!()).toBe('account-a')
+    const cachedA = await quota.get()
+    expect(cachedA).toMatchObject({ state: 'available', usedPercent: 42 })
+
+    let resolveStale!: (value: string | undefined) => void
+    let calls = 0
+    captured.identityFn = () => {
+      calls += 1
+      if (calls === 1) return new Promise(resolve => { resolveStale = resolve })
+      return Promise.resolve(captured.identity)
+    }
+    captured.identity = 'account-b'
+    const reset = vi.spyOn(quota, 'reset')
+    const stale = capabilities.identity!()
+    expect(await capabilities.identity!()).toBe('account-b')
+    expect(reset).toHaveBeenCalledTimes(1)
+    reset.mockClear()
+    const cachedB = await quota.get()
+    expect(cachedB).not.toBe(cachedA)
+    expect(cachedB).toMatchObject({ state: 'available', usedPercent: 42 })
+
+    fetch.mockRejectedValue(new Error('synthetic network failure after caching B'))
+    expect(await quota.get()).toBe(cachedB)
+    resolveStale('account-a')
+    expect(await stale).toBe('account-a')
+    expect(reset).not.toHaveBeenCalled()
+    expect(await quota.get()).toBe(cachedB)
   })
 })
