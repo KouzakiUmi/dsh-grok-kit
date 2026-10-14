@@ -2,6 +2,11 @@
 
 ## 未发布 / Unreleased
 
+- 进程内保留重新授权失败提示，不再因后续状态读取或模型选择而丢失；新的登录、导入或退出动作清除旧提示，不改写凭据。
+- Reauthorization failure diagnostics remain in memory across status reads and model selection; a new login, import or logout clears the old notice without rewriting credentials.
+- 同账号模型目录通知与首次媒体身份初始化不再清除 60 秒配额缓存；实际账号变更、未知身份与明确认证操作仍使缓存失效并隔离迟到结果。
+- Same-account catalog notifications and first capability identity initialization preserve the 60-second quota cache. Known account changes, unknown identities and explicit auth actions still invalidate it and isolate late results.
+
 - 重新授权失败或取消后，按当前保存的凭据恢复登录状态并显示非致命错误提示，不自动退出账号；迟到的恢复读取不能覆盖新的授权操作。首次登录失败且没有凭据时仍显示错误。
 - Failed or cancelled reauthorization reconciles sign-in status with saved credentials and shows a nonfatal error without signing out; late recovery reads cannot overwrite newer authorization actions. Initial login failure without credentials remains an error.
 - 私有凭据模式的已登录账号重新授权前增加替换确认；拒绝后不打开授权窗口、不提交登录请求，也不重置账号面板。共享 Grok CLI 凭据的原确认保持不变。

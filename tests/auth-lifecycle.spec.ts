@@ -24,6 +24,7 @@ describe('OAuth action serialization', () => {
       availableModels: () => [{ id: 'grok-4.6' }],
       visibleModels: () => [{ id: 'grok-4.6' }],
       selectedModelIds: () => ['grok-4.6'],
+      setSelectedModels: vi.fn(async () => undefined),
       catalogSource: 'cache',
     } as unknown as XaiOAuthSession
     return { session, logout }
@@ -39,8 +40,30 @@ describe('OAuth action serialization', () => {
     await expect(auth.signIn()).rejects.toThrow('synthetic authorization denied')
     await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2))
     expect(await auth.status()).toMatchObject({ status: 'signed-in', loginError: 'synthetic authorization denied' })
-    expect(await auth.status()).toMatchObject({ status: 'signed-in' })
+    expect(await auth.status()).toMatchObject({ status: 'signed-in', loginError: 'synthetic authorization denied' })
+    await auth.setModels(['grok-4.6'])
+    expect(await auth.status()).toMatchObject({ status: 'signed-in', loginError: 'synthetic authorization denied' })
     expect(logout).not.toHaveBeenCalled()
+    await auth.dispose()
+  })
+
+  it.each(['login', 'import', 'logout'])('clears the retained diagnostic on a new %s action', async action => {
+    authCalls.authenticated = true
+    authCalls.login.mockRejectedValue(new Error('synthetic previous failure'))
+    authCalls.importGrok.mockResolvedValue(undefined)
+    const { session } = signedInSession()
+    const changed = vi.fn()
+    const auth = new XaiOAuthWebAuth(session, changed)
+    await expect(auth.signIn()).rejects.toThrow('synthetic previous failure')
+    await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(2))
+    expect(await auth.status()).toMatchObject({ status: 'signed-in', loginError: 'synthetic previous failure' })
+    if (action === 'login') {
+      authCalls.login.mockImplementation(async interaction => interaction.notify({ type: 'auth_url', url: 'https://auth.x.ai/new-login' }))
+      await auth.signIn()
+      await vi.waitFor(() => expect(changed).toHaveBeenCalledTimes(4))
+    } else if (action === 'import') await auth.importGrok()
+    else await auth.signOut()
+    expect(await auth.status()).not.toHaveProperty('loginError')
     await auth.dispose()
   })
 

@@ -116,6 +116,8 @@ export class XaiOAuthWebAuth {
   /** Serializes import/logout against each other and against an in-flight login. */
   private exclusive: Promise<void> = Promise.resolve()
   private exclusivePending = 0
+  /** Retained across status/catalog reads; cleared by the next auth action. */
+  private loginError: string | undefined
 
   constructor(
     private readonly session: XaiOAuthSession,
@@ -131,7 +133,7 @@ export class XaiOAuthWebAuth {
       // A newer login/import/logout wins over this asynchronous recovery read.
       if (this.operation !== undefined || this.state !== failed) return this.state
       if (stored.status === 'signed-in') {
-        this.state = { ...stored, loginError: failed.message }
+        this.state = stored
         return this.state
       }
       return { ...failed, grokImportAvailable: stored.grokImportAvailable, sharedGrokAuth: stored.sharedGrokAuth }
@@ -185,6 +187,7 @@ export class XaiOAuthWebAuth {
     const run = this.exclusive.then(async () => {
       this.cancellation?.abort(new Error('xAI Grok sign-in cancelled'))
       await this.operation?.catch(() => undefined)
+      this.loginError = undefined
       this.onAccountChange()
       try { await fn() } finally { this.onAccountChange() }
     })
@@ -194,6 +197,7 @@ export class XaiOAuthWebAuth {
   }
 
   private start(): void {
+    this.loginError = undefined
     this.onAccountChange()
     const cancellation = new AbortController()
     this.cancellation = cancellation
@@ -211,9 +215,11 @@ export class XaiOAuthWebAuth {
       },
       (error: unknown) => {
         this.rejectChallenge(error)
+        const message = safeMessage(error)
+        this.loginError = message
         this.state = {
           status: 'error',
-          message: safeMessage(error),
+          message,
           grokImportAvailable: false,
           sharedGrokAuth: this.session.store.sharedWithGrokCli,
         }
@@ -281,6 +287,7 @@ export class XaiOAuthWebAuth {
       grokImportAvailable: grok && !shared,
       sharedGrokAuth: shared,
       ...this.session.catalogError === undefined ? {} : { catalogError: this.session.catalogError },
+      ...this.loginError === undefined ? {} : { loginError: this.loginError },
     }
   }
 

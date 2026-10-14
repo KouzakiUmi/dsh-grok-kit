@@ -322,11 +322,9 @@ export function apply(ctx: Context, config: Config): void {
     return dispose
   }, 'dsh-grok-kit: xAI proxy hook')
 
-  let quotaClient: SuperGrokQuotaClient | undefined
   const session = new XaiOAuthSession(new XaiOAuthCredentialStore(), () => {
-    // Login/import/logout notify through the existing catalog lifecycle.
-    // Clear account quota even if the viewer never visits the media page.
-    quotaClient?.reset()
+    // Model selection and catalog retries are not account changes. Auth routes
+    // invalidate account-scoped data separately, including failed transitions.
     ctx.emit('llm/adapters-updated')
   })
   // Stop the session's background catalog retry timer on plugin unload.
@@ -334,17 +332,16 @@ export function apply(ctx: Context, config: Config): void {
   const tokens = createXaiOAuthSearchTokenSource(session)
   const capabilities = new CapabilityTracker()
   const quota = new SuperGrokQuotaClient({ tokens })
-  quotaClient = quota
   ctx.effect(() => () => quota.dispose(), 'dsh-grok-kit: quota lifecycle')
   ctx.inject(['webServer'], webCtx => registerGrokQuotaRoute(webCtx, quota))
   let capabilityIdentity: string | undefined
   const currentIdentity = async (): Promise<string | undefined> => {
     const identity = await tokens.identity?.()
     // Unknown identity is deliberately fail-closed: never retain a previous account's observations.
-    if (identity !== capabilityIdentity || identity === undefined) {
-      capabilities.reset()
-      quota.reset()
-    }
+    if (identity !== capabilityIdentity || identity === undefined) capabilities.reset()
+    // First capability initialization does not invalidate a cached quota for
+    // that same account. Unknown identity still fails closed immediately.
+    if (identity === undefined || (capabilityIdentity !== undefined && identity !== capabilityIdentity)) quota.reset()
     capabilityIdentity = identity
     return identity
   }
