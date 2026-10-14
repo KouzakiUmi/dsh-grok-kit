@@ -61,9 +61,10 @@ const PAGE_LABEL_KEYS: Record<SettingsPageId, XaiOAuthSettingsKey> = {
 }
 
 /**
- * Which option keys each page owns. Save and reset are scoped to the active
- * page, so one page can never write (or clear) another page's overrides and a
- * draft left unsaved elsewhere is never dropped by this page's save.
+ * Which option keys each page owns for ordinary edits. Save is scoped to the
+ * active page's dirty keys from this list, so one page can never write another
+ * page's overrides and a draft left unsaved elsewhere is never dropped by
+ * this page's save.
  */
 const PAGE_OPTION_KEYS: Record<SettingsPageId, readonly OptionKey[]> = {
   account: [],
@@ -71,6 +72,20 @@ const PAGE_OPTION_KEYS: Record<SettingsPageId, readonly OptionKey[]> = {
   network: [],
   search: ['backendSearch', 'statefulResponses', 'nestedSearchTools', 'searchModel', 'searchMaxResults', 'webSearchTimeoutMs', 'xSearchTimeoutMs'],
   media: ['imagineTool', 'editTool', 'videoTool', 'mediaRiskAcknowledged'],
+}
+
+/**
+ * Extra keys Reset may clear even though the form does not edit them.
+ * Media still displays videoModel / videoMaxBytes as read-only; a stale
+ * stored videoMaxBytes would keep interrupting downloads after the user
+ * believes this page was reset.
+ */
+const PAGE_RESET_ONLY_KEYS: Partial<Record<SettingsPageId, readonly OptionKey[]>> = {
+  media: ['videoModel', 'videoMaxBytes'],
+}
+
+function pageResetKeys(pageId: SettingsPageId): readonly OptionKey[] {
+  return [...PAGE_OPTION_KEYS[pageId], ...(PAGE_RESET_ONLY_KEYS[pageId] ?? [])]
 }
 
 function optBool(value: OptionValue | undefined, fallback: boolean): boolean {
@@ -449,7 +464,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
 
   /** Reset only the active page's overrides back to the defaults. */
   const resetOptions = async (pageId: SettingsPageId): Promise<void> => {
-    const keys = PAGE_OPTION_KEYS[pageId]
+    const keys = pageResetKeys(pageId)
     if (keys.length === 0) return
     setOptionsBusy(true)
     try {

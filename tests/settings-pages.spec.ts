@@ -26,6 +26,8 @@
  *      are still there when the user comes back, with nothing written;
  *   5. save / reset are scoped to the active page's keys and named after it,
  *      and saving one page never drops the other page's unsaved draft;
+ *      Media reset also clears the read-only videoModel / videoMaxBytes
+ *      overrides while Save still never writes those keys;
  *   6. a non-finite numeric edit is rejected instead of serialising to null,
  *      which would silently delete the stored override;
  *   7. the account key (status + generation) reaches both account-scoped
@@ -490,7 +492,43 @@ describe('five-page settings section', () => {
     ;(reset.props.onClick as () => void)()
     await vi.waitFor(() => expect(probe.bodies).toHaveLength(1))
     await settled()
-    expect(probe.bodies[0]).toEqual({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
+    expect(probe.bodies[0]).toEqual({
+      imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false,
+      videoModel: null, videoMaxBytes: null,
+    })
+  })
+
+  it('clears read-only video overrides on Media reset without making them saveable', async () => {
+    stubFetch({
+      '/auth/options': {
+        options: { imagineTool: true, videoTool: false, videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 1_048_576 },
+        stored: { videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 1_048_576 },
+        effective: { imagineTool: true, videoTool: false, videoModel: 'grok-imagine-video-1.5', videoMaxBytes: 1_048_576 },
+      },
+    })
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
+    clickPage(en.navMedia)
+    await vi.waitFor(() => expect(texts(now()).join(' | ')).toContain('1048576'))
+    const rendered = texts(now()).join(' | ')
+    expect(rendered).toContain(en.videoModelLabel)
+    expect(rendered).toContain(en.videoMaxBytesLabel)
+    expect(find(now(), element => element.type === 'input' && element.props['aria-label'] === en.videoModelLabel)).toHaveLength(0)
+    expect(find(now(), element => element.type === 'input' && element.props['aria-label'] === en.videoMaxBytesLabel)).toHaveLength(0)
+
+    fire(field(now(), en.imagineTool), { target: { checked: false } })
+    ;(button(now(), en.optionsSave).props.onClick as () => void)()
+    await settled()
+    expect(probe.bodies[0]).toEqual({ imagineTool: false, editTool: false })
+    expect(probe.bodies[0]).not.toHaveProperty('videoModel')
+    expect(probe.bodies[0]).not.toHaveProperty('videoMaxBytes')
+
+    ;(button(now(), en.optionsReset).props.onClick as () => void)()
+    await settled()
+    expect(probe.bodies[1]).toEqual({
+      imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false,
+      videoModel: null, videoMaxBytes: null,
+    })
   })
 
   it("keeps both pages' drafts when one page is saved, and saves the other later", async () => {
@@ -530,7 +568,10 @@ describe('five-page settings section', () => {
     clickPage(en.navMedia)
     ;(button(now(), en.optionsReset).props.onClick as () => void)()
     await settled()
-    expect(probe.bodies[0]).toEqual({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
+    expect(probe.bodies[0]).toEqual({
+      imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false,
+      videoModel: null, videoMaxBytes: null,
+    })
 
     clickPage(en.navSearch)
     await settled()

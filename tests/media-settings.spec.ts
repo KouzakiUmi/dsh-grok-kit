@@ -163,7 +163,10 @@ describe('settings-only media risk confirmation', () => {
     expect(f.posts[0]).toEqual({ imagineTool: false, editTool: false, videoTool: true, mediaRiskAcknowledged: true })
     ;(f.button(en.optionsReset).props.onClick as () => void)()
     await vi.waitFor(() => expect(f.posts).toHaveLength(2))
-    expect(f.posts[1]).toMatchObject({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
+    expect(f.posts[1]).toEqual({
+      imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false,
+      videoModel: null, videoMaxBytes: null,
+    })
     expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
   })
 
