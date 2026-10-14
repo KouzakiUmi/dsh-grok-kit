@@ -2,7 +2,7 @@
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { XaiOAuthSettingsKey } from './locales.ts'
-import type { QuotaSnapshot } from '../quota.ts'
+import type { PartialQuotaSnapshot, QuotaSnapshot } from '../quota.ts'
 
 const QUOTA_PATH = '/plugins/dsh-grok-kit/quota'
 type Translate = (key: XaiOAuthSettingsKey, params?: Record<string, unknown>) => string
@@ -25,23 +25,26 @@ export function parseQuotaSnapshot(value: unknown): QuotaSnapshot {
     }
   }
   const checkedAt = timestamp(value.checkedAt)
-  const used = value.usedPercent
-  const remaining = value.remainingPercent
-  if (value.state !== 'available' || checkedAt === undefined
-    || typeof used !== 'number' || !Number.isFinite(used) || used < 0 || used > 100
-    || typeof remaining !== 'number' || !Number.isFinite(remaining) || remaining < 0 || remaining > 100
-    || Math.abs(used + remaining - 100) > 0.001
+  if ((value.state !== 'available' && value.state !== 'partial') || checkedAt === undefined
     || (value.period !== 'week' && value.period !== 'month' && value.period !== 'subscription')) {
     throw new Error('Invalid quota snapshot')
   }
   const resetAt = timestamp(value.resetAt)
-  return {
-    state: 'available', usedPercent: used, remainingPercent: remaining, period: value.period, checkedAt,
+  const details: Omit<PartialQuotaSnapshot, 'state'> = {
+    period: value.period, checkedAt,
     ...resetAt === undefined ? {} : { resetAt },
     ...typeof value.plan === 'string' && value.plan.trim() !== '' ? { plan: value.plan.slice(0, 100) } : {},
     ...typeof value.prepaidBalanceUsd === 'number' && Number.isFinite(value.prepaidBalanceUsd) && value.prepaidBalanceUsd >= 0
       ? { prepaidBalanceUsd: value.prepaidBalanceUsd } : {},
+    ...typeof value.unifiedBilling === 'boolean' ? { unifiedBilling: value.unifiedBilling } : {},
   }
+  if (value.state === 'partial') return { ...details, state: 'partial' }
+  const used = value.usedPercent
+  const remaining = value.remainingPercent
+  if (typeof used !== 'number' || !Number.isFinite(used) || used < 0 || used > 100
+    || typeof remaining !== 'number' || !Number.isFinite(remaining) || remaining < 0 || remaining > 100
+    || Math.abs(used + remaining - 100) > 0.001) throw new Error('Invalid quota snapshot')
+  return { ...details, state: 'available', usedPercent: used, remainingPercent: remaining }
 }
 
 const card: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 12, padding: '18px 20px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 12, background: 'var(--dsw-alias-bg-module-platform)' }
@@ -50,7 +53,7 @@ const button: CSSProperties = { minHeight: 34, padding: '6px 14px', border: '1px
 const row: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }
 
 export function QuotaDetails({ quota, t }: { quota: QuotaSnapshot; t: Translate }) {
-  if (quota.state !== 'available') {
+  if (quota.state !== 'available' && quota.state !== 'partial') {
     const key: XaiOAuthSettingsKey = quota.state === 'signed-out' ? 'quotaSignedOut'
       : quota.reason === 'auth' ? 'quotaAuthError'
         : quota.reason === 'restricted' ? 'quotaRestricted'
@@ -62,13 +65,18 @@ export function QuotaDetails({ quota, t }: { quota: QuotaSnapshot; t: Translate 
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={row}>
         <strong style={{ color: 'var(--dsw-alias-label-primary)' }}>{t(quota.period === 'week' ? 'quotaWeek' : quota.period === 'month' ? 'quotaMonth' : 'quotaSubscription')}</strong>
-        <span style={body}>{t('quotaRemaining')}: {percent(quota.remainingPercent)}</span>
+        {quota.state === 'available' ? <span style={body}>{t('quotaRemaining')}: {percent(quota.remainingPercent)}</span> : null}
       </div>
-      <div role="progressbar" aria-label={t('quotaUsed')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={quota.usedPercent}
-        style={{ height: 8, borderRadius: 8, background: 'var(--dsw-alias-border-l2)', overflow: 'hidden' }}>
-        <div style={{ height: '100%', width: `${quota.usedPercent}%`, background: 'var(--dsw-alias-brand-primary, #1677ff)' }} />
-      </div>
-      <p style={body}>{t('quotaUsed')}: {percent(quota.usedPercent)}</p>
+      {quota.unifiedBilling === true ? <p style={body}>{t('quotaUnified')}</p> : null}
+      {quota.state === 'available'
+        ? <>
+            <div role="progressbar" aria-label={t('quotaUsed')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={quota.usedPercent}
+              style={{ height: 8, borderRadius: 8, background: 'var(--dsw-alias-border-l2)', overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${quota.usedPercent}%`, background: 'var(--dsw-alias-brand-primary, #1677ff)' }} />
+            </div>
+            <p style={body}>{t('quotaUsed')}: {percent(quota.usedPercent)}</p>
+          </>
+        : <p role="status" style={body}>{t('quotaPartial')}</p>}
       <dl style={{ ...body, display: 'grid', gridTemplateColumns: 'minmax(90px, auto) minmax(0, 1fr)', gap: '6px 16px' }}>
         {quota.plan === undefined ? null : <><dt>{t('quotaPlan')}</dt><dd style={{ margin: 0, overflowWrap: 'anywhere' }}>{quota.plan}</dd></>}
         {quota.prepaidBalanceUsd === undefined ? null : <><dt>{t('quotaBalance')}</dt><dd style={{ margin: 0 }}>{quota.prepaidBalanceUsd.toFixed(2)} USD</dd></>}

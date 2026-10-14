@@ -2,6 +2,14 @@
 
 ## 未发布 / Unreleased
 
+- 登录入口明确兼容 X Subscription 与原 SuperGrok / X Premium，新增已登录账号的重新授权入口及官方订阅管理链接，沿用同一 Grok OAuth 与共享凭据生命周期。
+- The sign-in entry now covers The X Subscription and legacy SuperGrok / X Premium, with reauthorization for signed-in users and an official subscription-dashboard link, preserving the same Grok OAuth and shared credential lifecycle.
+- 统一计费响应未报告使用百分比时保留周期、套餐和余额，不再丢失整块订阅详情；不编造已用/剩余数字，proto3 空 Cent 消息按已报告的零余额处理，统一计费标记仅取官方布尔字段。未加入 Cursor 接入。
+- Unified billing responses without a usage percentage retain period, plan and balance details without fabricated usage numbers. Empty proto3 Cent messages represent a reported zero balance; unified billing uses only the official boolean flag. No Cursor integration is added.
+
+- 设置顶部公共状态与导航的吸顶背景统一为宿主弹窗背景层，消除深浅色下的矩形色块割裂，同时保留滚动遮挡效果。
+- The sticky settings header now uses the host dialog surface, removing the mismatched background block in light and dark themes while keeping scrolled content covered.
+
 - 视频任务替换后，旧播放/下载等待的迟到错误不再污染新任务卡片；保留当前任务的正常下载和错误反馈，移除未被使用且未公开导出的旧下载 hook。
 - Late playback/download failures from a replaced video task no longer pollute its replacement; current-task downloads and errors still work. Removed an unused, non-public download hook.
 - 视频文件路由改为复用既有浏览器安全共享模块中的唯一常量，保留 Host 与 Client 的原导出名，增加双端路径契约回归。

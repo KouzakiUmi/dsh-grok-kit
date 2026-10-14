@@ -153,9 +153,9 @@ const optionInputStyle: CSSProperties = {
 }
 const badgeStyle: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999, border: '1px solid var(--dsw-alias-border-l2)', fontSize: 12, fontWeight: 500, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' }
 const sourceBadgeStyle: CSSProperties = { ...badgeStyle, fontWeight: 600 }
-/* Sticky header: the shared title, the account status every page shows and the
-   five-page navigation. It needs its own opaque background, otherwise the page
-   content scrolls through it, and a z-index above the plain cards below. */
+/* Sticky header: match the host Modal surface so its background blends into
+   the settings panel. Keep it opaque and above the cards so scrolling content
+   cannot show through the shared title, account status or navigation. */
 const stickyBarStyle: CSSProperties = {
   position: 'sticky',
   top: 0,
@@ -164,7 +164,7 @@ const stickyBarStyle: CSSProperties = {
   flexDirection: 'column',
   gap: 12,
   padding: '12px 0 14px',
-  background: 'var(--dsw-alias-bg-module-platform)',
+  background: 'var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-base))',
 }
 const commonStatusStyle: CSSProperties = { ...statusStyle, fontSize: 13, flexWrap: 'wrap' }
 const tabBarStyle: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8 }
@@ -637,7 +637,10 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                   {status.status === 'loading'
                     ? null
                     : status.status === 'signed-in'
-                      ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signOut() }}>{busy ? t('working') : t(shared ? 'logoutShared' : 'logout')}</button>
+                      ? <>
+                          <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signIn() }}>{busy ? t('working') : t('loginAgain')}</button>
+                          <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signOut() }}>{busy ? t('working') : t(shared ? 'logoutShared' : 'logout')}</button>
+                        </>
                       : (
                           <>
                             <button type="button" style={primaryButtonStyle} disabled={busy || status.status === 'signing-in'} onClick={() => { void signIn() }}>{busy ? t('working') : status.status === 'error' ? t('loginAgain') : t(shared ? 'loginShared' : 'login')}</button>
@@ -647,6 +650,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                           </>
                         )}
                 </div>
+
+                <p style={bodyStyle}>{t('subscriptionLoginHint')}</p>
+                <a href="https://grok.com/dashboard" target="_blank" rel="noreferrer" style={linkStyle}>{t('subscriptionDashboard')}</a>
 
                 {/* dsh 0.1.2 repurposed --dsw-alias-label-dimmed to a near-invisible
                     tint (light: neutral-bluish-200) and removed state-info-primary;

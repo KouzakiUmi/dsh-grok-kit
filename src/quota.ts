@@ -5,7 +5,7 @@
 //
 
 /**
- * SuperGrok subscription quota probe over the official Grok CLI billing
+ * X Subscription / legacy SuperGrok quota probe over the official Grok CLI billing
  * proxy, reusing the shared OAuth token source (resolve + 401 refresh on the
  * same rotation chain as chat/search — never a bare token refresh here).
  *
@@ -13,8 +13,8 @@
  * `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` (plus an
  * optional `GET /settings` for the plan display name): `creditUsagePercent`
  * is the USED percentage (0–100), legacy responses fall back to
- * `monthlyLimit`/`used` cents. Nothing is fabricated: without a usable
- * percentage the response is `invalid`. Snapshots are cached per OAuth
+ * `monthlyLimit`/`used` cents. A readable period without a reported percentage
+ * yields partial metadata, never a fabricated usage number. Snapshots are cached per OAuth
  * account partition for 60s; an unknown or mid-flight-changed identity fails
  * closed and never returns another account's data.
  *
@@ -65,10 +65,27 @@ export interface AvailableQuotaSnapshot {
   plan?: string
   /** Prepaid (purchased) credit balance converted from US cents. */
   prepaidBalanceUsd?: number
+  /** Authoritative proxy flag, not inferred from the displayed tier name. */
+  unifiedBilling?: boolean
 }
+
+/** Readable subscription metadata when the proxy does not report a usage percentage. */
+export interface PartialQuotaSnapshot {
+  state: 'partial'
+  period: QuotaPeriod
+  checkedAt: string
+  resetAt?: string
+  plan?: string
+  prepaidBalanceUsd?: number
+  unifiedBilling?: boolean
+}
+
+type NormalizedQuota = Omit<AvailableQuotaSnapshot, 'state' | 'checkedAt'>
+  | (Omit<PartialQuotaSnapshot, 'state' | 'checkedAt'> & { usedPercent?: never; remainingPercent?: never })
 
 export type QuotaSnapshot =
   | AvailableQuotaSnapshot
+  | PartialQuotaSnapshot
   | { state: 'signed-out' | 'unavailable' | 'error'; reason?: QuotaErrorReason }
 
 /** Billing/settings JSON was readable but carried no usable quota fields. */
@@ -84,11 +101,11 @@ function numeric(value: unknown): number | undefined {
 
 /**
  * proto3 message fields decode as `{ val: n }`; a bare `{}` is the proto
- * zero value. Only a numeric `val` counts as a reported value.
+ * zero value. Missing messages and malformed values remain unknown.
  */
 function cents(value: unknown): number | undefined {
   if (!isRecord(value)) return undefined
-  return numeric(value.val)
+  return Object.keys(value).length === 0 ? 0 : numeric(value.val)
 }
 
 function trimmedString(value: unknown): string | undefined {
@@ -111,13 +128,13 @@ function parseResetAt(raw: unknown): string | undefined {
 
 /**
  * Strict mapping of the GetGrokCreditsConfig billing body (plus the optional
- * settings body). Throws {@link QuotaResponseError} when no percentage within
- * 0–100 can be derived; optional fields are omitted, never invented.
+ * settings body). A valid period may carry metadata without a percentage;
+ * malformed percentages and unreadable data still throw. No values are invented.
  */
 export function normalizeSuperGrokQuota(
   body: unknown,
   settingsBody: unknown,
-): Omit<AvailableQuotaSnapshot, 'state' | 'checkedAt'> {
+): NormalizedQuota {
   const config = isRecord(body) && isRecord(body.config) ? body.config : {}
   let percent = numeric(config.creditUsagePercent)
   if (percent === undefined) {
@@ -138,12 +155,15 @@ export function normalizeSuperGrokQuota(
       percent = used / limit * 100
     }
   }
-  // A percentage outside 0–100 is not a usable quota answer (used > limit or
-  // a negative reported percentage are upstream anomalies, not quota data).
-  if (percent === undefined || percent < 0 || percent > 100) {
+  const period = isRecord(config.currentPeriod) ? config.currentPeriod : undefined
+  // The unified proxy can omit the percentage while reporting a valid period.
+  // Preserve those details, but never interpret an omitted percentage as 0%.
+  const periodOnly = percent === undefined && config.creditUsagePercent === undefined
+    && (period?.type === 'USAGE_PERIOD_TYPE_WEEKLY' || period?.type === 'USAGE_PERIOD_TYPE_MONTHLY')
+    && parseResetAt(period.end) !== undefined
+  if (percent === undefined ? !periodOnly : percent < 0 || percent > 100) {
     throw new QuotaResponseError('SuperGrok billing response has no usable usage percentage')
   }
-  const period = isRecord(config.currentPeriod) ? config.currentPeriod : undefined
   const periodType = period?.type
   const kind: QuotaPeriod = periodType === 'USAGE_PERIOD_TYPE_WEEKLY' ? 'week'
     : periodType === 'USAGE_PERIOD_TYPE_MONTHLY' ? 'month'
@@ -160,15 +180,15 @@ export function normalizeSuperGrokQuota(
     : sanitizeDiagnosticMessage(plan).trim().slice(0, QUOTA_PLAN_MAX_LENGTH).trim()
   const prepaid = cents(config.prepaidBalance)
   const resetAt = parseResetAt(period?.end ?? config.billingPeriodEnd)
-  return {
-    usedPercent: percent,
-    remainingPercent: 100 - percent,
+  const details = {
     period: kind,
+    ...typeof config.isUnifiedBillingUser === 'boolean' ? { unifiedBilling: config.isUnifiedBillingUser } : {},
     ...resetAt === undefined ? {} : { resetAt },
     ...safePlan === undefined || safePlan.length === 0 ? {} : { plan: safePlan },
     // A negative prepaid balance is not a reportable credit balance.
     ...prepaid === undefined || prepaid < 0 ? {} : { prepaidBalanceUsd: Math.round(prepaid) / 100 },
   }
+  return percent === undefined ? details : { ...details, usedPercent: percent, remainingPercent: 100 - percent }
 }
 
 /** Bounded JSON read: hard byte ceiling, then a strict JSON parse. */
@@ -236,7 +256,7 @@ function quotaRequestInit(bearer: string, signal: AbortSignal): RequestInit {
 
 interface CacheEntry {
   identity: string
-  snapshot: AvailableQuotaSnapshot
+  snapshot: AvailableQuotaSnapshot | PartialQuotaSnapshot
   fetchedAt: number
 }
 
@@ -407,7 +427,7 @@ export class SuperGrokQuotaClient {
       if (combined.aborted) throw error
       return { state: 'error', reason: 'invalid' }
     }
-    let data: Omit<AvailableQuotaSnapshot, 'state' | 'checkedAt'>
+    let data: NormalizedQuota
     try {
       data = normalizeSuperGrokQuota(billingBody, round.settings)
     } catch {
@@ -417,11 +437,10 @@ export class SuperGrokQuotaClient {
     // fetched: a mid-flight account change must neither return nor cache it.
     const identityAfter = await raceAbort(Promise.resolve(this.tokens.identity?.()), combined)
     if (identityAfter !== identity) return { state: 'unavailable' }
-    const snapshot: AvailableQuotaSnapshot = {
-      ...data,
-      state: 'available',
-      checkedAt: new Date(this.now()).toISOString(),
-    }
+    const checkedAt = new Date(this.now()).toISOString()
+    const snapshot: AvailableQuotaSnapshot | PartialQuotaSnapshot = typeof data.usedPercent === 'number' && typeof data.remainingPercent === 'number'
+      ? { ...data, state: 'available', usedPercent: data.usedPercent, remainingPercent: data.remainingPercent, checkedAt }
+      : { ...data, state: 'partial', checkedAt }
     // A reset()/dispose() since this get started wins: the stale in-flight
     // result is still returned to its own caller, but never re-cached.
     if (generation === this.generation) {

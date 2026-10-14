@@ -34,6 +34,12 @@
 
 Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, and diagnostic redaction.
 
+### The X Subscription and legacy plans
+
+**Sign in with Grok / X Subscription** uses the same official Grok OAuth flow for The X Subscription and legacy SuperGrok / X Premium plans. Signed-in users can reauthorize to switch accounts without first deleting shared credentials. The account page also links to the [official subscription dashboard](<https://grok.com/dashboard>).
+
+Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the proxy omits the percentage, readable subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. This compatibility does not add Cursor authentication, models or Agent integration.
+
 ## Search in the main model turn
 
 The same model id does not guarantee the same experience across integrations. [xAI documents that `grok-4.6` is available in both Grok Build and the public API](https://docs.x.ai/build/overview); the important search difference is whether server-side tools share the main conversation request.

@@ -100,6 +100,37 @@ describe('normalizeSuperGrokQuota', () => {
     })
   })
 
+  it('keeps unified subscription details without fabricating an omitted percentage', () => {
+    const snapshot = normalizeSuperGrokQuota({ config: {
+      isUnifiedBillingUser: true,
+      currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-10-19T00:00:00Z' },
+      prepaidBalance: {},
+    } }, { subscription_tier_display: 'Ultra' })
+    expect(snapshot).toEqual({ period: 'week', resetAt: '2026-10-19T00:00:00.000Z', plan: 'Ultra', prepaidBalanceUsd: 0, unifiedBilling: true })
+    expect(snapshot).not.toHaveProperty('usedPercent')
+    expect(snapshot).not.toHaveProperty('remainingPercent')
+  })
+
+  it.each([null, '0', NaN, -1, 101])('does not treat malformed reported usage %s as a partial success', creditUsagePercent => {
+    expect(() => normalizeSuperGrokQuota({ config: {
+      creditUsagePercent,
+      currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-10-19T00:00:00Z' },
+    } }, undefined)).toThrow(QuotaResponseError)
+  })
+
+  it('retains a genuine zero percentage and the authoritative unified flag', () => {
+    expect(normalizeSuperGrokQuota({ config: { creditUsagePercent: 0, isUnifiedBillingUser: true, prepaidBalance: {} } }, undefined))
+      .toMatchObject({ usedPercent: 0, remainingPercent: 100, prepaidBalanceUsd: 0, unifiedBilling: true })
+    expect(normalizeSuperGrokQuota({ config: { creditUsagePercent: 5, isUnifiedBillingUser: 'true' } }, undefined))
+      .not.toHaveProperty('unifiedBilling')
+  })
+
+  it('requires a valid reported period for percentage-free subscription details', () => {
+    for (const currentPeriod of [{ type: 'USAGE_PERIOD_TYPE_WEEKLY', end: 'bad' }, { type: 'unexpected', end: '2026-10-19T00:00:00Z' }]) {
+      expect(() => normalizeSuperGrokQuota({ config: { currentPeriod, prepaidBalance: {} } }, SETTINGS_SUCCESS)).toThrow(QuotaResponseError)
+    }
+  })
+
   it('falls back to legacy cents (used/limit) with a month period from billing bounds', () => {
     const snapshot = normalizeSuperGrokQuota({
       config: {
@@ -185,6 +216,21 @@ describe('normalizeSuperGrokQuota', () => {
 })
 
 describe('SuperGrokQuotaClient.get', () => {
+  it('caches partial unified details without creating any usage numbers', async () => {
+    const { fetcher, calls } = makeFetch(() => jsonBody({ config: {
+      currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-10-19T00:00:00Z' },
+      isUnifiedBillingUser: true, prepaidBalance: {},
+    } }))
+    const client = makeClient({ fetch: fetcher })
+    const first = await client.get()
+    expect(first).toMatchObject({ state: 'partial', period: 'week', prepaidBalanceUsd: 0, unifiedBilling: true })
+    expect(first).not.toHaveProperty('usedPercent')
+    expect(first).not.toHaveProperty('remainingPercent')
+    expect(await client.get()).toBe(first)
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  })
+
   it('serves one upstream read from the 60s cache and keeps the original checkedAt', async () => {
     let tick = 1_000_000
     const { fetcher, calls } = makeFetch(() => jsonBody(BILLING_SUCCESS))

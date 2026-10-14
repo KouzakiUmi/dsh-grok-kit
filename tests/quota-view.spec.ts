@@ -33,6 +33,30 @@ describe('account quota presentation', () => {
     expect(nodes(tree).find(node => node.props.role === 'progressbar')?.props['aria-valuenow']).toBe(42)
     expect(text(tree)).not.toContain('synthetic-secret')
   })
+  it('shows partial subscription details without a fabricated progress bar or remaining percentage', () => {
+    const parsed = parseQuotaSnapshot({ state: 'partial', period: 'week', checkedAt: valid.checkedAt,
+      plan: 'Ultra', prepaidBalanceUsd: 0, unifiedBilling: true, resetAt: '2026-10-19T00:00:00Z',
+      access: 'synthetic-secret', usedPercent: 0, remainingPercent: 100 })
+    expect(parsed).not.toHaveProperty('usedPercent')
+    expect(parsed).not.toHaveProperty('remainingPercent')
+    expect(parsed).not.toHaveProperty('access')
+    const tree = QuotaDetails({ quota: parsed, t })
+    expect(text(tree)).toContain('quotaPartial')
+    expect(text(tree)).toContain('quotaUnified')
+    expect(text(tree)).toContain('Ultra')
+    expect(text(tree)).toContain('0.00 USD')
+    expect(text(tree)).toContain('quotaResetAt')
+    expect(text(tree)).not.toContain('quotaRemaining')
+    expect(nodes(tree).some(node => node.props.role === 'progressbar')).toBe(false)
+  })
+  it('does not infer unified billing from the plan name or a truthy string', () => {
+    const tree = QuotaDetails({ quota: parseQuotaSnapshot({ ...valid, plan: 'Ultra', unifiedBilling: 'true' }), t })
+    expect(text(tree)).not.toContain('quotaUnified')
+  })
+  it('still validates partial timestamps and period contracts', () => {
+    expect(() => parseQuotaSnapshot({ state: 'partial', period: 'daily', checkedAt: valid.checkedAt })).toThrow()
+    expect(() => parseQuotaSnapshot({ state: 'partial', period: 'week', checkedAt: 'bad' })).toThrow()
+  })
   it('does not invent unreported plan, reset or balance', () => {
     const tree = QuotaDetails({ quota: parseQuotaSnapshot(valid), t })
     expect(text(tree)).not.toContain('quotaPlan')

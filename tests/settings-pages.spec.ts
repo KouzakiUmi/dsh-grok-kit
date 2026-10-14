@@ -316,6 +316,31 @@ afterEach(() => {
 })
 
 describe('five-page settings section', () => {
+  it('exposes the same official OAuth entry for new and legacy subscriptions', () => {
+    stubFetch({ '/auth/status': { status: 'signed-out' } })
+    mount({ status: 'signed-out' })
+    expect(buttonText(en.login)).toContain('X Subscription')
+    expect(texts(view())).toContain(en.subscriptionLoginHint)
+    const link = find(view(), element => element.type === 'a' && element.props.href === 'https://grok.com/dashboard')[0]
+    expect(link?.props.target).toBe('_blank')
+    expect(link?.props.rel).toBe('noreferrer')
+    expect(countOf('/auth/login')).toBe(0)
+  })
+
+  it('lets an authenticated user reauthorize without first deleting the shared credential', async () => {
+    stubFetch({ '/auth/login': { url: 'https://auth.x.ai/device' } })
+    vi.stubGlobal('window', { open: vi.fn(() => null), confirm: vi.fn(() => true) })
+    mount()
+    await vi.waitFor(() => expect(countOf('/auth/status')).toBe(1))
+    const oldKey = panels(now(), QuotaView)[0]?.key
+    const action = button(view(), en.loginAgain)
+    expect(action.props.disabled).toBe(false)
+    ;(action.props.onClick as () => void)()
+    await vi.waitFor(() => expect(countOf('/auth/login')).toBe(1))
+    expect(countOf('/auth/logout')).toBe(0)
+    expect(panels(now(), QuotaView)[0]?.key).not.toBe(oldKey)
+  })
+
   it('renders a sticky header with the shared title, status line and five pages', () => {
     stubFetch()
     mount()
@@ -323,7 +348,9 @@ describe('five-page settings section', () => {
     const sticky = find(tree, element => (element.props.style as Record<string, unknown> | undefined)?.position === 'sticky')[0]
     expect(sticky).toBeDefined()
     expect((sticky!.props.style as Record<string, unknown>).top).toBe(0)
-    expect((sticky!.props.style as Record<string, unknown>).background).toBeTruthy()
+    // Match the host Modal surface, not the elevated module/card fill.
+    expect((sticky!.props.style as Record<string, unknown>).background).toBe('var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-base))')
+    expect((sticky!.props.style as Record<string, unknown>).zIndex).toBe(1)
     expect(texts(sticky!)).toContain(en.title)
     expect(texts(sticky!)).toContain(en.statusLabel)
     expect(find(sticky!, element => element.props.role === 'status').length).toBeGreaterThan(0)
