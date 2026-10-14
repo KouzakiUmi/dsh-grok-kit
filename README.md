@@ -29,7 +29,7 @@
 
 `dsh-grok-kit` 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 增加独立的 `xai-oauth` 路由。它不要求 `XAI_API_KEY`，也不修改 dsh 源码；重点不只是“能登录”，而是把服务端搜索和连续 reasoning 所需的请求字段接进主聊天路径。
 
-- **搜索融入主循环：** 网页与 X 检索发生在 grok-4.6 的同一轮 Think 中，推理可以直接使用刚搜到的材料
+- **搜索融入主循环：** 网页与 X 检索发生在 Grok 的同一轮 Think 中，推理可以直接使用刚搜到的材料
 - **多轮推理衔接：** 默认使用 high effort，并保留 `reasoning.encrypted_content`，让后续回合能够带回加密推理上下文
 - **登录状态与 Grok CLI 同步：** 直接共用并回写 `~/.grok/auth.json`，不是只复制一次后各自轮换 refresh token
 - **图片生成与编辑（实验性）：** `grok_imagine` 文生图、`grok_imagine_edit` 图生图（复用主 OAuth session），默认关闭，在设置页确认风险后开启；非聊天模型不会混进对话模型列表
@@ -44,7 +44,7 @@
 
 **分离式搜索**会额外发起一轮模型请求完成检索或摘要，再把结果交回主对话。它仍然适合需要独立过滤条件的任务，但会多出一轮模型处理，而且搜索摘要不是在当前回复的 Think 中生成。
 
-**主循环融合搜索**则按 [xAI Responses API 的服务端搜索方式](https://docs.x.ai/developers/tools/web-search)，把 `{type:web_search}` 与 `{type:x_search}` 直接放进主 grok-4.6 请求。检索发生在 Think 里，模型能在同一轮推理中使用刚获得的网页和 X 材料；这条路径默认关闭（v0.1.8 起），可在设置页或配置中打开。
+**主循环融合搜索**则按 [xAI Responses API 的服务端搜索方式](https://docs.x.ai/developers/tools/web-search)，把 `{type:web_search}` 与 `{type:x_search}` 直接放进主 Grok 请求。检索发生在 Think 里，模型能在同一轮推理中使用刚获得的网页和 X 材料；这条路径默认关闭（v0.1.8 起），可在设置页或配置中打开。
 
 为让两类搜索共存，宿主原生 `web_search` 仍保留在 DSH 工具列表中，但会从启用融合搜索的 xAI payload 里移除，避免服务端工具重名；其他模型路由仍可照常使用宿主搜索。
 
