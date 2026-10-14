@@ -300,7 +300,9 @@ interface StoredPluginOptions {
   nestedSearchTools?: boolean;
   statefulResponses?: boolean;
   imagineTool?: boolean;
+  editTool?: boolean;
   videoTool?: boolean;
+  mediaRiskAcknowledged?: boolean;
   videoModel?: string;
   videoMaxBytes?: number;
   searchModel?: string;
@@ -314,7 +316,9 @@ interface EffectivePluginOptions {
   nestedSearchTools: boolean;
   statefulResponses: boolean;
   imagineTool: boolean;
+  editTool: boolean;
   videoTool: boolean;
+  mediaRiskAcknowledged: boolean;
   videoModel: string;
   videoMaxBytes: number;
   searchModel: string;
@@ -439,6 +443,8 @@ interface GrokImagineOptions {
   session: XaiOAuthSession;
   resolveAttachments: () => AttachmentStore | undefined;
   fetch?: typeof fetch;
+  /** Current effective local media switch; checked for every new call. */
+  enabled?: () => boolean;
 }
 declare function applyGrokImagineTool(ctx: Context, options: GrokImagineOptions): void;
 //#endregion
@@ -454,6 +460,8 @@ interface GrokImagineEditOptions {
   /** Per-source byte cap. */
   maxImageBytes?: number;
   fetch?: typeof fetch;
+  /** Current effective local media switch; checked for every new call. */
+  enabled?: () => boolean;
 }
 /** Register grok_imagine_edit. Independent of imagineTool: either may be off. */
 declare function applyGrokImagineEditTool(ctx: Context, options: GrokImagineEditOptions): void;
@@ -801,6 +809,8 @@ declare class VideoTaskManager {
 //#region src/video-tools.d.ts
 interface GrokVideoToolOptions {
   manager: VideoTaskManager;
+  /** Current effective local media switch, including calls from old cards. */
+  enabled?: () => boolean;
 }
 /**
  * Register the three video tools. The manager is supplied by the host entry
@@ -869,7 +879,7 @@ declare class CapabilityTracker {
 //#region src/capability-routes.d.ts
 interface GrokCapabilityRouteOptions {
   tracker: CapabilityTracker;
-  videoEnabled: boolean;
+  videoEnabled: boolean | (() => boolean);
   authenticated: () => Promise<boolean>;
   /** Optional for legacy callers; production supplies the stable OAuth partition. */
   identity?: () => Promise<string | undefined>;
@@ -894,7 +904,7 @@ interface DownloadTask {
   attachment?: FileAttachmentRef;
 }
 interface VideoFileRouteOptions {
-  enabled: boolean;
+  enabled: boolean | (() => boolean);
   identity: () => Promise<string | undefined>;
   tasks: () => Promise<readonly DownloadTask[]>;
   resolveAttachments: () => AttachmentStore | undefined;
@@ -994,12 +1004,12 @@ interface Config {
    * omit means false. Do not enable while DSH is still in a toolUse step.
    */
   statefulResponses?: boolean;
-  /** Register grok_imagine. Default true. */
+  /** Register grok_imagine after explicit media consent. Default false. */
   imagineTool?: boolean;
   /**
    * Register grok_imagine_edit (image-to-image over POST /v1/images/edits),
-   * merged from the former dsh-grok-imagine-edit plugin. Default true;
-   * independent of imagineTool.
+   * merged from the former dsh-grok-imagine-edit plugin. Default false;
+   * independent advanced config; the settings page controls both image tools.
    */
   editTool?: boolean;
   /** Pin the edit model; '' follows the live catalog (grok-imagine-image-2.0, fallback grok-imagine-image). */
@@ -1010,6 +1020,8 @@ interface Config {
   editMaxImageBytes?: number;
   /** Register video task tools. Opt-in only; generation consumes subscription usage. */
   videoTool?: boolean;
+  /** Explicit local acknowledgement of the documented media risks; not official authorization. Default false. */
+  mediaRiskAcknowledged?: boolean;
   /** Supported single-image video model. */
   videoModel?: string;
   /** Hard streamed download ceiling, defaults to 100 MiB. */

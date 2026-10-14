@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
-> 通过 OAuth 在 DeepSeek Harness 中使用 Grok：主循环融合网页与 X 搜索、多轮推理衔接、Imagine 生图与图生图，以及仅作用于 xAI 的独立代理。
+> 通过 OAuth 在 DeepSeek Harness 中使用 Grok：主循环融合网页与 X 搜索、多轮推理衔接、图片生成与编辑、视频生成（实验性），以及仅作用于 xAI 的独立代理。
 
 > [!IMPORTANT]
 > **非官方项目、商标与账户使用声明**
@@ -27,12 +27,14 @@
 
 `dsh-grok-kit` 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 增加独立的 `xai-oauth` 路由。它不要求 `XAI_API_KEY`，也不修改 dsh 源码；重点不只是“能登录”，而是把服务端搜索和连续 reasoning 所需的请求字段接进主聊天路径。
 
-- **搜索融入主循环：** 网页与 X 检索发生在 grok-4.6 的同一轮 Think 中，推理可以直接使用刚搜到的材料
+- **搜索融入主循环：** 网页与 X 检索发生在 Grok 的同一轮 Think 中，推理可以直接使用刚搜到的材料
 - **多轮推理衔接：** 默认使用 high effort，并保留 `reasoning.encrypted_content`，让后续回合能够带回加密推理上下文
 - **登录状态与 Grok CLI 同步：** 直接共用并回写 `~/.grok/auth.json`，不是只复制一次后各自轮换 refresh token
-- **Imagine 文生图与图生图：** `grok_imagine` 与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启，非聊天模型不会混进对话模型列表；生成图与编辑图统一通过 DSH 附件库保存并保留归一化 metadata，在会话图片卡片中直观展示提示词、输入图与结果，并支持下载与再次生成/编辑
+- **图片生成与编辑（实验性）：** `grok_imagine` 文生图、`grok_imagine_edit` 图生图（复用主 OAuth session），默认关闭，在设置页确认风险后开启；非聊天模型不会混进对话模型列表
+- **会话图片卡片：** 生成与编辑的结果保存在 DSH 附件库，在会话卡片里直接显示提示词、输入图与结果，支持下载与再次生成/编辑
+- **视频生成（实验性）：** 单图生成视频，任务持久化、断线恢复与按账号隔离的下载；默认关闭，确认风险并重启 DSH 后开启
 
-此外还包括 xAI 专用代理、聊天 401 强制刷新重试、凭据原子写入与诊断脱敏等支撑能力。
+此外还包括 xAI 专用代理、聊天 401 强制刷新重试、凭据原子写入、能力状态页与诊断脱敏等支撑能力。
 
 ### X Subscription 与原订阅
 
@@ -46,7 +48,7 @@
 
 **分离式搜索**会额外发起一轮模型请求完成检索或摘要，再把结果交回主对话。它仍然适合需要独立过滤条件的任务，但会多出一轮模型处理，而且搜索摘要不是在当前回复的 Think 中生成。
 
-**主循环融合搜索**则按 [xAI Responses API 的服务端搜索方式](https://docs.x.ai/developers/tools/web-search)，把 `{type:web_search}` 与 `{type:x_search}` 直接放进主 grok-4.6 请求。检索发生在 Think 里，模型能在同一轮推理中使用刚获得的网页和 X 材料；这条路径默认关闭（v0.1.8 起），可在设置页或配置中打开。
+**主循环融合搜索**则按 [xAI Responses API 的服务端搜索方式](https://docs.x.ai/developers/tools/web-search)，把 `{type:web_search}` 与 `{type:x_search}` 直接放进主 Grok 请求。检索发生在 Think 里，模型能在同一轮推理中使用刚获得的网页和 X 材料；这条路径默认关闭（v0.1.8 起），可在设置页或配置中打开。
 
 为让两类搜索共存，宿主原生 `web_search` 仍保留在 DSH 工具列表中，但会从启用融合搜索的 xAI payload 里移除，避免服务端工具重名；其他模型路由仍可照常使用宿主搜索。
 
@@ -92,10 +94,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-也可以固定安装 0.2.2：
+也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.2
+dsh plugin --profile web add dsh-grok-kit@0.2.3
 dsh web
 ```
 
@@ -108,12 +110,12 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.2** 修复暗色模式下登录按钮文字不清晰，以及“全部显示”将模型列表收窄为单一模型的问题。点击“全部显示”可恢复所有可聊天模型，重启后仍保留；已保存的单模型选择不会自动改变。宿主支持范围不变：DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.3** 新增实验性视频生成、任务恢复和会话视频卡片，并修复桌面端设置页请求被拒绝的问题。图片生成、编辑和视频统一默认关闭，更新时不会继承旧媒体开启状态；请在设置页确认风险、保存并重启后使用。宿主支持范围不变：DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737aebbac071c336be04303d
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#adbbc678bf7d414393b037e379c2ffd929d2e46f
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。
@@ -126,7 +128,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 
 - 模型选择器只展示主线 Grok 聊天模型；Imagine、video、embedding、build/code 变体会被隐藏
 - 默认 grok-4.6 描述符使用 high reasoning，并请求 `reasoning.encrypted_content`，以便后续回合带回加密推理上下文
-- `grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启。图片保存到 DSH 附件库并在会话图片卡片中直接渲染。可从卡片下载，或使用宿主文件工具导出；两工具的 `save_path` 参数均不再支持直接写盘
+- `grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认关闭，需在设置页确认风险后开启。图片保存到 DSH 附件库并在会话图片卡片中直接渲染。可从卡片下载，或使用宿主文件工具导出；两工具的 `save_path` 参数均不再支持直接写盘
 - dsh 原生 `web_search` 仍保留在宿主工具列表中，但会从启用 backend search 的 xAI payload 中移除，避免工具重名
 
 模型列表来自登录账号的 `GET /v1/models` 结果，并在本地缓存。服务端能力或模型要求发生变化时，仍可能需要更新插件；不会把“模型 id 可见”等同于“所有能力一定可用”。
@@ -140,9 +142,17 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 - data URI 输入经过解码大小、base64、图片签名和 MIME 一致性校验；远程 URL 由上游获取，卡片显示链接，避免浏览器自动请求任意远程地址。
 - 会话卡片交互：运行卡片显示提示词和全部输入来源；图片完成后显示结果、下载入口与再次生成/编辑入口。再次编辑会保留全部输入图和原调用的渲染参数。
 
-### 开发版：可选视频任务与能力状态
+### 视频任务（实验性）
 
-当前源码新增默认关闭的 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，支持单图生视频、持久任务恢复与账号隔离下载。设置页按账号、模型、搜索与对话、媒体与任务、网络分类，顶部公共状态和导航保持可见。账号页通过现有 OAuth 登录读取官方共享订阅额度；只显示接口实际报告的百分比、周期和可选余额，不估算 token 余额。媒体页展示本地能力观察与任务。启用需重启，生成消耗订阅额度，停止等待不等于取消上游任务。此说明不代表 npm 0.2.2 已包含功能；用法、配置及限制见 [视频说明](VIDEO.zh.md)。
+当前源码新增默认关闭的 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，支持单图生视频、持久任务恢复与账号隔离下载。设置页按账号、模型、搜索与对话、媒体与任务、网络分类，顶部公共状态和导航保持可见。账号页通过现有 OAuth 登录读取官方共享订阅额度；只显示接口实际报告的百分比、周期和可选余额，不估算 token 余额。媒体页展示本地能力观察与任务。启用需重启，生成消耗订阅额度，停止等待不等于取消上游任务。用法、配置及限制见 [视频说明](VIDEO.zh.md)。
+
+### 媒体工具的开启与风险
+
+图片、图片编辑和视频默认都是关闭的。打开 **设置 → xAI Grok →「媒体与任务」**，拨动开关后卡片里会出现风险确认：确认并保存，重启 DSH 宿主后工具生效；取消或不动，就不会有任何改变。图片开关同时控制生成和编辑，两项状态分开显示。正常使用（生成、再编辑、查询、下载）不会再弹确认；关闭后重新开启时才会再问一次。开启只保存设置，不生成媒体，也不探测额度。
+
+先把几件事说清楚：这是第三方非官方接入，能否使用取决于 xAI 的账户资格和服务规则，随时可能被限制或暂停；生成会消耗订阅额度或产生费用；提示词和输入图片都会上传给 xAI，请不要发送敏感内容或无权使用的素材；“停止”只是停止等待，不会取消已提交的任务。
+
+媒体开关不继承旧版本的开启状态，更新后首次使用需要重新确认；确认会持久保存，重启不会重置。想分别控制 `imagineTool` / `editTool` / `videoTool`，可以在配置里显式设置并加上 `mediaRiskAcknowledged: true`——这只是本机的知情开关，不是凭据，也不代表官方许可。重置媒体页会撤销确认；关闭并保存后工具立即停止响应调用（已提交的任务不受影响），视频关闭时本地任务列表、恢复和下载接口一并停用，已有任务和附件保留。
 
 ## 配置
 
@@ -155,8 +165,12 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 | `searchMaxResults` | `8` | 嵌套搜索返回来源的上限 |
 | `webSearchTimeoutMs` | `60000` | 嵌套网页搜索的协作式超时预算 |
 | `xSearchTimeoutMs` | `120000` | 嵌套 X 搜索的协作式超时预算 |
-| `imagineTool` | `true` | 注册 `grok_imagine`（文生图） |
-| `editTool` | `true` | 注册 `grok_imagine_edit`（图生图；独立于 `imagineTool`，复用主 OAuth session） |
+| `imagineTool` | `false` | 确认媒体风险后注册 `grok_imagine`（文生图） |
+| `editTool` | `false` | 确认媒体风险后注册 `grok_imagine_edit`（高级配置可独立于 `imagineTool`，设置页图片开关控制两项） |
+| `videoTool` | `false` | 确认媒体风险后注册视频生成、查询和恢复工具 |
+| `videoModel` | `grok-imagine-video-1.5` | 视频生成模型（实验性，只读展示；当前仅接受这一个值） |
+| `videoMaxBytes` | `104857600` | 视频下载大小上限（字节，默认 100 MiB；只读展示） |
+| `mediaRiskAcknowledged` | `false` | 显式确认上述媒体风险；需与所选媒体开关均为 `true` 才启用 |
 | `editModel` | `''` | 固定图生图模型；为空时跟随线上目录自动选择（优先 `grok-imagine-image-2.0`，fallback `grok-imagine-image`） |
 | `editMaxSourceImages` | `5` | `grok_imagine_edit` 单次请求源图片上限，插件最多接受 5 张 |
 | `editMaxImageBytes` | `20971520` | `grok_imagine_edit` 单张源图片体积上限（默认 20 MiB） |
@@ -171,10 +185,11 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 - 优先使用 `~/.grok/auth.json`，与 Grok CLI 原地共用同一份 xAI 凭据；登录和刷新都会写回该文件，而不是只做一次性导入；在设置页退出也会让 Grok CLI 退出
 - OAuth 刷新令牌会轮换；插件用原子写入、进程内合并和 compare-and-write 避免并发刷新互相覆盖
 - 浏览器状态接口、错误信息和诊断不会返回 token 值
+- 插件接口只接受本机回环连接与回环 Host，并校验浏览器来源。桌面端的 `dsh-app://app` 页面受信任；没有 Origin、但携带 Fetch Metadata 的本机请求也可写入设置。该标记不是桌面身份或权限证明：本插件不隔离本机进程或桌面渲染器。不要将接口暴露到局域网或公网，也不要在不可信的多用户环境共享凭据目录。
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
 - xAI 专用 fetch hook 会在插件卸载时恢复；它不会永久修改系统或进程环境变量
 - Windows 上的 Node mode bit 不等于 NTFS ACL；如果用户目录或 `$DSH_HOME` 位于共享位置，请自行收紧目录权限
-- 写入锁机制与安全边界：凭据写入委托官方 `@deepseek-ai/dsh-atomic-write`（`$DSH_HOME/.xai-oauth-auth.json.lock`）。在同机且同一 PID 命名空间下，争用者通过独占 claim 文件与二次记录/PID 检查自动接管并回收已确认退出的进程遗留锁；活进程 PID、权限不明、格式损坏或空锁继续保持等待并超时（fail-closed）。写入目录必须为本机文件系统且处于同一 PID 命名空间，禁止跨机器或跨容器挂载共用同一 auth 与锁目录（异构环境 PID 无法对齐，可能导致互斥失效发生并发双写）。运行时手动替换凭据或锁文件可能破坏这些保证；需要清理时，请先停止所有相关进程
+- 凭据写入的锁委托官方 `@deepseek-ai/dsh-atomic-write`（锁文件 `$DSH_HOME/.xai-oauth-auth.json.lock`）。同一台机器、同一 PID 命名空间内，后来者可以用独占 claim 文件加二次存活性检查，接管并回收确认已退出的进程留下的锁；对方还活着、权限不明、内容损坏或是空锁时，继续等待直至超时（宁可失败也不抢锁）。凭据和锁目录必须放在本机文件系统上，且处于同一 PID 命名空间——跨机器或跨容器共用同一目录会让 PID 对不上号，互斥可能失效并发生并发双写。运行期间手动替换凭据或锁文件会破坏这些保证；确需清理时，先停掉所有相关进程
 
 ## 兼容性与限制
 

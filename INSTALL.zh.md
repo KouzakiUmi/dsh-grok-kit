@@ -24,10 +24,10 @@ dsh plugin --profile web add dsh-grok-kit
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-也可以固定安装 0.2.2：
+也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.2
+dsh plugin --profile web add dsh-grok-kit@0.2.3
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -48,7 +48,7 @@ dsh plugin --profile web add dsh-grok-kit@latest
 需要可复现安装时，可固定到完整 Git 提交（以下命令固定到所示提交，不跟随默认分支滚动）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737aebbac071c336be04303d
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#adbbc678bf7d414393b037e379c2ffd929d2e46f
 ```
 
 不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 会跟随 `main`，**不是**可复现锚点。
@@ -89,7 +89,7 @@ Web UI：
 1. `dsh web`（或 `dsh --profile web`）
 2. 设置 → xAI Grok → 使用 SuperGrok 登录
 3. 在浏览器里批准
-4. 模型选择器里选 `xai-oauth` / `grok-4.6`（或 `grok-4.5`，如果还没自动选中）
+4. 模型选择器里选 `xai-oauth` 下的主线 Grok 模型（如 `grok-4.6`；通常会自动选中偏好型号）
 
 登录成功后插件会请求 `GET /v1/models`，并缓存账号可见的模型 id。
 
@@ -102,11 +102,11 @@ Web UI：
 
 ## 搜索
 
-本 bundle 的组合把 `backendSearch` 设为 `false`（默认关闭，可在设置页或配置中打开）。开启后，grok-4.6 会在**同一轮** Responses 里混入 xAI 服务端 `{type:web_search}` / `{type:x_search}`（界面上多半是 thinking）。dsh 原生函数 `web_search` 仍在宿主工具列表里，但会从这份 xAI payload 剥掉，避免 `Duplicate tool names: web_search`。
+本 bundle 的组合把 `backendSearch` 设为 `false`（默认关闭，可在设置页或配置中打开）。开启后，xAI 会在**同一轮** Responses 里把服务端 `{type:web_search}` / `{type:x_search}` 混入 Grok 请求（界面上多半是 thinking）。dsh 原生函数 `web_search` 仍在宿主工具列表里，但会从这份 xAI payload 剥掉，避免 `Duplicate tool names: web_search`。
 
 嵌套的 `grok_web_search` / `x_search`（再开一轮 `grok-build-0.1`）在 `backendSearch` 关闭时自动注册（`nestedSearchTools ?? !backendSearch`）。只有需要与主搜索同时使用 `allowed_domains` / 账号/日期过滤时，才设 `nestedSearchTools: true`。主请求 403 会让整轮聊天失败——在插件配置里设 `backendSearch: false`。开启主循环搜索时，`x_keyword_search` 等拒绝桩会从转发流中剥掉，不属于正常界面体验。
 
-`grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认开启。图片保存到 DSH 附件库并直接在会话图片卡片中显示；支持从卡片下载或通过宿主文件工具导出，两工具的 `save_path` 参数均不再支持直接写盘。
+`grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认关闭，旧媒体开启配置不继承；需在设置页确认风险、保存并重启宿主后开启。正常使用不重复确认，详见 [媒体工具的开启与风险](README.md#媒体工具的开启与风险)。图片保存到 DSH 附件库并直接在会话图片卡片中显示；支持从卡片下载或通过宿主文件工具导出，两工具的 `save_path` 参数均不再支持直接写盘。实验性视频工具（`grok_video_generate` / `grok_video_status` / `grok_video_resume`）同样默认关闭、确认风险并重启后开启，详见 [视频任务（实验性）](README.md#视频任务实验性) 与 [VIDEO.zh.md](VIDEO.zh.md)。
 
 ## 代理
 

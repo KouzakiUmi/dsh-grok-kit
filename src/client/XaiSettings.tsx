@@ -13,6 +13,7 @@ import type { CSSProperties } from 'react'
 import type { XaiOAuthSettingsKey } from './locales.ts'
 import { CapabilitiesView } from './capabilities-view.tsx'
 import { QuotaView } from './quota-view.tsx'
+import { mediaTogglePatch } from './media-options.ts'
 
 const STATUS_PATH = '/plugins/dsh-grok-kit/auth/status'
 const LOGIN_PATH = '/plugins/dsh-grok-kit/auth/login'
@@ -28,7 +29,9 @@ type OptionKey =
   | 'nestedSearchTools'
   | 'statefulResponses'
   | 'imagineTool'
+  | 'editTool'
   | 'videoTool'
+  | 'mediaRiskAcknowledged'
   | 'videoModel'
   | 'videoMaxBytes'
   | 'searchModel'
@@ -67,7 +70,7 @@ const PAGE_OPTION_KEYS: Record<SettingsPageId, readonly OptionKey[]> = {
   models: [],
   network: [],
   search: ['backendSearch', 'statefulResponses', 'nestedSearchTools', 'searchModel', 'searchMaxResults', 'webSearchTimeoutMs', 'xSearchTimeoutMs'],
-  media: ['imagineTool', 'videoTool'],
+  media: ['imagineTool', 'editTool', 'videoTool', 'mediaRiskAcknowledged'],
 }
 
 function optBool(value: OptionValue | undefined, fallback: boolean): boolean {
@@ -132,6 +135,20 @@ const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 34, pad
 // label uses the matching foreground token instead of a hardcoded white.
 const primaryButtonStyle: CSSProperties = { ...buttonStyle, borderColor: 'var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-label-primary-foreground, white)' }
 const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
+const mediaConfirmStyle: CSSProperties = {
+  border: '1px solid var(--dsw-alias-state-error-primary)',
+  borderRadius: 6,
+  padding: '8px 10px',
+  margin: '6px 0',
+}
+const experimentalTagStyle: CSSProperties = {
+  fontSize: 11,
+  lineHeight: '18px',
+  padding: '0 6px',
+  borderRadius: 4,
+  border: '1px solid currentColor',
+  color: 'var(--dsw-alias-label-secondary, inherit)',
+}
 const codeBoxStyle: CSSProperties = { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: '10px 14px', border: '1px dashed var(--dsw-alias-border-l2)', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1)' }
 const codeStyle: CSSProperties = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 20, letterSpacing: '0.08em', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }
 const linkStyle: CSSProperties = { color: 'var(--dsw-alias-brand-primary)', wordBreak: 'break-all' }
@@ -257,6 +274,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   // A missing `page` means the failure belongs to the initial load, not to one
   // page's save, so both option pages may show it.
   const [optionsFeedback, setOptionsFeedback] = useState<{ page?: SettingsPageId; state: 'saved' | 'error' } | undefined>()
+  // An off→on media toggle parks here for the inline risk confirmation; the
+  // switch does not move until the user confirms inside the card.
+  const [pendingMediaGroup, setPendingMediaGroup] = useState<'images' | 'video' | null>(null)
   // Bumped by every account-changing action (sign-in, Grok import, sign-out).
   // Together with the account status it keys <CapabilitiesView/> so the panel
   // remounts: fresh fetches, aborted in-flight work, revoked blob URLs, and no
@@ -266,6 +286,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   // Active page. Only the active page body is mounted; every draft it owns
   // still lives here, so switching pages never discards an unsaved edit.
   const [page, setPage] = useState<SettingsPageId>('account')
+  // A saved video choice/revocation also invalidates the local runtime
+  // capability snapshot, without probing upstream or reloading the account.
+  const [capabilityGeneration, setCapabilityGeneration] = useState(0)
 
   type OptionsPayload = {
     options?: Partial<Record<OptionKey, OptionValue>>
@@ -365,6 +388,35 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     optionsFeedback === undefined
       ? undefined
       : optionsFeedback.page === undefined || optionsFeedback.page === pageId ? optionsFeedback.state : undefined
+  const applyMediaPatch = (patch: Record<string, boolean>): void => {
+    for (const [key, value] of Object.entries(patch)) markOption(key as OptionKey, value)
+  }
+
+  const markMedia = (group: 'images' | 'video', enabled: boolean): void => {
+    if (enabled) {
+      // Park the toggle: the switch stays off until the inline confirmation
+      // below the media rows is accepted.
+      setPendingMediaGroup(group)
+      setOptionsFeedback(previous => previous?.page === 'media' ? undefined : previous)
+      return
+    }
+    const patch = mediaTogglePatch(options, group, false)
+    if (patch === undefined) return
+    applyMediaPatch(patch)
+  }
+
+  const confirmPendingMedia = (): void => {
+    if (pendingMediaGroup === null) return
+    const patch = mediaTogglePatch(options, pendingMediaGroup, true)
+    setPendingMediaGroup(null)
+    if (patch === undefined) return
+    applyMediaPatch(patch)
+  }
+
+  const cancelPendingMedia = (): void => {
+    setPendingMediaGroup(null)
+    setOptionsFeedback(previous => previous?.page === 'media' ? undefined : previous)
+  }
 
   const loadOptions = useCallback(async () => {
     try {
@@ -387,6 +439,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       for (const key of keys) remaining.delete(key)
       optionsDirtyRef.current = remaining
       setOptionsFeedback({ page: pageId, state: 'saved' })
+      if (keys.includes('videoTool') || keys.includes('mediaRiskAcknowledged')) setCapabilityGeneration(generation => generation + 1)
     } catch {
       setOptionsFeedback({ page: pageId, state: 'error' })
     } finally {
@@ -402,11 +455,16 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     try {
       const patch: Record<string, unknown> = {}
       for (const key of keys) patch[key] = null
+      if (pageId === 'media') {
+        patch.mediaRiskAcknowledged = false
+        setPendingMediaGroup(null)
+      }
       applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch), keys)
       const remaining = new Set(optionsDirtyRef.current)
       for (const key of keys) remaining.delete(key)
       optionsDirtyRef.current = remaining
       setOptionsFeedback({ page: pageId, state: 'saved' })
+      if (pageId === 'media') setCapabilityGeneration(generation => generation + 1)
     } catch {
       setOptionsFeedback({ page: pageId, state: 'error' })
     } finally {
@@ -766,6 +824,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                   />
                   <span>{t('backendSearch')}</span>
                 </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
                 <p style={optionHintStyle}>{t('backendSearchHint')}</p>
 
                 <label style={optionRowStyle}>
@@ -777,6 +836,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                   />
                   <span>{t('statefulResponses')}</span>
                 </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
                 <p style={optionHintStyle}>{t('statefulResponsesHint')}</p>
 
                 <label style={optionRowStyle}>
@@ -868,26 +928,30 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
               <div style={cardStyle}>
                 <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('navMedia')}</h3>
                 <p style={bodyStyle}>{t('optionsHint')}</p>
+                <p style={bodyStyle}>{t('mediaRiskHint')}</p>
                 <label style={optionRowStyle}>
                   <input
                     type="checkbox"
-                    checked={optBool(options.imagineTool, true)}
+                    checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
                     disabled={optionsBusy}
-                    onChange={(event) => markOption('imagineTool', event.target.checked)}
+                    onChange={(event) => markMedia('images', event.target.checked)}
                   />
                   <span>{t('imagineTool')}</span>
                 </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
                 <p style={optionHintStyle}>{t('imagineToolHint')}</p>
+                <p style={optionHintStyle}>{`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}</p>
 
                 <label style={optionRowStyle}>
                   <input
                     type="checkbox"
                     checked={optBool(options.videoTool, false)}
                     disabled={optionsBusy}
-                    onChange={(event) => markOption('videoTool', event.target.checked)}
+                    onChange={(event) => markMedia('video', event.target.checked)}
                   />
                   <span>{t('videoTool')}</span>
                 </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
                 <p style={optionHintStyle}>{t('videoToolHint')}</p>
                 {/* Read-only presentation of the remaining video parameters: the first
                     version edits videoTool only, so these stay informational. */}
@@ -895,13 +959,23 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                   <span style={optionRowStyle}>{`${t('videoModelLabel')}: ${String(options.videoModel ?? '—')}`}</span>
                   <span style={optionRowStyle}>{`${t('videoMaxBytesLabel')}: ${String(options.videoMaxBytes ?? '—')}`}</span>
                 </div>
+                {pendingMediaGroup !== null ? (
+                  <div style={mediaConfirmStyle}>
+                    <p style={{ ...errorStyle, margin: '0 0 4px', fontWeight: 600 }}>{pendingMediaGroup === 'images' ? t('imagineTool') : t('videoTool')}</p>
+                    <p style={{ ...errorStyle, margin: '0 0 6px' }}>{t('mediaConfirmPrompt')}</p>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" style={primaryButtonStyle} disabled={optionsBusy} onClick={confirmPendingMedia}>{t('mediaConfirmYes')}</button>
+                      <button type="button" style={buttonStyle} disabled={optionsBusy} onClick={cancelPendingMedia}>{t('mediaConfirmNo')}</button>
+                    </div>
+                  </div>
+                ) : null}
                 {optionActions('media')}
               </div>
 
               {/* Capability status + local video task list (frozen plugin routes).
                   The key remounts the panel on every account change, so a previous
                   account's tasks/diagnostics and blob URLs never survive a switch. */}
-              <CapabilitiesView key={accountKey} t={t} signedIn={status.status === 'signed-in'} />
+              <CapabilitiesView key={`${accountKey}:${String(capabilityGeneration)}`} t={t} signedIn={status.status === 'signed-in'} />
             </div>
           )
         : null}

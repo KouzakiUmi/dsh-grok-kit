@@ -14,7 +14,7 @@
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
-> Use Grok in DeepSeek Harness through OAuth, with fused web/X search in the main model turn, reasoning continuity across turns, Imagine image generation and editing, and an xAI-only proxy.
+> Use Grok in DeepSeek Harness through OAuth: fused web/X search in the main model turn, reasoning continuity across turns, image generation and editing, video generation (experimental), and an xAI-only proxy.
 
 > [!IMPORTANT]
 > **Unofficial project, trademark, and account-use notice**
@@ -27,12 +27,14 @@
 
 `dsh-grok-kit` adds a separate `xai-oauth` route to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It does not require `XAI_API_KEY` or patch dsh source code. The point is not only to sign in, but to bring server-side search and the fields required for continuous reasoning into the main chat path.
 
-- **Search in the main loop:** web and X lookup occurs inside grok-4.6's current Think turn, so reasoning can use newly found material immediately
+- **Search in the main loop:** web and X lookup occurs inside Grok's current Think turn, so reasoning can use newly found material immediately
 - **Continuous multi-turn reasoning:** high effort is the default, with `reasoning.encrypted_content` preserved for the next turn
 - **Sign-in stays in sync with Grok CLI:** the plugin shares and writes back `~/.grok/auth.json` instead of copying once and rotating refresh tokens separately
-- **Imagine text-to-image and image-to-image:** `grok_imagine` and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are enabled by default, while non-chat models stay out of the conversation picker; generated and edited images are stored in the DSH attachment library preserving normalized metadata, rendered in session image cards with prompt and inputs, and support download and re-generation/editing
+- **Image generation and editing (experimental):** `grok_imagine` for text-to-image and `grok_imagine_edit` for image-to-image (reusing the main OAuth session), off by default and enabled after risk confirmation in Settings. Non-chat models stay out of the conversation picker
+- **Session image cards:** generated and edited images are stored in the DSH attachment library and rendered in session cards showing the prompt, inputs, and result, with download and re-generate/re-edit actions
+- **Video generation (experimental):** image-to-video with durable tasks, resume, and account-scoped downloads; off by default, enabled after risk confirmation and a DSH restart
 
-Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, and diagnostic redaction.
+Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, a capability status page, and diagnostic redaction.
 
 ### The X Subscription and legacy plans
 
@@ -46,7 +48,7 @@ The same model id does not guarantee the same experience across integrations. [x
 
 **Separate search** sends another model request to retrieve or summarize material before returning it to the main conversation. That path remains useful when explicit filters are needed, but adds another model round, and its search summary is not produced inside the current reply's Think turn.
 
-**Main-turn search** follows [xAI's server-side Responses search pattern](https://docs.x.ai/developers/tools/web-search), placing `{type:web_search}` and `{type:x_search}` directly on the main grok-4.6 request. Lookup occurs inside Think, so the model can use newly found web and X material during the same reasoning turn. This path is off by default (since v0.1.8); enable it from Settings or config.
+**Main-turn search** follows [xAI's server-side Responses search pattern](https://docs.x.ai/developers/tools/web-search), placing `{type:web_search}` and `{type:x_search}` directly on the main Grok request. Lookup occurs inside Think, so the model can use newly found web and X material during the same reasoning turn. This path is off by default (since v0.1.8); enable it from Settings or config.
 
 To let both search systems coexist, DSH's native `web_search` remains in the host tool list but is removed from an xAI payload with fused search enabled, preventing a server-tool name collision. Other model routes can continue using the host search tool normally.
 
@@ -92,10 +94,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-You can also pin version 0.2.2:
+You can also pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.2
+dsh plugin --profile web add dsh-grok-kit@0.2.3
 dsh web
 ```
 
@@ -108,12 +110,12 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.2** fixes unreadable sign-in button text in dark mode and “Show all” narrowing the model list to a single model. Clicking “Show all” restores all chat models and survives restarts; existing single-model selections are not changed automatically. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.3** adds experimental video generation, task recovery, and session video cards, and fixes rejected Settings requests in the desktop app. Image generation, editing, and video are all off by default; upgrading does not inherit old media enablement. Confirm the risks in Settings, save, and restart before using them. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737aebbac071c336be04303d
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#adbbc678bf7d414393b037e379c2ffd929d2e46f
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
@@ -126,7 +128,7 @@ See [INSTALL.md](INSTALL.md) for installation, migration, removal, and troublesh
 
 - The picker shows only mainline Grok chat models; Imagine, video, embedding, build, and code variants are hidden
 - The default grok-4.6 descriptor uses high reasoning and requests `reasoning.encrypted_content` so encrypted reasoning context can be carried into later turns
-- `grok_imagine` (text-to-image) and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are enabled by default. Images are stored in the DSH attachment library and rendered directly in session image cards. Images can be downloaded from the card or exported with host file tools; direct disk writing via `save_path` is no longer supported for either tool
+- `grok_imagine` (text-to-image) and `grok_imagine_edit` (image-to-image, reusing the main OAuth session) are off by default and require risk confirmation in Settings to enable. Images are stored in the DSH attachment library and rendered directly in session image cards. Images can be downloaded from the card or exported with host file tools; direct disk writing via `save_path` is no longer supported for either tool
 - DSH's native `web_search` remains in the host tool list, but is removed from an xAI payload with backend search enabled to avoid duplicate tool names
 
 The model list comes from the signed-in account's `GET /v1/models` response and is cached locally. Service or model requirements may still require a plugin update; a visible model id does not imply that every capability is available to the account.
@@ -140,9 +142,17 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 - Data URI inputs are validated for decoded byte size, base64 encoding, magic-byte signatures, and MIME consistency; remote URLs are fetched upstream, and the card displays links to avoid automatic browser requests to arbitrary addresses.
 - Session card interactions: cards display the prompt and all input sources; completed runs show the result, a download entry, and a regenerate/re-edit action. Re-editing retains all input images and original render parameters.
 
-### Development version: optional video tasks and capabilities
+### Video tasks (experimental)
 
-Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings are separated into Account, Models, Search & chat, Media & tasks, and Network, with a sticky shared status and navigation. Account reads official shared subscription quota through the existing OAuth login; only reported percentages, periods and optional balances are displayed, never token-based estimates. Media shows local capability observations and tasks. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. This does not imply the published npm 0.2.2 package includes the feature. See the [video guide](VIDEO.md) for configuration and limitations.
+Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings are separated into Account, Models, Search & chat, Media & tasks, and Network, with a sticky shared status and navigation. Account reads official shared subscription quota through the existing OAuth login; only reported percentages, periods and optional balances are displayed, never token-based estimates. Media shows local capability observations and tasks. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. See the [video guide](VIDEO.md) for configuration and limitations.
+
+### Enabling media tools and understanding the risks
+
+Image generation, image editing, and video are all off by default. In DeepSeek Harness Settings → xAI Grok → "Media & tasks", flipping a switch opens an inline risk confirmation inside the card: confirm and save, then restart the DSH host to register the tools; cancel or ignore it, and nothing changes. The image switch controls generation and editing together, with each state shown separately. Normal use — generating, re-editing, queries, downloads — does not ask again; only reopening after a close does. Enabling saves settings only, without generating media or probing quota.
+
+A few things to know up front: this is third-party, unofficial access. Whether it works depends on your xAI account eligibility and xAI service rules, and access can be limited or paused at any time. Generation uses subscription quota or incurs charges. Prompts and input images are uploaded to xAI — do not send sensitive content or material you have no rights to. "Stop" in the UI only stops waiting; it does not cancel a submitted task.
+
+Media switches do not inherit enablement from older versions: after updating, confirm once before first use. Confirmations persist across restarts. To control `imagineTool`, `editTool`, and `videoTool` separately, set them explicitly in config together with `mediaRiskAcknowledged: true` — a local informed choice, not a credential or permission. Resetting Media & tasks revokes consent. Saving a close stops the tools from answering calls immediately (submitted jobs are unaffected); with video off, its local task list, resume, and download routes are disabled too, and existing tasks and attachments stay stored.
 
 ## Configuration
 
@@ -155,8 +165,12 @@ Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_v
 | `searchMaxResults` | `8` | Maximum number of sources returned by nested search |
 | `webSearchTimeoutMs` | `60000` | Cooperative budget for nested web search |
 | `xSearchTimeoutMs` | `120000` | Cooperative budget for nested X search |
-| `imagineTool` | `true` | Register `grok_imagine` (text-to-image) |
-| `editTool` | `true` | Register `grok_imagine_edit` (image-to-image; independent of `imagineTool`, reusing the main OAuth session) |
+| `imagineTool` | `false` | Register `grok_imagine` (text-to-image) after media risk confirmation |
+| `editTool` | `false` | Register `grok_imagine_edit` after media risk confirmation (independent advanced config; the Settings image switch controls both tools) |
+| `videoTool` | `false` | Register video generation, status and resume tools after media risk confirmation |
+| `videoModel` | `grok-imagine-video-1.5` | Video generation model (experimental, read-only display; currently the only accepted value) |
+| `videoMaxBytes` | `104857600` | Video download size cap in bytes (default 100 MiB; read-only display) |
+| `mediaRiskAcknowledged` | `false` | Explicit acknowledgement of the media risks above; both it and the selected media switch must be `true` |
 | `editModel` | `''` | Pin the image-edit model; empty string follows live catalog (prefers `grok-imagine-image-2.0`, fallback `grok-imagine-image`) |
 | `editMaxSourceImages` | `5` | Per-request source-image cap for `grok_imagine_edit` (plugin accepts up to 5) |
 | `editMaxImageBytes` | `20971520` | Per-source byte cap for `grok_imagine_edit` (default 20 MiB) |
@@ -171,10 +185,11 @@ Development settings split related keys between Search & chat and Media & tasks.
 - The live store prefers `~/.grok/auth.json`, sharing the same xAI credential with Grok CLI in place; sign-in and refresh write back to that file instead of performing a one-time import, and signing out in Settings signs Grok CLI out too
 - OAuth refresh tokens rotate; atomic writes, in-process coalescing, and compare-and-write prevent concurrent refreshes from overwriting one another
 - Browser status routes, errors, and diagnostics do not return token values
+- Plugin routes accept only loopback connections and loopback Host names, with browser-origin checks. The desktop `dsh-app://app` page is trusted; local requests without Origin but with Fetch Metadata may also write settings. This marker is not proof of desktop identity or authorization: the plugin does not isolate local processes or the desktop renderer. Do not expose these routes to a LAN or the internet, or share credential directories in an untrusted multi-user environment.
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
 - The xAI-only fetch hook is restored when the plugin is disposed and does not permanently change system or process environment variables
 - On Windows, Node mode bits are not NTFS ACLs. Restrict the directory ACL yourself if the user profile or `$DSH_HOME` is stored in a shared location
-- Writer lock and safety boundaries: Credential writes delegate to official `@deepseek-ai/dsh-atomic-write` (`$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, contenders use an exclusive claim file and double-checked record/PID inspection to automatically take over and reclaim locks left by proven exited processes; locks held by live PIDs, unverified permissions, malformed records, or empty files continue to wait and time out (fail-closed). The credential and lock directory must reside on a local filesystem within the same PID namespace; sharing the directory across hosts or container boundaries is prohibited (mismatched PID spaces can cause mutex failures and data corruption). Manually replacing credential or lock files while these processes are running can bypass these safeguards; stop all related processes before making such changes
+- Writer locks: credential writes delegate to the official `@deepseek-ai/dsh-atomic-write` (lock file `$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, a contender can take over and reclaim locks left by proven-exited processes using an exclusive claim file plus a second liveness check; locks held by live PIDs, with unclear ownership, malformed content, or empty files keep waiting until timeout (fail-closed). The credential and lock directory must live on a local filesystem within one PID namespace — sharing it across machines or containers desynchronizes PIDs and can break mutual exclusion into concurrent double writes. Replacing credential or lock files by hand while things run defeats these guarantees; stop every related process before cleaning up
 
 ## Compatibility and limitations
 

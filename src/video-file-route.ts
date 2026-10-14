@@ -13,7 +13,7 @@ interface DownloadTask {
   attachment?: FileAttachmentRef
 }
 export interface VideoFileRouteOptions {
-  enabled: boolean
+  enabled: boolean | (() => boolean)
   identity: () => Promise<string | undefined>
   tasks: () => Promise<readonly DownloadTask[]>
   resolveAttachments: () => AttachmentStore | undefined
@@ -51,6 +51,7 @@ async function drain(res: ServerResponse, signal: AbortSignal): Promise<void> {
 }
 
 export function registerGrokVideoFileRoute(ctx: Context, options: VideoFileRouteOptions): void {
+  const enabled = (): boolean => typeof options.enabled === 'function' ? options.enabled() : options.enabled
   const active = new Set<AbortController>()
   let disposed = false
   ctx.effect(() => {
@@ -61,7 +62,7 @@ export function registerGrokVideoFileRoute(ctx: Context, options: VideoFileRoute
         if (req.method !== 'GET') return fail(res, 405, 'method not allowed')
         if (!isTrustedRequest(req.socket.remoteAddress, req.headers, req.method)) return fail(res, 403, 'forbidden')
         if (disposed) return fail(res, 503, 'video downloads are unavailable')
-        if (!options.enabled) return fail(res, 409, 'video generation is disabled')
+        if (!enabled()) return fail(res, 409, 'video generation is disabled')
         const controller = new AbortController()
         const signal = controller.signal
         active.add(controller)
@@ -79,6 +80,7 @@ export function registerGrokVideoFileRoute(ctx: Context, options: VideoFileRoute
           const task = (await options.tasks()).find(candidate => candidate.taskId === ids[0])
           signal.throwIfAborted()
           if (await options.identity() !== identity) return fail(res, 403, 'account changed')
+          if (!enabled()) return fail(res, 409, 'video generation is disabled')
           if (task === undefined) return fail(res, 404, 'video task not found')
           if (task.state !== 'done' || task.attachment === undefined) return fail(res, 409, 'video is not saved yet')
           const maxBytes = options.maxBytes ?? DEFAULT_VIDEO_MAX_BYTES

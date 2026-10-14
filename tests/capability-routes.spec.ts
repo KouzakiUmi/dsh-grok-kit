@@ -183,6 +183,17 @@ describe('route account and response boundaries', () => {
 })
 
 describe('GET /video/tasks', () => {
+  it('disables capabilities, history and resume after the current media switch closes', async () => {
+    let enabled = true
+    const { handlers, tasks, resume } = setup({ videoEnabled: () => enabled })
+    enabled = false
+    expect((await call(handlers.get(GROK_CAPABILITIES_PATH)!, mockReq(), new MockResponse())).body).toMatchObject({ videoEnabled: false })
+    expect((await call(handlers.get(GROK_VIDEO_TASKS_PATH)!, mockReq(), new MockResponse())).status).toBe(409)
+    expect((await call(handlers.get(GROK_VIDEO_RESUME_PATH)!, mockReq({ method: 'POST', headers: POST_HEADERS, body: JSON.stringify({ taskId: UUID }) }), new MockResponse())).status).toBe(409)
+    expect(tasks).not.toHaveBeenCalled()
+    expect(resume).not.toHaveBeenCalled()
+  })
+
   it('serves the local task list without any upstream probe', async () => {
     const { handlers, tasks, resume } = setup()
     const { status, body } = await call(handlers.get(GROK_VIDEO_TASKS_PATH)!, mockReq(), new MockResponse())
@@ -279,15 +290,26 @@ describe('POST /video/resume', () => {
     expect(tracker.snapshot(true).features[0]!.state).toBe('unverified')
   })
 
-  it('requires the same-origin gate on writes (no Origin → 403)', async () => {
+  it('keeps the write gate for browser writes (sec-fetch-site present, no Origin → 403)', async () => {
     const { handlers, resume } = setup()
     const { status } = await call(
       handlers.get(GROK_VIDEO_RESUME_PATH)!,
-      mockReq({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ taskId: UUID }) }),
+      mockReq({ method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ taskId: UUID }) }),
       new MockResponse(),
     )
     expect(status).toBe(403)
     expect(resume).not.toHaveBeenCalled()
+  })
+
+  it('accepts shell-forwarded writes (no Origin, no sec-fetch-site, Fetch-Metadata marker → desktop shape)', async () => {
+    const { handlers, resume } = setup()
+    const { status } = await call(
+      handlers.get(GROK_VIDEO_RESUME_PATH)!,
+      mockReq({ method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-mode': 'cors' }, body: JSON.stringify({ taskId: UUID }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(200)
+    expect(resume).toHaveBeenCalled()
   })
 
   it('redacts upstream error messages', async () => {

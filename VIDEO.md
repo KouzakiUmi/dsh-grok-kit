@@ -1,18 +1,23 @@
-# Optional video tasks and capability status (development version)
+# Video tasks (experimental)
 
-This feature belongs to the current source development version, not necessarily the published npm 0.2.2 package. It is off by default, requires account OAuth entitlement, and consumes subscription usage. Mock tests are not live-account verification.
+An experimental feature added in 0.2.3, off by default. It requires account OAuth entitlement and may use subscription quota or incur charges. Availability depends on account eligibility and upstream service rules.
 
 ## Enable
 
-Enable video tools in Settings → xAI Grok → Media & tasks, save, and restart the host. Alternatively configure the plugin:
+In DeepSeek Harness Settings → xAI Grok → Media & tasks, selecting the video switch shows an inline risk confirmation inside the card. Cancel leaves the setting unchanged; confirm, save and restart the host to register the tools. The prompt appears only on enabling in Settings, including reopening after a close, not during normal generation, queries, resume or downloads. Enabling saves settings only and does not generate media or probe quota. Alternatively, after reading the risks below, explicitly configure the plugin:
 
 ```yaml
 videoTool: true
+mediaRiskAcknowledged: true
 videoModel: grok-imagine-video-1.5
 videoMaxBytes: 104857600
 ```
 
 The first version supports only `grok-imagine-video-1.5`. The default download cap is 100 MiB; integral caps from 1–100 MiB are accepted, matching the first-version browser download ceiling. It reuses existing OAuth credentials and the xAI-only proxy, without creating another credential copy. Tasks fail closed when no stable account identity can be determined; access/refresh tokens are not account identifiers.
+
+This is third-party unofficial access. Account eligibility and features depend on upstream service rules; access may be restricted or suspended. Confirmation is not official authorization. Generation may use subscription quota or incur charges. Text and input images are sent upstream: do not upload sensitive content or content you have no right to use. Stopping the wait does not cancel submitted generation or guarantee that usage stops.
+
+All image and video switches start off in the new version, ignoring old media enablement. First confirmation saves only media explicitly selected in that request, with the rest off. These new confirmed choices persist across restarts, and other settings are unaffected. The acknowledgement is a local setting, not a credential or official permission. Reset revokes it even when profile/Cordis still has a true switch. Saving a close blocks subsequent tool, resume and download calls and disables the local task list, without cancelling submitted upstream jobs or deleting stored tasks/attachments. Newly registered tools require a restart after confirmation.
 
 ## Workflow
 

@@ -14,6 +14,9 @@ describe('bundle composition', () => {
     expect(patch).toContain('name: dsh-grok-kit')
     expect(patch).toContain('backendSearch: false')
     expect(patch).toContain('videoTool: false')
+    expect(patch).toContain('imagineTool: false')
+    expect(patch).toContain('editTool: false')
+    expect(patch).toContain('mediaRiskAcknowledged: false')
     // The cordis insert id must differ from the route id so a profile with the
     // old dsh-xai bundle still installed cannot fail to load on duplicate ids.
     expect(patch).not.toContain('id: llm-xai-oauth')

@@ -472,7 +472,7 @@ describe('five-page settings section', () => {
     ;(save.props.onClick as () => void)()
     await vi.waitFor(() => expect(probe.bodies).toHaveLength(1))
     await settled()
-    expect(probe.bodies[0]).toEqual({ imagineTool: false })
+    expect(probe.bodies[0]).toEqual({ imagineTool: false, editTool: false })
 
     clickPage(en.navSearch)
     await settled()
@@ -490,7 +490,7 @@ describe('five-page settings section', () => {
     ;(reset.props.onClick as () => void)()
     await vi.waitFor(() => expect(probe.bodies).toHaveLength(1))
     await settled()
-    expect(probe.bodies[0]).toEqual({ imagineTool: null, videoTool: null })
+    expect(probe.bodies[0]).toEqual({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
   })
 
   it("keeps both pages' drafts when one page is saved, and saves the other later", async () => {
@@ -504,7 +504,7 @@ describe('five-page settings section', () => {
 
     ;(button(now(), en.optionsSave).props.onClick as () => void)()
     await settled()
-    expect(probe.bodies[0]).toEqual({ imagineTool: false })
+    expect(probe.bodies[0]).toEqual({ imagineTool: false, editTool: false })
 
     // The media save did not touch the search draft: still unsaved, still there.
     clickPage(en.navSearch)
@@ -530,7 +530,7 @@ describe('five-page settings section', () => {
     clickPage(en.navMedia)
     ;(button(now(), en.optionsReset).props.onClick as () => void)()
     await settled()
-    expect(probe.bodies[0]).toEqual({ imagineTool: null, videoTool: null })
+    expect(probe.bodies[0]).toEqual({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
 
     clickPage(en.navSearch)
     await settled()
@@ -583,14 +583,14 @@ describe('five-page settings section', () => {
     ;(importButton!.props.onClick as () => void)()
     await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toBe('signed-in:2'))
     clickPage(en.navMedia)
-    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:2')
+    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:2:0')
   })
 
   it('hides the outgoing account before sign-out completes, then recovers', async () => {
     stubFetch()
     mount(SIGNED_IN)
     clickPage(en.navMedia)
-    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:0')
+    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:0:0')
     expect(panels(now(), CapabilitiesView)[0]!.props.signedIn).toBe(true)
 
     clickPage(en.navAccount)
@@ -714,6 +714,7 @@ describe('five-page settings section', () => {
     fire(field(now(), en.searchModel), { target: { value: 'draft-model' } })
     clickPage(en.navMedia)
     fire(field(now(), en.videoTool), { target: { checked: true } })
+    ;(button(now(), en.mediaConfirmYes).props.onClick as () => void)()
     expect(navLabel(en.navSearch)).toContain(en.unsavedChanges)
     expect(navLabel(en.navMedia)).toContain(en.unsavedChanges)
     expect(texts(view())).toContain(en.unsavedChangesHint)

@@ -17,6 +17,7 @@ import type { FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm/types'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import { DEFAULT_MAX_IMAGE_BYTES } from './imagine-edit-core.ts'
+import { assertMediaEnabled } from './media-options.ts'
 import {
   SUPPORTED_VIDEO_DURATIONS,
   SUPPORTED_VIDEO_RESOLUTIONS,
@@ -170,6 +171,8 @@ const OUTPUT_SCHEMA = {
 
 export interface GrokVideoToolOptions {
   manager: VideoTaskManager
+  /** Current effective local media switch, including calls from old cards. */
+  enabled?: () => boolean
 }
 
 /**
@@ -223,6 +226,7 @@ export function applyGrokVideoTools(ctx: Context, options: GrokVideoToolOptions)
       }
     },
     async execute(args, exec) {
+      assertMediaEnabled(options.enabled, GENERATE_TOOL)
       const prompt = isNonEmptyString(args?.prompt) ? args.prompt.trim() : ''
       if (prompt.length === 0) throw new Error('prompt must be a non-empty string')
       const image = isNonEmptyString(args?.image) ? args.image.trim() : ''
@@ -280,6 +284,7 @@ export function applyGrokVideoTools(ctx: Context, options: GrokVideoToolOptions)
         }
       },
       async execute(args, exec) {
+        assertMediaEnabled(options.enabled, name)
         const taskId = isNonEmptyString(args?.task_id) ? args.task_id.trim() : ''
         if (taskId.length === 0) throw new Error('task_id must be a non-empty task id')
         const result = await run(taskId, exec.signal)

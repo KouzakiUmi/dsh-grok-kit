@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { resolveMediaOptions } from './media-options.ts'
 import { DEFAULT_XAI_SEARCH_MODEL } from './search.ts'
 import { DEFAULT_VIDEO_MODEL, DEFAULT_VIDEO_MAX_BYTES, validVideoModel, validVideoMaxBytes } from './video-config.ts'
 import {
@@ -32,7 +33,9 @@ export interface StoredPluginOptions {
   nestedSearchTools?: boolean
   statefulResponses?: boolean
   imagineTool?: boolean
+  editTool?: boolean
   videoTool?: boolean
+  mediaRiskAcknowledged?: boolean
   videoModel?: string
   videoMaxBytes?: number
   searchModel?: string
@@ -48,7 +51,9 @@ const OPTION_SOURCE_KEYS = [
   'nestedSearchTools',
   'statefulResponses',
   'imagineTool',
+  'editTool',
   'videoTool',
+  'mediaRiskAcknowledged',
   'videoModel',
   'videoMaxBytes',
   'searchModel',
@@ -62,7 +67,9 @@ export interface EffectivePluginOptions {
   nestedSearchTools: boolean
   statefulResponses: boolean
   imagineTool: boolean
+  editTool: boolean
   videoTool: boolean
+  mediaRiskAcknowledged: boolean
   videoModel: string
   videoMaxBytes: number
   searchModel: string
@@ -108,7 +115,7 @@ export function sanitizeStoredOptions(value: unknown): StoredPluginOptions {
   if (!isRecord(value) || value['version'] !== OPTIONS_VERSION) return {}
   const raw = isRecord(value['options']) ? value['options'] : {}
   const out: StoredPluginOptions = {}
-  for (const key of ['backendSearch', 'nestedSearchTools', 'statefulResponses', 'imagineTool', 'videoTool'] as const) {
+  for (const key of ['backendSearch', 'nestedSearchTools', 'statefulResponses', 'imagineTool', 'editTool', 'videoTool', 'mediaRiskAcknowledged'] as const) {
     if (typeof raw[key] === 'boolean') out[key] = raw[key]
   }
   if (
@@ -164,7 +171,9 @@ export function mergePluginOptions(
     ...stored.nestedSearchTools === undefined ? {} : { nestedSearchTools: stored.nestedSearchTools },
     ...stored.statefulResponses === undefined ? {} : { statefulResponses: stored.statefulResponses },
     ...stored.imagineTool === undefined ? {} : { imagineTool: stored.imagineTool },
+    ...stored.editTool === undefined ? {} : { editTool: stored.editTool },
     ...stored.videoTool === undefined ? {} : { videoTool: stored.videoTool },
+    ...stored.mediaRiskAcknowledged === undefined ? {} : { mediaRiskAcknowledged: stored.mediaRiskAcknowledged },
     ...stored.videoModel === undefined ? {} : { videoModel: stored.videoModel },
     ...stored.videoMaxBytes === undefined ? {} : { videoMaxBytes: stored.videoMaxBytes },
     ...stored.searchModel === undefined ? {} : { searchModel: stored.searchModel },
@@ -195,8 +204,7 @@ export function presentPluginOptions(
       backendSearch,
       nestedSearchTools,
       statefulResponses: typeof merged['statefulResponses'] === 'boolean' ? merged['statefulResponses'] : false,
-      imagineTool: typeof merged['imagineTool'] === 'boolean' ? merged['imagineTool'] : true,
-      videoTool: typeof merged['videoTool'] === 'boolean' ? merged['videoTool'] : false,
+      ...resolveMediaOptions(merged),
       videoModel: validVideoModel(merged['videoModel']) ? merged['videoModel'] : DEFAULT_VIDEO_MODEL,
       videoMaxBytes: validVideoMaxBytes(merged['videoMaxBytes']) ? merged['videoMaxBytes'] : DEFAULT_VIDEO_MAX_BYTES,
       searchModel: typeof merged['searchModel'] === 'string' && merged['searchModel'].trim().length > 0

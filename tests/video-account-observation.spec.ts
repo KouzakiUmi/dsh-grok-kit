@@ -51,7 +51,8 @@ describe('video capability account isolation in apply()', () => {
       inject: (_deps: unknown, callback: (context: typeof scoped) => void) => callback(scoped),
     }
     try {
-      apply(ctx as never, { videoTool: true, imagineTool: false, editTool: false })
+      apply(ctx as never, { videoTool: true, mediaRiskAcknowledged: true, imagineTool: false, editTool: false })
+      expect(captured.options).toBeDefined()
       const options = captured.options!
       const tracker = captured.tracker!
       await options.identity?.()

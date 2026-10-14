@@ -45,13 +45,47 @@ describe('isTrustedRequest (loopback + Host pin + Origin)', () => {
     expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'https://127.0.0.1:3080'), 'POST')).toBe(true)
   })
 
-  it('requires Origin on writes (local-process CSRF slot)', () => {
-    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080'), 'POST')).toBe(false)
-    expect(isTrustedRequest(loopback, headers(), 'PUT')).toBe(false)
+  it('accepts desktop-shell-forwarded writes (Fetch-Metadata marker kept) on loopback hosts', () => {
+    // The shell strips origin and sec-fetch-site but keeps the renderer's
+    // sec-fetch-mode (a fetch shows cors).
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-mode': 'cors' }, 'POST')).toBe(true)
+    expect(isTrustedRequest(loopback, { host: 'localhost:3080', 'sec-fetch-mode': 'cors' }, 'PUT')).toBe(true)
+  })
+
+  it('rejects header-less legacy-form writes and browser writes without Origin', () => {
+    // Legacy browsers without Fetch Metadata send cross-site form POSTs with
+    // neither Origin nor sec-fetch-* headers; the sec-fetch-mode requirement
+    // blocks them while the shell-forwarded shape above still passes.
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, {}, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-site': 'same-origin' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', 'sec-fetch-site': 'cross-site' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { host: 'evil.example', 'sec-fetch-mode': 'cors' }, 'POST')).toBe(false)
   })
 
   it('allows no-Origin GET status reads', () => {
     expect(isTrustedRequest(loopback, headers('127.0.0.1:3080'), 'GET')).toBe(true)
+  })
+
+  it('accepts the DeepSeek desktop shell origin (dsh-app scheme) on reads and writes', () => {
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'dsh-app://app'), 'GET')).toBe(true)
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'dsh-app://app'), 'POST')).toBe(true)
+    // The shell proxy may forward the renderer's cross-site marker; the exact
+    // custom-scheme Origin is the trust anchor, not the fetch-site hint.
+    expect(isTrustedRequest(loopback, { host: '127.0.0.1:3080', origin: 'dsh-app://app', 'sec-fetch-site': 'cross-site' }, 'POST')).toBe(true)
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'DSH-APP://APP'), 'POST')).toBe(true)
+  })
+
+  it('still rejects look-alike origins near the desktop scheme and non-loopback peers', () => {
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'dsh-app://app.evil.example'), 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'x-dsh-app://app'), 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'dsh-app://evil'), 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, headers('127.0.0.1:3080', 'dsh-app://app/'), 'POST')).toBe(false)
+    expect(isTrustedRequest('192.168.1.10', headers('127.0.0.1:3080', 'dsh-app://app'), 'GET')).toBe(false)
+    // The desktop allowance sits behind the Host pin: a dsh-app Origin on a
+    // non-loopback or missing Host is still rejected.
+    expect(isTrustedRequest(loopback, { host: 'evil.example', origin: 'dsh-app://app' }, 'POST')).toBe(false)
+    expect(isTrustedRequest(loopback, { origin: 'dsh-app://app' }, 'POST')).toBe(false)
   })
 
   it('rejects non-loopback peers, missing/malformed Host, and DNS-rebinding hosts', () => {

@@ -17,6 +17,7 @@ import type { CatalogSource } from './catalog.ts'
 import { probeGrokAuth } from './grok-import.ts'
 import { readStoredProxyUrl, setXaiProxyUrl, validProxyUrl, writeStoredProxyUrl } from './proxy.ts'
 import { safeMessage } from './redact.ts'
+import { MEDIA_TOOL_KEYS, mediaEnableNeedsConfirmation } from './media-options.ts'
 import {
   presentPluginOptions,
   readStoredOptions,
@@ -40,7 +41,9 @@ const OPTION_KEYS: ReadonlyArray<keyof StoredPluginOptions> = [
   'nestedSearchTools',
   'statefulResponses',
   'imagineTool',
+  'editTool',
   'videoTool',
+  'mediaRiskAcknowledged',
   'videoModel',
   'videoMaxBytes',
   'searchModel',
@@ -59,7 +62,9 @@ export function mergeStoredOptionsPatch(
   for (const key of OPTION_KEYS) {
     if (!(key in patch)) continue
     const value = (patch as Record<string, unknown>)[key]
-    if (value === null || value === undefined || value === '') delete next[key]
+    // Reset revokes consent even if an old Cordis/profile config says true.
+    if (key === 'mediaRiskAcknowledged' && (value === null || value === undefined || value === '')) next[key] = false
+    else if (value === null || value === undefined || value === '') delete next[key]
     else next[key] = value
   }
   // Return next directly — spreading current again would resurrect deleted keys.
@@ -301,25 +306,53 @@ function trustedRequest(req: IncomingMessage): boolean {
 /** Trust header/remote shape for the plugin's Web routes. Exported for tests. */
 export function isTrustedRequest(
   remote: string | undefined,
-  headers: { host?: string | undefined; origin?: string | undefined; 'sec-fetch-site'?: string | undefined },
+  headers: {
+    host?: string | undefined
+    origin?: string | undefined
+    'sec-fetch-site'?: string | undefined
+    'sec-fetch-mode'?: string | undefined
+  },
   method: string,
 ): boolean {
   if (remote !== '127.0.0.1' && remote !== '::1' && remote !== '::ffff:127.0.0.1') return false
-  if (headers['sec-fetch-site'] === 'cross-site') return false
   const host = headers.host
   if (host === undefined) return false
-  // PIN the Host header to an explicit loopback name. Otherwise a DNS-rebinding
+  // PIN the Host header to an explicit loopback name on every trust path
+  // below, including the desktop-shell allowances. Otherwise a DNS-rebinding
   // page (attacker domain resolving to 127.0.0.1) satisfies the same-origin
-  // check below with a same-host origin while the request really originates
-  // from a hostile page — enough to CSRF login/import/logout or to install a
-  // proxy URL that later captures the x.ai bearer.
+  // check with a same-host origin while the request really originates from a
+  // hostile page — enough to CSRF login/import/logout or to install a proxy
+  // URL that later captures the x.ai bearer.
   if (loopbackHostname(host) === undefined) return false
   const origin = headers.origin
-  // Same-origin browsers send Origin on every POST; non-browser clients and
-  // some privacy modes do not. Requiring Origin on writes closes the
-  // local-process CSRF slot (a local script could otherwise POST logout /
-  // set-proxy with a forged host). Status GETs stay open.
-  if (origin === undefined) return method === 'GET'
+  // The DeepSeek desktop shell serves its renderer over the custom `dsh-app`
+  // scheme and forwards UI requests to the local HTTP server carrying that
+  // Origin. It can never satisfy the HTTP same-origin check below, and a
+  // browser page cannot forge this value (browsers only emit their own
+  // http(s) origin), so an exact allow-list entry is safe. Some shell proxy
+  // paths also forward `sec-fetch-site: cross-site`, which is not meaningful
+  // for a custom-scheme page; the desktop origin is accepted before both.
+  if (origin !== undefined && origin.trim().toLowerCase() === 'dsh-app://app') return true
+  if (headers['sec-fetch-site'] === 'cross-site') return false
+  if (origin === undefined) {
+    if (method === 'GET') return true
+    // The DeepSeek desktop shell forwards UI requests after stripping `origin`
+    // and `sec-fetch-site` but keeping the renderer's `sec-fetch-mode` (a
+    // fetch shows `cors`). A legacy browser without Fetch Metadata sends
+    // cross-site form POSTs carrying neither Origin nor any sec-fetch-* header;
+    // requiring the marker blocks that while the shell-forwarded shape passes.
+    //
+    // Declared trade-offs (reviewed): accepting the marker re-opens the
+    // local-process write slot the old Origin-on-writes rule closed. Note the
+    // marker is NOT a shell identity proof — Node's default undici fetch sends
+    // exactly this shape (`sec-fetch-mode: cors`, no origin, no site), so any
+    // local fetch-based client passes too. That is accepted: a local process
+    // gains no new capability, since it can already read `~/.grok/auth.json`
+    // (the bearer itself) directly. And trusting the `dsh-app://app` origin
+    // means the desktop renderer is trusted to the same extent as the
+    // same-origin page on the supported `dsh web` path.
+    return (headers['sec-fetch-mode'] ?? '') !== ''
+  }
   try {
     return new URL(origin).host === new URL(`http://${host}`).host
   } catch {
@@ -398,6 +431,31 @@ export function registerXaiOAuthAuthRoutes(
   onAccountChange?: () => void,
 ): void {
   const auth = new XaiOAuthWebAuth(session, onAccountChange)
+  // Keep merge/check/write in order across tabs: a stale unrelated save must
+  // not resurrect switches that another request just closed.
+  let optionsWrite = Promise.resolve()
+  const saveOptionsPatch = (body: unknown): Promise<StoredPluginOptions> => {
+    const pending = optionsWrite.then(async () => {
+      const current = readStoredOptions()
+      const previous = presentPluginOptions(cordisConfig, current).effective
+      const merged = sanitizeStoredOptions({ version: 1, options: mergeStoredOptionsPatch(current, body) })
+      if (!previous.mediaRiskAcknowledged && typeof body === 'object' && body !== null
+        && !Array.isArray(body) && 'mediaRiskAcknowledged' in body && body.mediaRiskAcknowledged === true) {
+        // A first confirmation starts with all media off, ignoring old stored
+        // and Cordis true switches. Only choices explicit in this request win.
+        for (const key of MEDIA_TOOL_KEYS) merged[key] = key in body && (body as Record<string, unknown>)[key] === true
+      }
+      if (mediaEnableNeedsConfirmation(
+        previous,
+        presentPluginOptions(cordisConfig, merged).effective,
+        body,
+      )) throw new BadRequestError('Enabling media tools requires explicit mediaRiskAcknowledged: true in this request after reviewing the media risks.')
+      await writeStoredOptions(merged)
+      return merged
+    })
+    optionsWrite = pending.then(() => undefined, () => undefined)
+    return pending
+  }
   ctx.effect(() => {
     const routes = [
       ctx.webServer.register({
@@ -497,11 +555,7 @@ export function registerXaiOAuthAuthRoutes(
           if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
           try {
             const body = await readJson(req)
-            const merged = sanitizeStoredOptions({
-              version: 1,
-              options: mergeStoredOptionsPatch(readStoredOptions(), body),
-            })
-            await writeStoredOptions(merged)
+            const merged = await saveOptionsPatch(body)
             // Respond with effective values so the UI matches runtime, plus
             // the sanitized stored document (invalid/out-of-range dropped).
             json(res, 200, optionsResponse(cordisConfig, merged))
