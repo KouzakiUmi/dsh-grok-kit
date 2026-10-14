@@ -1,4 +1,4 @@
-# Optional video tasks and capability status (development version)
+# Video tasks (experimental)
 
 This feature belongs to the current source development version, not necessarily the published npm 0.2.2 package. It is off by default, requires account OAuth entitlement, and may use subscription quota or incur charges. Mock tests are not live-account verification.
 

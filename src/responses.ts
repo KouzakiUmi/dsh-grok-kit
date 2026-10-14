@@ -203,7 +203,7 @@ function rewriteBackendSearchError(event: AssistantMessageEvent, backendSearch: 
       error: {
         ...event.error,
         errorMessage:
-          'xAI rejected this request (HTTP 403). Server-side web/X search looks unavailable on this account — turn off backendSearch in the plugin settings and retry.',
+          'xAI rejected this request (HTTP 403). Server-side web/X search looks unavailable on this account — turn off backendSearch in the plugin settings, save, and restart the DSH host, then retry.',
       },
     }
   }
@@ -213,7 +213,7 @@ function rewriteBackendSearchError(event: AssistantMessageEvent, backendSearch: 
       error: {
         ...event.error,
         errorMessage:
-          'xAI rejected this request (HTTP 400): the payload mixed server-side search tools. Turn off backendSearch in the plugin settings and retry.'
+          'xAI rejected this request (HTTP 400): the payload mixed server-side search tools. Turn off backendSearch in the plugin settings, save, and restart the DSH host, then retry.'
           + (message.length > 0 ? ` Original: ${message}` : ''),
       },
     }

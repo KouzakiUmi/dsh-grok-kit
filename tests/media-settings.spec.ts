@@ -169,6 +169,17 @@ describe('settings-only media risk confirmation', () => {
     await vi.waitFor(() => expect(panelKey()).not.toBe(closedKey))
   })
 
+  it('lets the video toggle replace a parked image confirmation, and only the confirmed group lands', async () => {
+    const f = await fixture()
+    f.change(en.imagineTool, true)
+    f.change(en.videoTool, true)
+    expect(text(f.render())).toContain(en.mediaConfirmPrompt)
+    f.click(en.mediaConfirmYes)
+    expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
+    await f.save()
+    expect(f.posts[0]).toEqual({ imagineTool: false, editTool: false, videoTool: true, mediaRiskAcknowledged: true })
+  })
+
   it('provides nonempty English and Chinese copies for the same media controls and risks', () => {
     for (const locale of [en, zh]) {
       for (const key of ['imagineTool', 'imagineToolHint', 'videoToolHint', 'mediaRiskHint', 'experimentalTag', 'mediaConfirmPrompt', 'mediaConfirmYes', 'mediaConfirmNo', 'optionsHint'] as const) {

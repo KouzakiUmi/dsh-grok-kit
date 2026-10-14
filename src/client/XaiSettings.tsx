@@ -306,6 +306,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       for (const key of ALL_OPTION_KEYS) patch[key] = null
       // Consent revocation must override even an old opt-in Cordis config.
       patch.mediaRiskAcknowledged = false
+      // A parked inline confirmation would re-sign consent on top of the
+      // reset, so drop it together with the reset itself.
+      setPendingMediaGroup(null)
       applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch))
       setCapabilityGeneration(generation => generation + 1)
       setOptionsFeedback('saved')
@@ -674,6 +677,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
 
         {pendingMediaGroup !== null ? (
           <div style={mediaConfirmStyle}>
+            <p style={{ ...errorStyle, margin: '0 0 4px', fontWeight: 600 }}>
+              {pendingMediaGroup === 'images' ? t('imagineTool') : t('videoTool')}
+            </p>
             <p style={{ ...errorStyle, margin: '0 0 6px' }}>{t('mediaConfirmPrompt')}</p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button type="button" style={primaryButtonStyle} disabled={optionsBusy} onClick={confirmPendingMedia}>{t('mediaConfirmYes')}</button>

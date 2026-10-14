@@ -33,7 +33,7 @@
 - **Continuous multi-turn reasoning:** high effort is the default, with `reasoning.encrypted_content` preserved for the next turn
 - **Sign-in stays in sync with Grok CLI:** the plugin shares and writes back `~/.grok/auth.json` instead of copying once and rotating refresh tokens separately
 - **Image generation and editing (experimental):** `grok_imagine` for text-to-image and `grok_imagine_edit` for image-to-image (reusing the main OAuth session), off by default and enabled after risk confirmation in Settings. Non-chat models stay out of the conversation picker
-- **Session media cards:** generated and edited images are stored in the DSH attachment library and rendered in session cards showing the prompt, inputs, and result, with download and re-generate/re-edit actions
+- **Session image cards:** generated and edited images are stored in the DSH attachment library and rendered in session cards showing the prompt, inputs, and result, with download and re-generate/re-edit actions
 - **Video generation (experimental):** image-to-video with durable tasks, resume, and account-scoped downloads; off by default, enabled after risk confirmation and a DSH restart
 
 Supporting behavior includes an xAI-only proxy, forced refresh and one retry on chat 401, atomic credential writes, a capability status page, and diagnostic redaction.
@@ -164,6 +164,8 @@ Media switches do not inherit enablement from older versions: after updating, co
 | `imagineTool` | `false` | Register `grok_imagine` (text-to-image) after media risk confirmation |
 | `editTool` | `false` | Register `grok_imagine_edit` after media risk confirmation (independent advanced config; the Settings image switch controls both tools) |
 | `videoTool` | `false` | Register video generation, status and resume tools after media risk confirmation |
+| `videoModel` | `grok-imagine-video-1.5` | Video generation model (experimental, read-only display; currently the only accepted value) |
+| `videoMaxBytes` | `104857600` | Video download size cap in bytes (default 100 MiB; read-only display) |
 | `mediaRiskAcknowledged` | `false` | Explicit acknowledgement of the media risks above; both it and the selected media switch must be `true` |
 | `editModel` | `''` | Pin the image-edit model; empty string follows live catalog (prefers `grok-imagine-image-2.0`, fallback `grok-imagine-image`) |
 | `editMaxSourceImages` | `5` | Per-request source-image cap for `grok_imagine_edit` (plugin accepts up to 5) |
@@ -182,7 +184,7 @@ The “Search & feature options” card on Settings → xAI Grok can also overri
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
 - The xAI-only fetch hook is restored when the plugin is disposed and does not permanently change system or process environment variables
 - On Windows, Node mode bits are not NTFS ACLs. Restrict the directory ACL yourself if the user profile or `$DSH_HOME` is stored in a shared location
-- Writer lock and safety boundaries: Credential writes delegate to official `@deepseek-ai/dsh-atomic-write` (`$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, contenders use an exclusive claim file and double-checked record/PID inspection to automatically take over and reclaim locks left by proven exited processes; locks held by live PIDs, unverified permissions, malformed records, or empty files continue to wait and time out (fail-closed). The credential and lock directory must reside on a local filesystem within the same PID namespace; sharing the directory across hosts or container boundaries is prohibited (mismatched PID spaces can cause mutex failures and data corruption). Manually replacing credential or lock files while these processes are running can bypass these safeguards; stop all related processes before making such changes
+- Writer locks: credential writes delegate to the official `@deepseek-ai/dsh-atomic-write` (lock file `$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, a contender can take over and reclaim locks left by proven-exited processes using an exclusive claim file plus a second liveness check; locks held by live PIDs, with unclear ownership, malformed content, or empty files keep waiting until timeout (fail-closed). The credential and lock directory must live on a local filesystem within one PID namespace — sharing it across machines or containers desynchronizes PIDs and can break mutual exclusion into concurrent double writes. Replacing credential or lock files by hand while things run defeats these guarantees; stop every related process before cleaning up
 
 ## Compatibility and limitations
 

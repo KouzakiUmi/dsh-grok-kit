@@ -324,6 +324,16 @@ export function isTrustedRequest(
     // fetch shows `cors`). A legacy browser without Fetch Metadata sends
     // cross-site form POSTs carrying neither Origin nor any sec-fetch-* header;
     // requiring the marker blocks that while the shell-forwarded shape passes.
+    //
+    // Declared trade-offs (reviewed): accepting the marker re-opens the
+    // local-process write slot the old Origin-on-writes rule closed. Note the
+    // marker is NOT a shell identity proof — Node's default undici fetch sends
+    // exactly this shape (`sec-fetch-mode: cors`, no origin, no site), so any
+    // local fetch-based client passes too. That is accepted: a local process
+    // gains no new capability, since it can already read `~/.grok/auth.json`
+    // (the bearer itself) directly. And trusting the `dsh-app://app` origin
+    // means the desktop renderer is trusted to the same extent as the
+    // same-origin page on the supported `dsh web` path.
     return (headers['sec-fetch-mode'] ?? '') !== ''
   }
   try {
