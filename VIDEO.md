@@ -1,10 +1,10 @@
 # Video tasks (experimental)
 
-This feature belongs to the current source development version, not necessarily the published npm 0.2.2 package. It is off by default, requires account OAuth entitlement, and may use subscription quota or incur charges. Mock tests are not live-account verification.
+An experimental feature added in 0.2.3, off by default. It requires account OAuth entitlement and may use subscription quota or incur charges. Availability depends on account eligibility and upstream service rules.
 
 ## Enable
 
-In DeepSeek Harness Settings → xAI Grok → Search & feature options, selecting the video switch opens a risk confirmation. Cancel leaves the setting unchanged; confirm, save and restart the host to register the tools. The prompt appears only on enabling in Settings, including reopening after a close, not during normal generation, queries, resume or downloads. Enabling saves settings only and does not generate media or probe quota. Alternatively, after reading the risks below, explicitly configure the plugin:
+In DeepSeek Harness Settings → xAI Grok → Search & feature options, selecting the video switch shows an inline risk confirmation inside the card. Cancel leaves the setting unchanged; confirm, save and restart the host to register the tools. The prompt appears only on enabling in Settings, including reopening after a close, not during normal generation, queries, resume or downloads. Enabling saves settings only and does not generate media or probe quota. Alternatively, after reading the risks below, explicitly configure the plugin:
 
 ```yaml
 videoTool: true

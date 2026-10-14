@@ -1,5 +1,18 @@
 # 更新记录 / Changelog
 
+## 0.2.3（2026-10-14）
+
+- 新增实验性视频工具 `grok_video_generate`、`grok_video_status`、`grok_video_resume`：单图生成视频、任务持久化与恢复、按账号隔离的下载，以及会话视频卡片。
+- Added experimental `grok_video_generate`, `grok_video_status`, and `grok_video_resume` tools: image-to-video, durable tasks and recovery, account-scoped downloads, and session video cards.
+- 图片生成、图片编辑和视频统一默认关闭，不继承旧版本媒体开启状态。设置页开启时需确认风险、保存并重启；确认在卡片内显示，正常调用不重复询问，关闭后重开需重新确认。
+- Image generation, editing, and video are now off by default and do not inherit old media enablement. Enable them through an inline risk confirmation in Settings, save, and restart; normal calls do not ask again, while reopening requires confirmation.
+- 修复桌面端来源和壳转发请求导致设置页登录、代理或选项保存被拒绝的问题。接口仍限回环连接与回环 Host；桌面页面与携带 Fetch Metadata 的本机请求受信任，该标记不构成桌面身份或权限证明。
+- Fixed rejected sign-in, proxy, and option writes from desktop-origin or shell-forwarded requests. Routes remain limited to loopback connections and Host names; the desktop page and local requests with Fetch Metadata are trusted, but the marker does not prove desktop identity or authorization.
+- 修复视频下载提前结束时的流清理、视频关闭时设置页误报，以及重置后残留的媒体确认。补齐实验性徽标和使用说明，宿主支持范围不变。
+- Fixed stream cleanup on early video download termination, spurious Settings errors while video is disabled, and pending media confirmation surviving a reset. Added experimental badges and usage notes; host support is unchanged.
+- 视频生成可能消耗订阅额度或产生费用；“停止等待”不会取消已提交的上游任务。关闭视频会停用任务列表、恢复与下载入口，已有任务和附件保留。
+- Video generation may use subscription quota or incur charges; stopping the wait does not cancel submitted upstream jobs. Disabling video hides the task list and blocks recovery/download routes without deleting existing tasks or attachments.
+
 ## 0.2.2（2026-10-12）
 
 - 修复暗色模式下登录主按钮文字不清晰的问题，文字颜色跟随宿主主题。

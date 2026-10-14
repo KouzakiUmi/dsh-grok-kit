@@ -24,10 +24,10 @@ dsh plugin --profile web add dsh-grok-kit
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-也可以固定安装 0.2.2：
+也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.2
+dsh plugin --profile web add dsh-grok-kit@0.2.3
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -106,7 +106,7 @@ Web UI：
 
 嵌套的 `grok_web_search` / `x_search`（再开一轮 `grok-build-0.1`）在 `backendSearch` 关闭时自动注册（`nestedSearchTools ?? !backendSearch`）。只有需要与主搜索同时使用 `allowed_domains` / 账号/日期过滤时，才设 `nestedSearchTools: true`。主请求 403 会让整轮聊天失败——在插件配置里设 `backendSearch: false`。开启主循环搜索时，`x_keyword_search` 等拒绝桩会从转发流中剥掉，不属于正常界面体验。
 
-当前源码候选中，`grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认关闭，旧媒体开启配置不继承；需在设置页确认风险、保存并重启宿主后开启。正常使用不重复弹窗，详见 [媒体工具的开启与风险](README.md#媒体工具的开启与风险)。已发布的 npm `0.2.2` 尚未包含此默认关闭变更。图片保存到 DSH 附件库并直接在会话图片卡片中显示；支持从卡片下载或通过宿主文件工具导出，两工具的 `save_path` 参数均不再支持直接写盘。同一候选还包含实验性视频工具（`grok_video_generate` / `grok_video_status` / `grok_video_resume`），同样默认关闭、确认风险并重启后开启，详见 [视频任务（实验性）](README.md#视频任务实验性) 与 [VIDEO.zh.md](VIDEO.zh.md)。
+`grok_imagine`（文生图）与 `grok_imagine_edit`（图生图，复用主 OAuth session）默认关闭，旧媒体开启配置不继承；需在设置页确认风险、保存并重启宿主后开启。正常使用不重复确认，详见 [媒体工具的开启与风险](README.md#媒体工具的开启与风险)。图片保存到 DSH 附件库并直接在会话图片卡片中显示；支持从卡片下载或通过宿主文件工具导出，两工具的 `save_path` 参数均不再支持直接写盘。实验性视频工具（`grok_video_generate` / `grok_video_status` / `grok_video_resume`）同样默认关闭、确认风险并重启后开启，详见 [视频任务（实验性）](README.md#视频任务实验性) 与 [VIDEO.zh.md](VIDEO.zh.md)。
 
 ## 代理
 

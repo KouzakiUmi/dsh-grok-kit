@@ -23,8 +23,6 @@
 >
 > OAuth 可用性可能受订阅档位、地区、xAI 条款、账户资格、速率限制和后续服务变更影响。用户应自行确认其账户与用途获准；本项目不保证持续可用性或兼容性，也不提供 xAI/Grok 账号、订阅或官方支持。
 
-> 当前源码待发布：下文的图片/视频默认关闭、设置页风险确认及视频任务功能属于当前源码候选，不表示已发布的 npm `0.2.2` 包已有这些行为。下方固定版本安装命令仍安装已发布的版本。
-
 ## 不止于 OAuth 登录
 
 `dsh-grok-kit` 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 增加独立的 `xai-oauth` 路由。它不要求 `XAI_API_KEY`，也不修改 dsh 源码；重点不只是“能登录”，而是把服务端搜索和连续 reasoning 所需的请求字段接进主聊天路径。
@@ -90,10 +88,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-也可以固定安装 0.2.2：
+也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.2
+dsh plugin --profile web add dsh-grok-kit@0.2.3
 dsh web
 ```
 
@@ -106,7 +104,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.2** 修复暗色模式下登录按钮文字不清晰，以及“全部显示”将模型列表收窄为单一模型的问题。点击“全部显示”可恢复所有可聊天模型，重启后仍保留；已保存的单模型选择不会自动改变。宿主支持范围不变：DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.3** 新增实验性视频生成、任务恢复和会话视频卡片，并修复桌面端设置页请求被拒绝的问题。图片生成、编辑和视频统一默认关闭，更新时不会继承旧媒体开启状态；请在设置页确认风险、保存并重启后使用。宿主支持范围不变：DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
@@ -140,7 +138,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 
 ### 视频任务（实验性）
 
-当前源码提供默认关闭的 `grok_video_generate` / `grok_video_status` / `grok_video_resume`：单图生成视频、任务持久化与恢复、按账号隔离的下载。设置页会显示本地的能力状态与任务列表；额度来源尚未核验，因此不显示余额估算。开启需要确认风险并重启 DSH，生成可能消耗订阅额度或产生费用，“停止等待”不会取消上游任务。npm `0.2.2` 暂不包含这些工具；用法、配置与限制见 [视频说明](VIDEO.zh.md)。
+`grok_video_generate` / `grok_video_status` / `grok_video_resume` 提供单图生成视频、任务持久化与恢复、按账号隔离的下载，默认关闭。设置页会显示本地的能力状态与任务列表；额度来源尚未核验，因此不显示余额估算。开启需要确认风险并重启 DSH，生成可能消耗订阅额度或产生费用，“停止等待”不会取消上游任务。用法、配置与限制见 [视频说明](VIDEO.zh.md)。
 
 ### 媒体工具的开启与风险
 
@@ -181,6 +179,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#236652c3deef6fb8737ae
 - 优先使用 `~/.grok/auth.json`，与 Grok CLI 原地共用同一份 xAI 凭据；登录和刷新都会写回该文件，而不是只做一次性导入；在设置页退出也会让 Grok CLI 退出
 - OAuth 刷新令牌会轮换；插件用原子写入、进程内合并和 compare-and-write 避免并发刷新互相覆盖
 - 浏览器状态接口、错误信息和诊断不会返回 token 值
+- 插件接口只接受本机回环连接与回环 Host，并校验浏览器来源。桌面端的 `dsh-app://app` 页面受信任；没有 Origin、但携带 Fetch Metadata 的本机请求也可写入设置。该标记不是桌面身份或权限证明：本插件不隔离本机进程或桌面渲染器。不要将接口暴露到局域网或公网，也不要在不可信的多用户环境共享凭据目录。
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
 - xAI 专用 fetch hook 会在插件卸载时恢复；它不会永久修改系统或进程环境变量
 - Windows 上的 Node mode bit 不等于 NTFS ACL；如果用户目录或 `$DSH_HOME` 位于共享位置，请自行收紧目录权限

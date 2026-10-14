@@ -23,8 +23,6 @@
 >
 > OAuth availability may depend on subscription tier, region, xAI terms, account entitlement, rate limits, and future service changes. Users are responsible for confirming that their account and use are permitted. This project does not guarantee continued access or compatibility and does not provide xAI/Grok accounts, subscriptions, or official support.
 
-> Current source, not yet released: the media-off defaults, Settings risk confirmation and video task features below belong to this source candidate. They do not describe the already published npm `0.2.2` package; the fixed-version installation commands below still install that published version.
-
 ## More than OAuth sign-in
 
 `dsh-grok-kit` adds a separate `xai-oauth` route to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It does not require `XAI_API_KEY` or patch dsh source code. The point is not only to sign in, but to bring server-side search and the fields required for continuous reasoning into the main chat path.
@@ -90,10 +88,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-You can also pin version 0.2.2:
+You can also pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.2
+dsh plugin --profile web add dsh-grok-kit@0.2.3
 dsh web
 ```
 
@@ -106,7 +104,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.2** fixes unreadable sign-in button text in dark mode and “Show all” narrowing the model list to a single model. Clicking “Show all” restores all chat models and survives restarts; existing single-model selections are not changed automatically. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.3** adds experimental video generation, task recovery, and session video cards, and fixes rejected Settings requests in the desktop app. Image generation, editing, and video are all off by default; upgrading does not inherit old media enablement. Confirm the risks in Settings, save, and restart before using them. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
@@ -140,7 +138,7 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 
 ### Video tasks (experimental)
 
-Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume`: image-to-video, durable task recovery, and account-scoped downloads. Settings show local capability observations and the task list; the quota source is unverified, so no balance is estimated. Enabling requires risk confirmation and a DSH restart; generation may use subscription quota or incur charges, and stopping the wait does not cancel an upstream job. The published npm `0.2.2` package does not include these tools yet. See the [video guide](VIDEO.md) for configuration and limitations.
+`grok_video_generate` / `grok_video_status` / `grok_video_resume` provide image-to-video, durable task recovery, and account-scoped downloads, off by default. Settings show local capability observations and the task list; the quota source is unverified, so no balance is estimated. Enabling requires risk confirmation and a DSH restart; generation may use subscription quota or incur charges, and stopping the wait does not cancel an upstream job. See the [video guide](VIDEO.md) for configuration and limitations.
 
 ### Enabling media tools and understanding the risks
 
@@ -181,6 +179,7 @@ The “Search & feature options” card on Settings → xAI Grok can also overri
 - The live store prefers `~/.grok/auth.json`, sharing the same xAI credential with Grok CLI in place; sign-in and refresh write back to that file instead of performing a one-time import, and signing out in Settings signs Grok CLI out too
 - OAuth refresh tokens rotate; atomic writes, in-process coalescing, and compare-and-write prevent concurrent refreshes from overwriting one another
 - Browser status routes, errors, and diagnostics do not return token values
+- Plugin routes accept only loopback connections and loopback Host names, with browser-origin checks. The desktop `dsh-app://app` page is trusted; local requests without Origin but with Fetch Metadata may also write settings. This marker is not proof of desktop identity or authorization: the plugin does not isolate local processes or the desktop renderer. Do not expose these routes to a LAN or the internet, or share credential directories in an untrusted multi-user environment.
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
 - The xAI-only fetch hook is restored when the plugin is disposed and does not permanently change system or process environment variables
 - On Windows, Node mode bits are not NTFS ACLs. Restrict the directory ACL yourself if the user profile or `$DSH_HOME` is stored in a shared location

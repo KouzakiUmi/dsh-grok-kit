@@ -541,7 +541,7 @@ export class VideoTaskManager {
           authorization: `Bearer ${bearer}`,
           'content-type': 'application/json',
           accept: 'application/json',
-          'user-agent': 'dsh-grok-kit/0.2.2',
+          'user-agent': 'dsh-grok-kit/0.2.3',
         },
         body: JSON.stringify(body),
         signal: timed.signal,
@@ -858,7 +858,7 @@ export class VideoTaskManager {
         headers: {
           authorization: `Bearer ${bearer}`,
           accept: 'application/json',
-          'user-agent': 'dsh-grok-kit/0.2.2',
+          'user-agent': 'dsh-grok-kit/0.2.3',
         },
         signal: pollTimed.signal,
       })
@@ -993,7 +993,7 @@ export class VideoTaskManager {
       const response = await this.fetchImpl(remoteUrl, {
         method: 'GET',
         redirect: 'error',
-        headers: { accept: 'video/mp4', 'user-agent': 'dsh-grok-kit/0.2.2' },
+        headers: { accept: 'video/mp4', 'user-agent': 'dsh-grok-kit/0.2.3' },
         signal: timed.signal,
       })
       if (!response.ok) {
