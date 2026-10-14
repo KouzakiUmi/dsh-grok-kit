@@ -370,6 +370,8 @@ type XaiOAuthWebAuthStatus = {
   selected: string[];
   catalogSource: CatalogSource;
   catalogError?: string;
+  /** A failed reauthorization need not invalidate the saved account. */
+  loginError?: string;
   grokImportAvailable: boolean;
   sharedGrokAuth: boolean;
 } | {

@@ -76,6 +76,8 @@ export type XaiOAuthWebAuthStatus =
     selected: string[]
     catalogSource: CatalogSource
     catalogError?: string
+    /** A failed reauthorization need not invalidate the saved account. */
+    loginError?: string
     grokImportAvailable: boolean
     sharedGrokAuth: boolean
   }
@@ -119,7 +121,15 @@ export class XaiOAuthWebAuth {
   async status(): Promise<XaiOAuthWebAuthStatus> {
     if (this.operation !== undefined) return this.state
     if (this.state.status === 'error') {
-      return { ...this.state, grokImportAvailable: await grokImportAvailable() }
+      const failed = this.state
+      const stored = await this.readStoredStatus()
+      // A newer login/import/logout wins over this asynchronous recovery read.
+      if (this.operation !== undefined || this.state !== failed) return this.state
+      if (stored.status === 'signed-in') {
+        this.state = { ...stored, loginError: failed.message }
+        return this.state
+      }
+      return { ...failed, grokImportAvailable: stored.grokImportAvailable, sharedGrokAuth: stored.sharedGrokAuth }
     }
     return this.readStoredStatus()
   }

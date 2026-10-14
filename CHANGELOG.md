@@ -2,6 +2,11 @@
 
 ## 未发布 / Unreleased
 
+- 重新授权失败或取消后，按当前保存的凭据恢复登录状态并显示非致命错误提示，不自动退出账号；迟到的恢复读取不能覆盖新的授权操作。首次登录失败且没有凭据时仍显示错误。
+- Failed or cancelled reauthorization reconciles sign-in status with saved credentials and shows a nonfatal error without signing out; late recovery reads cannot overwrite newer authorization actions. Initial login failure without credentials remains an error.
+- 私有凭据模式的已登录账号重新授权前增加替换确认；拒绝后不打开授权窗口、不提交登录请求，也不重置账号面板。共享 Grok CLI 凭据的原确认保持不变。
+- Reauthorization of a signed-in private-store account now asks before replacing it. Declining opens no authorization window, starts no login request and leaves account panels intact. The shared Grok CLI warning is unchanged.
+
 - 登录入口明确兼容 X Subscription 与原 SuperGrok / X Premium，新增已登录账号的重新授权入口及官方订阅管理链接，沿用同一 Grok OAuth 与共享凭据生命周期。
 - The sign-in entry now covers The X Subscription and legacy SuperGrok / X Premium, with reauthorization for signed-in users and an official subscription-dashboard link, preserving the same Grok OAuth and shared credential lifecycle.
 - 统一计费响应未报告使用百分比时保留周期、套餐和余额，不再丢失整块订阅详情；不编造已用/剩余数字，proto3 空 Cent 消息按已报告的零余额处理，统一计费标记仅取官方布尔字段。未加入 Cursor 接入。

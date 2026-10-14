@@ -87,6 +87,7 @@ type AccountStatus =
     selected?: string[]
     catalogSource?: CatalogSource
     catalogError?: string
+    loginError?: string
     grokImportAvailable?: boolean
     sharedGrokAuth?: boolean
   }
@@ -467,6 +468,8 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     if (status.status === 'signing-in') return
     if (status.status !== 'loading' && status.sharedGrokAuth === true) {
       if (!window.confirm(t('confirmLoginShared'))) return
+    } else if (status.status === 'signed-in') {
+      if (!window.confirm(t('confirmLoginPrivate'))) return
     }
     // Only once the user actually committed to a sign-in.
     ++statusRequestRef.current
@@ -661,6 +664,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                 <p style={{ ...bodyStyle, fontSize: 12, color: 'var(--dsw-alias-label-secondary, #61666b)' }}>{t('unofficialNotice')}</p>
 
                 {status.status === 'error' ? <p style={errorStyle}>{status.message}</p> : null}
+                {status.status === 'signed-in' && status.loginError !== undefined
+                  ? <p role="status" style={errorStyle}>{t('loginFailedStoredAccount')}{' '}{status.loginError}</p>
+                  : null}
                 {status.status !== 'loading' && status.sharedGrokAuth === true
                   ? <p style={bodyStyle}>{t('sharedGrok')}</p>
                   : null}

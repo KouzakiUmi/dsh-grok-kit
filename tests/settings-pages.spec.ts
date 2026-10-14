@@ -327,6 +327,47 @@ describe('five-page settings section', () => {
     expect(countOf('/auth/login')).toBe(0)
   })
 
+  it.each([false, true])('asks before replacing a private account (accepted=%s)', async accepted => {
+    stubFetch({ '/auth/login': { url: 'https://auth.x.ai/device' } })
+    const confirm = vi.fn(() => accepted)
+    const open = vi.fn(() => null)
+    vi.stubGlobal('window', { open, confirm })
+    mount()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    const oldKey = panels(now(), QuotaView)[0]?.key
+    ;(button(view(), en.loginAgain).props.onClick as () => void)()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(confirm).toHaveBeenCalledWith(en.confirmLoginPrivate)
+    expect(countOf('/auth/login')).toBe(accepted ? 1 : 0)
+    expect(open).toHaveBeenCalledTimes(accepted ? 1 : 0)
+    expect(countOf('/auth/logout')).toBe(0)
+    if (!accepted) expect(panels(now(), QuotaView)[0]?.key).toBe(oldKey)
+  })
+
+  it('keeps the existing shared-credential replacement warning', async () => {
+    const shared = { ...SIGNED_IN, sharedGrokAuth: true }
+    stubFetch({ '/auth/status': shared })
+    const confirm = vi.fn(() => false)
+    const open = vi.fn(() => null)
+    vi.stubGlobal('window', { open, confirm })
+    mount(shared)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    ;(button(view(), en.loginAgain).props.onClick as () => void)()
+    expect(confirm).toHaveBeenCalledWith(en.confirmLoginShared)
+    expect(countOf('/auth/login')).toBe(0)
+    expect(open).not.toHaveBeenCalled()
+  })
+
+  it('displays the nonfatal login error while keeping the stored account panels active', () => {
+    const restored = { ...SIGNED_IN, loginError: 'synthetic authorization denied' }
+    stubFetch({ '/auth/status': restored })
+    mount(restored)
+    expect(texts(view())).toContain('synthetic authorization denied')
+    expect(panels(now(), QuotaView)[0]?.props.signedIn).toBe(true)
+    expect(buttonText(en.loginAgain)).toBe(en.loginAgain)
+  })
+
   it('lets an authenticated user reauthorize without first deleting the shared credential', async () => {
     stubFetch({ '/auth/login': { url: 'https://auth.x.ai/device' } })
     vi.stubGlobal('window', { open: vi.fn(() => null), confirm: vi.fn(() => true) })
