@@ -89,7 +89,7 @@ Web UI：
 1. `dsh web`（或 `dsh --profile web`）
 2. 设置 → xAI Grok → 使用 SuperGrok 登录
 3. 在浏览器里批准
-4. 模型选择器里选 `xai-oauth` / `grok-4.6`（或 `grok-4.5`，如果还没自动选中）
+4. 模型选择器里选 `xai-oauth` 下的主线 Grok 模型（如 `grok-4.6`；通常会自动选中偏好型号）
 
 登录成功后插件会请求 `GET /v1/models`，并缓存账号可见的模型 id。
 
@@ -102,7 +102,7 @@ Web UI：
 
 ## 搜索
 
-本 bundle 的组合把 `backendSearch` 设为 `false`（默认关闭，可在设置页或配置中打开）。开启后，grok-4.6 会在**同一轮** Responses 里混入 xAI 服务端 `{type:web_search}` / `{type:x_search}`（界面上多半是 thinking）。dsh 原生函数 `web_search` 仍在宿主工具列表里，但会从这份 xAI payload 剥掉，避免 `Duplicate tool names: web_search`。
+本 bundle 的组合把 `backendSearch` 设为 `false`（默认关闭，可在设置页或配置中打开）。开启后，xAI 会在**同一轮** Responses 里把服务端 `{type:web_search}` / `{type:x_search}` 混入 Grok 请求（界面上多半是 thinking）。dsh 原生函数 `web_search` 仍在宿主工具列表里，但会从这份 xAI payload 剥掉，避免 `Duplicate tool names: web_search`。
 
 嵌套的 `grok_web_search` / `x_search`（再开一轮 `grok-build-0.1`）在 `backendSearch` 关闭时自动注册（`nestedSearchTools ?? !backendSearch`）。只有需要与主搜索同时使用 `allowed_domains` / 账号/日期过滤时，才设 `nestedSearchTools: true`。主请求 403 会让整轮聊天失败——在插件配置里设 `backendSearch: false`。开启主循环搜索时，`x_keyword_search` 等拒绝桩会从转发流中剥掉，不属于正常界面体验。
 
