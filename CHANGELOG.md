@@ -1,54 +1,19 @@
 # 更新记录 / Changelog
 
-## 未发布 / Unreleased
+## 0.2.4（2026-10-15）
 
-- 进程内保留重新授权失败提示，不再因后续状态读取或模型选择而丢失；新的登录、导入或退出动作清除旧提示，不改写凭据。
-- Reauthorization failure diagnostics remain in memory across status reads and model selection; a new login, import or logout clears the old notice without rewriting credentials.
-- 同账号模型目录通知与首次媒体身份初始化不再清除 60 秒配额缓存；实际账号变更、未知身份与明确认证操作仍使缓存失效并隔离迟到结果。
-- Same-account catalog notifications and first capability identity initialization preserve the 60-second quota cache. Known account changes, unknown identities and explicit auth actions still invalidate it and isolate late results.
-
-- 重新授权失败或取消后，按当前保存的凭据恢复登录状态并显示非致命错误提示，不自动退出账号；迟到的恢复读取不能覆盖新的授权操作。首次登录失败且没有凭据时仍显示错误。
-- Failed or cancelled reauthorization reconciles sign-in status with saved credentials and shows a nonfatal error without signing out; late recovery reads cannot overwrite newer authorization actions. Initial login failure without credentials remains an error.
-- 私有凭据模式的已登录账号重新授权前增加替换确认；拒绝后不打开授权窗口、不提交登录请求，也不重置账号面板。共享 Grok CLI 凭据的原确认保持不变。
-- Reauthorization of a signed-in private-store account now asks before replacing it. Declining opens no authorization window, starts no login request and leaves account panels intact. The shared Grok CLI warning is unchanged.
-
-- 登录入口明确兼容 X Subscription 与原 SuperGrok / X Premium，新增已登录账号的重新授权入口及官方订阅管理链接，沿用同一 Grok OAuth 与共享凭据生命周期。
-- The sign-in entry now covers The X Subscription and legacy SuperGrok / X Premium, with reauthorization for signed-in users and an official subscription-dashboard link, preserving the same Grok OAuth and shared credential lifecycle.
-- 统一计费响应未报告使用百分比时保留周期、套餐和余额，不再丢失整块订阅详情；不编造已用/剩余数字，proto3 空 Cent 消息按已报告的零余额处理，统一计费标记仅取官方布尔字段。未加入 Cursor 接入。
-- Unified billing responses without a usage percentage retain period, plan and balance details without fabricated usage numbers. Empty proto3 Cent messages represent a reported zero balance; unified billing uses only the official boolean flag. No Cursor integration is added.
-
-- 设置顶部公共状态与导航的吸顶背景统一为宿主弹窗背景层，消除深浅色下的矩形色块割裂，同时保留滚动遮挡效果。
-- The sticky settings header now uses the host dialog surface, removing the mismatched background block in light and dark themes while keeping scrolled content covered.
-
-- 视频任务替换后，旧播放/下载等待的迟到错误不再污染新任务卡片；保留当前任务的正常下载和错误反馈，移除未被使用且未公开导出的旧下载 hook。
-- Late playback/download failures from a replaced video task no longer pollute its replacement; current-task downloads and errors still work. Removed an unused, non-public download hook.
-- 视频文件路由改为复用既有浏览器安全共享模块中的唯一常量，保留 Host 与 Client 的原导出名，增加双端路径契约回归。
-- Video downloads now use one browser-safe shared route constant while preserving existing Host/Client export names, with contract regressions on both sides.
-
-- 账号变更使此前的状态读取失效；迟到的首屏或轮询结果、错误不再覆盖退出或导入后的账号界面。
-- Account changes invalidate older status reads; late initial/polling results and errors no longer overwrite the account UI after sign-out or import.
-
-- 搜索、图片生成和编辑在 401 续约重试或续约失败时释放被丢弃的响应体；无法轮换时保留原响应诊断。仍仅重试一次，不新增生成或刷新策略。
-- Search and image generation/editing release discarded 401 bodies on OAuth retry or refresh failure, while preserving diagnostics when no rotation occurs. Existing single-retry policies are unchanged.
-- 搜索在结果解码后复检取消状态，不再把已取消请求的迟到结果返回为成功。
-- Search re-checks cancellation after decoding a response instead of returning a late success for a cancelled call.
-
-- 凭据读取与 getAuth 等待响应调用者取消，不中断其他调用者的共享凭据操作；搜索在此阶段取消会返回 WEB_ABORTED，且不会开始上游搜索。
-- Credential reads and getAuth waits honor caller cancellation without interrupting shared operations; search cancellation at this stage returns WEB_ABORTED without starting an upstream search.
-- 图片大图预览不再因卡片无关重渲染关闭；视频任务刷新或替换会取消旧的本地查询等待并忽略迟到结果，避免最新状态回退。
-- Image lightboxes survive unrelated card re-renders; video refresh/task replacement cancels older local query waits and ignores late results so newer task states win.
-
-- 导航标记搜索、媒体和网络页的未保存修改；保存反馈可被读屏宣布，账号读取期间额度不再提前提示登录。
-- Navigation marks unsaved Search, Media and Network edits; save feedback is accessible, and quota waits for account loading instead of prematurely prompting sign-in.
-- 修复迟到的首屏选项或代理响应覆盖草稿、已保存值或重置结果；代理保存同步服务端规范化值。重启文案适用于桌面与 Web，代理说明涵盖官方额度请求。
-- Late initial option/proxy reads no longer roll back drafts, saves or resets; proxy saves synchronize normalized server values. Restart wording applies to Desktop and Web, and proxy help covers billing requests.
-
-- 设置按账号、模型、搜索与对话、媒体与任务、网络分页；公共状态与导航固定在顶部，分页保存和重置不影响其他页草稿。
-- Settings now separate Account, Models, Search & chat, Media & tasks, and Network with sticky shared status/navigation and page-scoped option saves/resets.
-- 账号页读取官方共享订阅额度，复用 OAuth 与代理；成功结果按账号缓存 60 秒，不估算未报告的额度或余额。
-- Account reads official shared subscription quota using existing OAuth/proxy, with a 60-second account-scoped successful-result cache and no fabricated usage or balances.
-- 保留视频默认关闭、账号隔离与不自动重复提交的计费边界；此前复审修复已覆盖凭据等待截止、查询能力状态及未知状态脱敏。
-- Video remains opt-in, account-isolated and never automatically resubmitted; review fixes cover credential deadlines, poll capability states and sanitized unknown status diagnostics.
+- 修复账号切换时旧身份读取进入视频任务或下载的问题，同账号并发读取仍可用；额度请求超时、取消或卸载时释放响应与读取器，不额外发起请求。
+- Fixed stale account identities reaching video tasks or downloads while preserving concurrent reads for the same account. Quota timeouts, cancellation, and unload now release responses and readers without extra requests.
+- 登录入口明确兼容 X Subscription 与原 SuperGrok / X Premium 订阅，共用官方 Grok OAuth 流程；已登录账号增加重新授权入口与账号替换确认弹窗，并提供官方订阅仪表盘管理链接。
+- Sign-in explicitly supports The X Subscription alongside legacy SuperGrok / X Premium using official Grok OAuth; signed-in users can reauthorize to switch accounts with replacement confirmation, and the account panel links directly to the official subscription dashboard.
+- 账号页新增官方共享订阅额度展示，复用现有 OAuth 与代理配置；成功结果按账号缓存 60 秒（无自动轮询），严格展示官方接口返回的百分比、重置周期与预付余额，不估算 token 余额或编造未报告数据，统一计费标记仅读取官方布尔值。
+- Account settings now display official shared subscription quota reusing existing OAuth and proxy settings; successful results are cached for 60 seconds per account without automatic polling, strictly displaying reported percentages, billing periods, and prepaid balances without estimating tokens or fabricating unreported fields.
+- 设置面板重构为五大独立分页（账号、模型、搜索与对话、媒体与任务、网络），顶部常驻吸顶状态与导航并适配宿主弹窗背景；保存与重置操作严格隔离至当前页，切换分页保留其他页未保存草稿，重置媒体页同步撤销媒体确认。
+- Settings are now reorganized into five tabs (Account, Models, Search & conversation, Media & tasks, Network) with a sticky status/navigation bar matching the host dialog theme; save and reset actions are page-scoped while preserving unsaved drafts across tab navigation, and resetting media revokes risk acknowledgment.
+- 加固登录与凭据流程：轮询请求设置 10 秒超时并在组件卸载或新操作时取消，修复轮询挂起与排队堆积；授权失败保留诊断提示，取消或失败后恢复已保存凭据与状态，旧状态读取与迟到响应不再覆盖新状态。
+- Hardened sign-in and credential flows: status polling enforces a 10-second deadline and cancels on unmount or user action, preventing request pileup; failure diagnostics are retained across re-renders, saved credentials restore gracefully on cancellation, and stale responses cannot overwrite newer states.
+- 完善请求取消与资源清理：凭据读取与等待严格遵循调用者取消信号；搜索与媒体请求在 401 重试或失败时及时释放响应体；搜索在结果解码后复检取消状态以防止迟到成功返回；视频任务替换时取消旧查询等待并隔离迟到错误。
+- Improved cancellation and resource cleanup: credential reads honor caller abort signals; search and media requests release response bodies on 401 retry or failure; search re-checks abort signals after decoding to prevent late completions; replaced video tasks cancel older waits and discard late errors.
 
 ## 0.2.3（2026-10-14）
 

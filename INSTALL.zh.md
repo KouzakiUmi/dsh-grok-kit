@@ -7,7 +7,7 @@
 ## 先决条件
 
 - PATH 上有 DeepSeek Harness 的 `dsh`（当前冻结支持 **0.2.0-rc.2**，配套 `@earendil-works/pi-ai@0.87.1`，Node 22/24；不再支持旧 0.1 宿主线）
-- xAI 允许走 OAuth API 的 SuperGrok 或 X Premium 账号
+- xAI 允许走 OAuth API 的 X Subscription 或原 SuperGrok / X Premium 账号
 - 能打开浏览器完成 device-code 授权
 
 ## 装进 web profile
@@ -27,7 +27,7 @@ pnpm dsh plugin --profile web add dsh-grok-kit
 也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.3
+dsh plugin --profile web add dsh-grok-kit@0.2.4
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -87,7 +87,7 @@ dsh plugin --profile web add .
 Web UI：
 
 1. `dsh web`（或 `dsh --profile web`）
-2. 设置 → xAI Grok → 使用 SuperGrok 登录
+2. 设置 → xAI Grok → 登录 Grok / X 订阅（已登录时为“重新登录”以切换账号）
 3. 在浏览器里批准
 4. 模型选择器里选 `xai-oauth` 下的主线 Grok 模型（如 `grok-4.6`；通常会自动选中偏好型号）
 
@@ -110,7 +110,7 @@ Web UI：
 
 ## 代理
 
-可选。在 设置 → xAI Grok → 网络代理（仅 xAI）里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。只对 x.ai 流量生效。
+可选。在 设置 → xAI Grok → 网络页的“网络代理（仅 xAI）”里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。代理对 x.ai 与 Grok 官方额度请求生效，其余请求不变。
 
 ## 卸载
 

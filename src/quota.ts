@@ -224,22 +224,39 @@ export function normalizeSuperGrokQuota(
   return percent === undefined ? details : { ...details, usedPercent: percent, remainingPercent: 100 - percent }
 }
 
+/** Release an unread response without letting a broken cancel exceed the budget. */
+function discardResponse(response: Response): void {
+  try { void response.body?.cancel().catch(() => undefined) } catch { /* Best effort. */ }
+}
+
 /** Bounded JSON read: hard byte ceiling, then a strict JSON parse. */
-export async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
+export async function readBoundedJson(response: Response, maxBytes: number, signal?: AbortSignal): Promise<unknown> {
+  if (signal?.aborted) {
+    discardResponse(response)
+    signal.throwIfAborted()
+  }
   const body = response.body
   if (body === null) throw new Error('quota response has no body')
   const reader = body.getReader()
   const chunks: Uint8Array[] = []
   let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > maxBytes) {
-      void reader.cancel().catch(() => undefined)
-      throw new Error(`quota response body exceeded ${maxBytes} bytes`)
+  let completed = false
+  try {
+    for (;;) {
+      const pending = reader.read()
+      const { done, value } = signal === undefined ? await pending : await raceAbort(pending, signal)
+      if (done) { completed = true; break }
+      size += value.byteLength
+      if (size > maxBytes) throw new Error(`quota response body exceeded ${maxBytes} bytes`)
+      chunks.push(value)
     }
-    chunks.push(value)
+  } finally {
+    // The reader owns a locked body: response.body.cancel() cannot cancel it.
+    // Do not await cancellation; transports may ignore it or never settle it.
+    if (!completed) {
+      try { void reader.cancel().catch(() => undefined) } catch { /* Best effort. */ }
+    }
+    reader.releaseLock()
   }
   const text = Buffer.concat(chunks).toString('utf8').trim()
   if (text.length === 0) throw new Error('quota response body is empty')
@@ -251,18 +268,21 @@ export async function readBoundedJson(response: Response, maxBytes: number): Pro
  * honor the shared budget signal: reject on abort and remove the listener
  * once either side settles. The underlying promise keeps running — its owner
  * (token source / fetch) is responsible for it, and dispose() aborts the
- * shared signal it was handed.
+ * shared signal it was handed. Fetch callers also discard any response that
+ * arrives after the race has already been aborted.
  */
-function raceAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+function raceAbort<T>(promise: Promise<T>, signal: AbortSignal, discard?: (value: T) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => { reject(signal.reason) }
+    let aborted = false
+    const onAbort = () => { aborted = true; reject(signal.reason) }
     // Observe the underlying promise first. get() after dispose() races an
     // already-aborted combined signal; returning before this handler would
     // leave a later identity/token rejection unhandled and can take down Node.
     promise.then(
       value => {
         signal.removeEventListener('abort', onAbort)
-        resolve(value)
+        if (aborted) discard?.(value)
+        else resolve(value)
       },
       error => {
         signal.removeEventListener('abort', onAbort)
@@ -437,9 +457,10 @@ export class SuperGrokQuotaClient {
       this.dropCache()
       return { state: 'signed-out' }
     }
-    let round = await raceAbort(this.fetchRound(bearer, combined), combined)
+    let round = await this.fetchRound(bearer, combined)
+    if (combined.aborted) { discardResponse(round.billing); combined.throwIfAborted() }
     if (round.billing.status === 401) {
-      void round.billing.body?.cancel().catch(() => undefined)
+      discardResponse(round.billing)
       // At most one refresh, on the shared official chain; 403/429 never
       // refresh. A refresh that returns nothing new cannot be retried.
       const refreshed = await raceAbort(Promise.resolve(this.tokens.refresh?.(bearer, combined)), combined)
@@ -447,19 +468,20 @@ export class SuperGrokQuotaClient {
         return { state: 'error', reason: 'auth' }
       }
       bearer = refreshed
-      round = await raceAbort(this.fetchRound(bearer, combined), combined)
+      round = await this.fetchRound(bearer, combined)
+      if (combined.aborted) { discardResponse(round.billing); combined.throwIfAborted() }
       if (round.billing.status === 401) {
-        void round.billing.body?.cancel().catch(() => undefined)
+        discardResponse(round.billing)
         return { state: 'error', reason: 'auth' }
       }
     }
     if (!round.billing.ok) {
-      void round.billing.body?.cancel().catch(() => undefined)
+      discardResponse(round.billing)
       return { state: 'error', reason: round.billing.status === 403 ? 'restricted' : 'temporary' }
     }
     let billingBody: unknown
     try {
-      billingBody = await raceAbort(readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES), combined)
+      billingBody = await readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES, combined)
     } catch (error) {
       // Aborts (deadline/disposal/caller) propagate to the state mapping in
       // get(); a readable but unusable body is an invalid response.
@@ -492,11 +514,33 @@ export class SuperGrokQuotaClient {
     // Settings runs under its own shorter budget so a hung plan endpoint
     // cannot eat the whole-get deadline and drag a successful billing read
     // down with it.
-    const [billing, settings] = await Promise.all([
-      this.fetcher(GROK_BILLING_URL, quotaRequestInit(bearer, signal)),
-      this.readSettings(bearer, signal),
-    ])
-    return { billing, settings }
+    const failed = new AbortController()
+    const roundSignal = AbortSignal.any([signal, failed.signal])
+    let billing: Response | undefined
+    const discardBilling = () => {
+      if (billing !== undefined) { discardResponse(billing); billing = undefined }
+    }
+    roundSignal.addEventListener('abort', discardBilling, { once: true })
+    try {
+      const [response, settings] = await Promise.all([
+        raceAbort(this.fetcher(GROK_BILLING_URL, quotaRequestInit(bearer, roundSignal)), roundSignal, discardResponse)
+          .then(response => {
+            billing = response
+            if (roundSignal.aborted) { discardBilling(); roundSignal.throwIfAborted() }
+            return response
+          }),
+        this.readSettings(bearer, roundSignal),
+      ])
+      roundSignal.throwIfAborted()
+      return { billing: response, settings }
+    } catch (error) {
+      // A billing failure must also stop settings, including its active reader.
+      failed.abort(error)
+      discardBilling()
+      throw error
+    } finally {
+      roundSignal.removeEventListener('abort', discardBilling)
+    }
   }
 
   /**
@@ -508,13 +552,15 @@ export class SuperGrokQuotaClient {
     const settingsBudget = Math.min(QUOTA_SETTINGS_TIMEOUT_MS, Math.floor(this.timeoutMs / 2))
     const settingsSignal = AbortSignal.any([wholeSignal, AbortSignal.timeout(settingsBudget)])
     try {
-      return await raceAbort((async () => {
-        const response = await this.fetcher(GROK_SETTINGS_URL, quotaRequestInit(bearer, settingsSignal))
-        if (response.ok) return await readBoundedJson(response, MAX_QUOTA_RESPONSE_BYTES)
-        // A non-ok settings response must not hold the connection open.
-        void response.body?.cancel().catch(() => undefined)
-        return undefined
-      })(), settingsSignal)
+      const response = await raceAbort(
+        this.fetcher(GROK_SETTINGS_URL, quotaRequestInit(bearer, settingsSignal)), settingsSignal, discardResponse,
+      )
+      // Fetch may settle just before the abort, with this continuation queued.
+      if (settingsSignal.aborted) { discardResponse(response); settingsSignal.throwIfAborted() }
+      if (response.ok) return await readBoundedJson(response, MAX_QUOTA_RESPONSE_BYTES, settingsSignal)
+      // A non-ok settings response must not hold the connection open.
+      discardResponse(response)
+      return undefined
     } catch {
       // Timeout, status, or parse failure: the plan falls back to the
       // billing body tier (normalizeSuperGrokQuota handles undefined).

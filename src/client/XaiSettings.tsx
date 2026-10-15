@@ -23,6 +23,7 @@ const MODELS_PATH = '/plugins/dsh-grok-kit/auth/models'
 const PROXY_PATH = '/plugins/dsh-grok-kit/auth/proxy'
 const OPTIONS_PATH = '/plugins/dsh-grok-kit/auth/options'
 const POLL_INTERVAL_MS = 1_000
+const STATUS_TIMEOUT_MS = 10_000
 
 type OptionKey =
   | 'backendSearch'
@@ -242,11 +243,12 @@ function displayName(id: string): string {
     .join(' ')
 }
 
-async function jsonRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function jsonRequest<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
     method,
     headers: { accept: 'application/json', ...body === undefined ? {} : { 'content-type': 'application/json' } },
     credentials: 'same-origin',
+    ...signal === undefined ? {} : { signal },
     ...body === undefined ? {} : { body: JSON.stringify(body) },
   })
   const value: unknown = await response.json().catch(() => undefined)
@@ -265,7 +267,13 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const [status, setStatus] = useState<AccountStatus>({ status: 'loading' })
   // Account mutations invalidate older status reads, including login polling.
   const statusRequestRef = useRef(0)
-  const statusInFlightRef = useRef(false)
+  const statusAbortRef = useRef<AbortController | undefined>(undefined)
+  const invalidateStatusRead = useCallback(() => {
+    ++statusRequestRef.current
+    const pending = statusAbortRef.current
+    statusAbortRef.current = undefined
+    pending?.abort()
+  }, [])
   const [busy, setBusy] = useState(false)
   const [proxyUrl, setProxyUrl] = useState('')
   const [savedProxyUrl, setSavedProxyUrl] = useState('')
@@ -520,22 +528,38 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     // every tick used to bump the sequence and doom every completion, leaving
     // the UI in signing-in forever while requests kept stacking up. A tick
     // that finds a read in flight just skips; the next one runs after it.
-    if (statusInFlightRef.current) return
-    statusInFlightRef.current = true
+    if (statusAbortRef.current !== undefined) return
+    const abort = new AbortController()
+    statusAbortRef.current = abort
     const request = ++statusRequestRef.current
+    let rejectAborted!: (reason?: unknown) => void
+    const aborted = new Promise<never>((_resolve, reject) => { rejectAborted = reject })
+    const onAbort = () => rejectAborted(abort.signal.reason)
+    abort.signal.addEventListener('abort', onAbort, { once: true })
+    const timer = setTimeout(() => { abort.abort(new Error(t('requestFailed'))) }, STATUS_TIMEOUT_MS)
     try {
-      const value = await jsonRequest<AccountStatus>(STATUS_PATH)
+      // Cover both fetch and body decoding, even if a transport ignores abort.
+      const value = await Promise.race([jsonRequest<AccountStatus>(STATUS_PATH, 'GET', undefined, abort.signal), aborted])
       if (request === statusRequestRef.current) setStatus(value)
     } catch (error: unknown) {
       if (request === statusRequestRef.current) {
-        setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+        // A transient read failure must not stop OAuth polling or hide the
+        // device code. The next tick can observe server-side completion.
+        setStatus(previous => previous.status === 'signing-in'
+          ? previous
+          : { status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
       }
     } finally {
-      statusInFlightRef.current = false
+      clearTimeout(timer)
+      abort.signal.removeEventListener('abort', onAbort)
+      if (statusAbortRef.current === abort) statusAbortRef.current = undefined
     }
   }, [t])
 
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    void refresh()
+    return invalidateStatusRead
+  }, [refresh, invalidateStatusRead])
   useEffect(() => { void loadProxy() }, [loadProxy])
   useEffect(() => { void loadOptions() }, [loadOptions])
   useEffect(() => {
@@ -554,7 +578,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       if (!window.confirm(t('confirmLoginPrivate'))) return
     }
     // Only once the user actually committed to a sign-in.
-    ++statusRequestRef.current
+    invalidateStatusRead()
     setAccountGeneration(generation => generation + 1)
     const popup = window.open('about:blank', '_blank')
     if (popup !== null) popup.opener = null
@@ -585,13 +609,13 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const importGrok = async (): Promise<void> => {
     // Hide old account data during import and remount again after it commits.
     // A pre-request bump alone could mount a panel that fetches the old account.
-    ++statusRequestRef.current
+    invalidateStatusRead()
     setAccountGeneration(generation => generation + 1)
     setStatus({ status: 'loading' })
     setBusy(true)
     try {
       const imported = await jsonRequest<AccountStatus>(IMPORT_PATH, 'POST')
-      ++statusRequestRef.current
+      invalidateStatusRead()
       setAccountGeneration(generation => generation + 1)
       setStatus(imported)
     } catch (error: unknown) {
@@ -602,7 +626,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const saveModels = async (selected: string[]): Promise<void> => {
-    ++statusRequestRef.current
+    invalidateStatusRead()
     setBusy(true)
     try {
       setStatus(await jsonRequest<AccountStatus>(MODELS_PATH, 'POST', { selected }))
@@ -621,7 +645,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     // and task panels: while the sign-out is still in flight they would
     // otherwise re-read the account that is on its way out.
     setStatus({ status: 'loading' })
-    ++statusRequestRef.current
+    invalidateStatusRead()
     setAccountGeneration(generation => generation + 1)
     setBusy(true)
     try {

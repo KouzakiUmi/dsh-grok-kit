@@ -22,7 +22,7 @@ const runtime={exports:{}};
 new Function('require','module','exports','process',${encode(jsx)})(name=>{if(name==='react')return window.React;throw Error(name)},runtime,runtime.exports,{env:{NODE_ENV:'production'}});
 const client={exports:{}};
 new Function('require','module','exports',${encode(client)})(name=>{if(name==='react')return window.React;if(name==='react/jsx-runtime')return runtime.exports;throw Error(name)},client,client.exports);
-const registrations=[],copies={}; let language='zh',signedIn=true,quotaError=false,generation=0; const options={backendSearch:false,nestedSearchTools:true,statefulResponses:false,imagineTool:true,videoTool:false,videoModel:'grok-imagine-video-1.5',videoMaxBytes:104857600,searchModel:'grok-build-0.1',searchMaxResults:8,webSearchTimeoutMs:60000,xSearchTimeoutMs:120000}; let stored={}; let proxy='';
+const registrations=[],copies={}; let language='zh',signedIn=true,quotaError=false,generation=0; const options={backendSearch:false,nestedSearchTools:true,statefulResponses:false,imagineTool:false,editTool:false,videoTool:false,mediaRiskAcknowledged:false,videoModel:'grok-imagine-video-1.5',videoMaxBytes:104857600,searchModel:'grok-build-0.1',searchMaxResults:8,webSearchTimeoutMs:60000,xSearchTimeoutMs:120000}; let stored={}; let proxy='';
 window.__previewRequests=[];
 window.fetch=async (input,init={})=>{
  const path=typeof input==='string'?input:input.url; window.__previewRequests.push({path,method:init.method??'GET'}); if(init.signal?.aborted)throw init.signal.reason;
@@ -33,7 +33,7 @@ window.fetch=async (input,init={})=>{
  else if(path.endsWith('/quota'))data=quotaError?{state:'error',reason:'temporary'}:{state:'available',usedPercent:42,remainingPercent:58,period:'week',plan:'SuperGrok',prepaidBalanceUsd:0,checkedAt:'2026-10-13T06:00:00.000Z',resetAt:'2026-10-14T11:18:57.966Z'};
  else if(path.endsWith('/capabilities'))data={features:['video','voice','code','image-generation'].map(id=>({id,state:'unverified'})),videoEnabled:false,quota:{state:'unavailable',message:''}};
  else if(path.endsWith('/video/tasks'))data={tasks:[]};
- else if(path.endsWith('/auth/logout')){signedIn=false;data={ok:true};}
+ else if(path.endsWith('/auth/logout')){signedIn=false;data={status:'signed-out'};}
  else return new Response(JSON.stringify({error:'Preview blocks this action'}),{status:409});
  return new Response(JSON.stringify(data),{headers:{'content-type':'application/json'}});
 };

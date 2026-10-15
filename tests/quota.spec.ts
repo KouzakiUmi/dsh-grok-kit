@@ -88,6 +88,23 @@ function makeClient(overrides: {
   })
 }
 
+/** A real stream whose cancellation hook never settles, like a broken transport. */
+function hangingResponse(status = 200) {
+  const cancel = vi.fn(() => new Promise<void>(() => {}))
+  const response = new Response(new ReadableStream<Uint8Array>({
+    start(controller) { controller.enqueue(new TextEncoder().encode('{"config":')) },
+    cancel,
+  }), { status })
+  return { response, cancel }
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
+  return { promise, resolve, reject }
+}
+
 describe('normalizeSuperGrokQuota', () => {
   it('maps creditUsagePercent, weekly period, plan, and prepaid cents', () => {
     expect(normalizeSuperGrokQuota(BILLING_SUCCESS, SETTINGS_SUCCESS)).toEqual({
@@ -637,6 +654,153 @@ describe('SuperGrokQuotaClient.get', () => {
       globalThis.fetch = original
     }
   })
+})
+
+describe('quota response cleanup', () => {
+  it.each(['deadline', 'caller', 'dispose'] as const)('cancels and unlocks a hanging billing reader on %s without awaiting cancel', async stop => {
+    const { response, cancel } = hangingResponse()
+    const { fetcher, calls } = makeFetch(() => response)
+    const controller = new AbortController()
+    const client = makeClient({ fetch: fetcher, timeoutMs: stop === 'deadline' ? 40 : 1000 })
+    const reason = new Error('caller cancelled')
+    const result = client.get(controller.signal).catch(error => error as Error)
+    await vi.waitFor(() => expect(response.body!.locked).toBe(true), { interval: 1 })
+    if (stop === 'caller') controller.abort(reason)
+    if (stop === 'dispose') client.dispose()
+    expect(await result).toEqual(stop === 'caller' ? reason : { state: 'error', reason: 'temporary' })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(response.body!.locked).toBe(false)
+    expect(calls.map(call => call.url).sort()).toEqual([GROK_BILLING_URL, GROK_SETTINGS_URL].sort())
+    client.dispose()
+  }, 2000)
+
+  it.each(['caller', 'dispose'] as const)('cancels billing received while waiting for settings on %s', async stop => {
+    const { response, cancel } = hangingResponse()
+    const settings = deferred<Response>()
+    const { fetcher, calls } = makeFetch(() => response, () => settings.promise)
+    const controller = new AbortController()
+    const client = makeClient({ fetch: fetcher, timeoutMs: 1000 })
+    const reason = new Error('caller cancelled')
+    const result = client.get(controller.signal).catch(error => error as Error)
+    await vi.waitFor(() => expect(calls).toHaveLength(2), { interval: 1 })
+    // Billing is still waiting in Promise.all; no reader owns it yet.
+    expect(response.body!.locked).toBe(false)
+    if (stop === 'caller') controller.abort(reason)
+    else client.dispose()
+    expect(await result).toEqual(stop === 'caller' ? reason : { state: 'error', reason: 'temporary' })
+    expect(cancel).toHaveBeenCalledOnce()
+    const late = hangingResponse()
+    settings.resolve(late.response)
+    await vi.waitFor(() => expect(late.cancel).toHaveBeenCalledOnce(), { interval: 1 })
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
+
+  it.each(['deadline', 'caller', 'dispose'] as const)('discards a billing response that arrives after %s', async stop => {
+    const billing = deferred<Response>()
+    const { fetcher, calls } = makeFetch(() => billing.promise)
+    const controller = new AbortController()
+    const client = makeClient({ fetch: fetcher, timeoutMs: stop === 'deadline' ? 40 : 1000 })
+    const reason = new Error('caller cancelled')
+    const result = client.get(controller.signal).catch(error => error as Error)
+    await vi.waitFor(() => expect(calls).toHaveLength(2), { interval: 1 })
+    if (stop === 'caller') controller.abort(reason)
+    if (stop === 'dispose') client.dispose()
+    expect(await result).toEqual(stop === 'caller' ? reason : { state: 'error', reason: 'temporary' })
+    const late = hangingResponse()
+    const reader = vi.spyOn(late.response.body!, 'getReader')
+    billing.resolve(late.response)
+    await vi.waitFor(() => expect(late.cancel).toHaveBeenCalledOnce(), { interval: 1 })
+    expect(reader).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
+
+  it.each(['caller', 'dispose'] as const)('cancels both billing and an active settings reader on %s', async stop => {
+    const billing = hangingResponse()
+    const settings = hangingResponse()
+    const { fetcher, calls } = makeFetch(() => billing.response, () => settings.response)
+    const controller = new AbortController()
+    const client = makeClient({ fetch: fetcher, timeoutMs: 1000 })
+    const reason = new Error('caller cancelled')
+    const result = client.get(controller.signal).catch(error => error as Error)
+    await vi.waitFor(() => expect(settings.response.body!.locked).toBe(true), { interval: 1 })
+    if (stop === 'caller') controller.abort(reason)
+    else client.dispose()
+    expect(await result).toEqual(stop === 'caller' ? reason : { state: 'error', reason: 'temporary' })
+    expect(billing.cancel).toHaveBeenCalledOnce()
+    expect(settings.cancel).toHaveBeenCalledOnce()
+    expect(settings.response.body!.locked).toBe(false)
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
+
+  it('cancels a hanging settings reader at its own budget while retaining billing', async () => {
+    const { response, cancel } = hangingResponse()
+    const { fetcher, calls } = makeFetch(() => jsonBody(BILLING_SUCCESS), () => response)
+    const client = makeClient({ fetch: fetcher, timeoutMs: 80 })
+    expect(await client.get()).toMatchObject({ state: 'available', usedPercent: 42.5 })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(response.body!.locked).toBe(false)
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
+
+  it('discards settings arriving after its optional budget and keeps the cached billing result', async () => {
+    const settings = deferred<Response>()
+    const { fetcher, calls } = makeFetch(() => jsonBody(BILLING_SUCCESS), () => settings.promise)
+    const client = makeClient({ fetch: fetcher, timeoutMs: 80 })
+    const snapshot = await client.get()
+    expect(snapshot).toMatchObject({ state: 'available', usedPercent: 42.5 })
+    const late = hangingResponse()
+    const reader = vi.spyOn(late.response.body!, 'getReader')
+    settings.resolve(late.response)
+    await vi.waitFor(() => expect(late.cancel).toHaveBeenCalledOnce(), { interval: 1 })
+    expect(reader).not.toHaveBeenCalled()
+    expect(await client.get()).toBe(snapshot)
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
+
+  it('cancels a rejected settings status without waiting for its transport cleanup', async () => {
+    const { response, cancel } = hangingResponse(500)
+    const { fetcher, calls } = makeFetch(() => jsonBody(BILLING_SUCCESS), () => response)
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toMatchObject({ state: 'available', usedPercent: 42.5 })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
+
+  it('cancels an oversized settings reader and degrades to billing without another request', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => {}))
+    const response = new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new Uint8Array(MAX_QUOTA_RESPONSE_BYTES + 1)) },
+      cancel,
+    }))
+    const { fetcher, calls } = makeFetch(() => jsonBody(BILLING_SUCCESS), () => response)
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toMatchObject({ state: 'available', usedPercent: 42.5 })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(response.body!.locked).toBe(false)
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
+
+  it('stops an active settings reader when the billing fetch fails', async () => {
+    const billing = deferred<Response>()
+    const { response, cancel } = hangingResponse()
+    const { fetcher, calls } = makeFetch(() => billing.promise, () => response)
+    const client = makeClient({ fetch: fetcher })
+    const pending = client.get()
+    await vi.waitFor(() => expect(response.body!.locked).toBe(true), { interval: 1 })
+    billing.reject(new Error('synthetic billing failure'))
+    expect(await pending).toEqual({ state: 'error', reason: 'temporary' })
+    expect(cancel).toHaveBeenCalledOnce()
+    expect(response.body!.locked).toBe(false)
+    expect(calls).toHaveLength(2)
+    client.dispose()
+  }, 2000)
 })
 
 describe('quota snapshot shape', () => {

@@ -97,7 +97,7 @@ dsh web
 You can also pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.3
+dsh plugin --profile web add dsh-grok-kit@0.2.4
 dsh web
 ```
 
@@ -110,7 +110,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.3** adds experimental video generation, task recovery, and session video cards, and fixes rejected Settings requests in the desktop app. Image generation, editing, and video are all off by default; upgrading does not inherit old media enablement. Confirm the risks in Settings, save, and restart before using them. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.4** updates The X Subscription sign-in entry with reauthorization, account switching, and shared subscription quota (cached per account for 60 seconds, without estimating missing values). Settings now have five tabs with page-scoped saves and retained drafts; hung login polls and stale status responses are fixed. Image generation, editing, and video remain off by default. Previously acknowledged choices are preserved; legacy enablement without acknowledgment stays inactive. To enable a tool for the first time, confirm the risks under "Media & tasks", save, and restart. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
@@ -144,7 +144,7 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 
 ### Video tasks (experimental)
 
-Current source adds opt-in `grok_video_generate` / `grok_video_status` / `grok_video_resume` for image-to-video, durable task recovery, and account-scoped downloads. Settings are separated into Account, Models, Search & chat, Media & tasks, and Network, with a sticky shared status and navigation. Account reads official shared subscription quota through the existing OAuth login; only reported percentages, periods and optional balances are displayed, never token-based estimates. Media shows local capability observations and tasks. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. See the [video guide](VIDEO.md) for configuration and limitations.
+Provides image-to-video, durable task recovery, and account-scoped downloads, off by default via `grok_video_generate` / `grok_video_status` / `grok_video_resume`. Settings are separated into Account, Models, Search & conversation, Media & tasks, and Network, with sticky shared status and navigation. Account reads official shared subscription quota through the existing OAuth login; only reported percentages, periods and optional balances are displayed, never token-based estimates. Media shows local capability observations and tasks. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. See the [video guide](VIDEO.md) for configuration and limitations.
 
 ### Enabling media tools and understanding the risks
 
@@ -152,7 +152,7 @@ Image generation, image editing, and video are all off by default. In DeepSeek H
 
 A few things to know up front: this is third-party, unofficial access. Whether it works depends on your xAI account eligibility and xAI service rules, and access can be limited or paused at any time. Generation uses subscription quota or incurs charges. Prompts and input images are uploaded to xAI — do not send sensitive content or material you have no rights to. "Stop" in the UI only stops waiting; it does not cancel a submitted task.
 
-Media switches do not inherit enablement from older versions: after updating, confirm once before first use. Confirmations persist across restarts. To control `imagineTool`, `editTool`, and `videoTool` separately, set them explicitly in config together with `mediaRiskAcknowledged: true` — a local informed choice, not a credential or permission. Resetting Media & tasks revokes consent. Saving a close stops the tools from answering calls immediately (submitted jobs are unaffected); with video off, its local task list, resume, and download routes are disabled too, and existing tasks and attachments stay stored.
+Legacy media enablement without acknowledgment stays inactive; confirm explicitly before first use. Acknowledged choices persist across upgrades and restarts. To control `imagineTool`, `editTool`, and `videoTool` separately, set them explicitly in config together with `mediaRiskAcknowledged: true` — a local informed choice, not a credential or permission. Resetting Media & tasks revokes consent. Saving a close stops the tools from answering calls immediately (submitted jobs are unaffected); with video off, its local task list, resume, and download routes are disabled too, and existing tasks and attachments stay stored.
 
 ## Configuration
 
@@ -178,7 +178,7 @@ Media switches do not inherit enablement from older versions: after updating, co
 
 The bundle defaults come from `cordis.patch.yml`. For a manually reduced or recomposed setup, inspect the final values with `dsh --profile web --dump-config`.
 
-Development settings split related keys between Search & chat and Media & tasks. Saves/resets apply only to the current page and drafts survive page switches (restart to apply; untouched keys still follow the bundle defaults). `proxyUrl` on Network applies immediately on save. See the [roadmap](ROADMAP.zh.md) for delivery status and future candidates.
+Settings split related keys between Search & chat and Media & tasks. Saves/resets apply only to the current page and drafts survive page switches (restart to apply; untouched keys still follow the bundle defaults). `proxyUrl` on Network applies immediately on save. See the [roadmap](ROADMAP.zh.md) for delivery status and future candidates.
 
 ## Sign-in document, proxy, and security boundaries
 

@@ -7,7 +7,7 @@ Idempotent runbook for humans and automation agents.
 ## Prerequisites
 
 - DeepSeek Harness `dsh` on PATH (frozen support for **0.2.0-rc.2** paired with `@earendil-works/pi-ai@0.87.1`, Node 22/24; compatibility with the legacy 0.1 line is no longer supported); a source checkout that runs `pnpm dsh` works too
-- A SuperGrok or X Premium account that xAI allows on the OAuth API
+- An X Subscription or legacy SuperGrok / X Premium account that xAI allows on the OAuth API
 - A browser you can use to approve the device-code login
 
 ## Install into the web profile
@@ -27,7 +27,7 @@ pnpm dsh plugin --profile web add dsh-grok-kit
 Or pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.3
+dsh plugin --profile web add dsh-grok-kit@0.2.4
 ```
 
 If `dsh` is not on PATH, run via pinned `npx`:
@@ -87,7 +87,7 @@ Routine development uses `npm ci` (or `npm install`) and `npm run check`. Runnin
 Web UI:
 
 1. `dsh web` (or `dsh --profile web`)
-2. Settings → xAI Grok → Sign in with SuperGrok
+2. Settings → xAI Grok → Sign in with Grok / X Subscription (or "Sign in again" to switch accounts when already signed in)
 3. Approve access in the browser
 4. Pick a mainline Grok model under `xai-oauth` in the model picker (for example `grok-4.6`; the preferred model is usually selected automatically)
 
@@ -110,7 +110,7 @@ Nested `grok_web_search` / `x_search` (a second `grok-build-0.1` hop) are regist
 
 ## Proxy
 
-Optional. Set it from Settings → xAI Grok → Network proxy (xAI only), or via `DSH_XAI_PROXY` (e.g. `http://127.0.0.1:8080`) in the dsh environment / config. Applies to x.ai traffic only.
+Optional. Set it from Settings → xAI Grok → Network tab under "Network proxy (xAI only)", or via `DSH_XAI_PROXY` (e.g. `http://127.0.0.1:8080`) in the dsh environment / config. Routes x.ai and official Grok billing requests through this proxy; other requests stay direct.
 
 ## Uninstall
 

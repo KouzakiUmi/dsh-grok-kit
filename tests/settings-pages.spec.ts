@@ -40,6 +40,7 @@ const probe = vi.hoisted(() => ({
   calls: [] as string[],
   bodies: [] as unknown[],
   initialStatus: undefined as { status: string; grokImportAvailable?: boolean } | undefined,
+  stateWrites: 0,
 }))
 
 vi.mock('react', () => {
@@ -49,18 +50,22 @@ vi.mock('react', () => {
   let slots: unknown[] = []
   let cursor = 0
   let effectCursor = 0
-  let effects: Array<[number, () => void]> = []
+  let effects: Array<[number, () => void | (() => void)]> = []
   const ranEffects = new Set<number>()
+  let cleanups: Array<() => void> = []
   let draw: (() => void) | null = null
   let lastTree: unknown = undefined
   return {
     __harness: {
       reset(): void {
+        for (const cleanup of cleanups) cleanup()
+        cleanups = []
         slots = []
         cursor = 0
         effectCursor = 0
         effects = []
         ranEffects.clear()
+        probe.stateWrites = 0
       },
       mount(component: (props: unknown) => unknown, props: unknown): void {
         draw = () => {
@@ -71,7 +76,8 @@ vi.mock('react', () => {
           for (const [index, effect] of effects) {
             if (ranEffects.has(index)) continue
             ranEffects.add(index)
-            effect()
+            const cleanup = effect()
+            if (typeof cleanup === 'function') cleanups.push(cleanup)
           }
         }
         draw()
@@ -80,9 +86,14 @@ vi.mock('react', () => {
         draw?.()
         return lastTree
       },
+      unmount(): void {
+        draw = null
+        for (const cleanup of cleanups) cleanup()
+        cleanups = []
+      },
     },
     useCallback: (fn: unknown) => fn,
-    useEffect: (effect: () => void) => {
+    useEffect: (effect: () => void | (() => void)) => {
       effects.push([effectCursor++, effect])
     },
     useMemo: (fn: () => unknown) => fn(),
@@ -100,6 +111,7 @@ vi.mock('react', () => {
       }
       if (!(index in slots)) slots[index] = typeof initial === 'function' ? (initial as () => unknown)() : initial
       const set = (next: unknown): void => {
+        probe.stateWrites += 1
         slots[index] = typeof next === 'function' ? (next as (previous: unknown) => unknown)(slots[index]) : next
         draw?.()
       }
@@ -128,7 +140,7 @@ interface FakeElement {
 const LEAF = new Set<unknown>([QuotaView, CapabilitiesView])
 
 const harness = (React as unknown as {
-  __harness: { reset(): void; mount(component: (props: unknown) => unknown, props: unknown): void; tree(): unknown }
+  __harness: { reset(): void; mount(component: (props: unknown) => unknown, props: unknown): void; tree(): unknown; unmount(): void }
 }).__harness
 
 const t = (key: keyof typeof en): string => en[key]
@@ -313,6 +325,8 @@ const settled = async (): Promise<void> => {
 }
 
 afterEach(() => {
+  harness.unmount()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   probe.initialStatus = undefined
 })
@@ -754,6 +768,99 @@ describe('five-page settings section', () => {
     // Authorization completed while polling was serialized: it lands this time.
     pending[1]!(new Response(JSON.stringify(SIGNED_IN), { status: 200, headers: { 'content-type': 'application/json' } }))
     await vi.waitFor(() => expect(texts(now()).join(' ')).toContain(en.signedIn))
+  })
+
+  it.each(['fetch', 'body'] as const)('recovers from a stalled auth-status %s without losing the login challenge', async phase => {
+    vi.useFakeTimers()
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    const intervals: Array<() => void> = []
+    vi.stubGlobal('window', {
+      setInterval: vi.fn((handler: () => void) => { intervals.push(handler); return intervals.length }),
+      clearInterval: vi.fn(),
+    })
+    const signals: Array<AbortSignal | null | undefined> = []
+    let finishLate!: () => void
+    vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
+      if (!path.endsWith('/auth/status')) return originalFetch(path, init)
+      signals.push(init?.signal)
+      if (signals.length > 1) return Promise.resolve(new Response(JSON.stringify(SIGNED_IN)))
+      // Deliberately ignore abort: the deadline must cover both fetch and JSON
+      // decoding, and a late old result must not overwrite a newer poll.
+      if (phase === 'fetch') return new Promise<Response>(resolve => {
+        finishLate = () => resolve(new Response(JSON.stringify({ status: 'signed-out' })))
+      })
+      return Promise.resolve({ ok: true, json: () => new Promise(resolve => {
+        finishLate = () => resolve({ status: 'signed-out' })
+      }) } as Response)
+    }))
+    mount({ status: 'signing-in', url: 'https://example.invalid/device', userCode: 'TEST-CODE' } as { status: string })
+    await vi.advanceTimersByTimeAsync(0)
+    intervals[0]!()
+    expect(signals).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(signals[0]?.aborted).toBe(true)
+    expect(texts(now()).join(' ')).toContain('TEST-CODE')
+    expect(texts(now()).join(' ')).toContain(en.signingIn)
+    intervals[0]!()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(signals).toHaveLength(2)
+    expect(texts(now()).join(' ')).toContain(en.signedIn)
+    finishLate()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(texts(now()).join(' ')).toContain(en.signedIn)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('aborts a stalled status read on unmount and ignores its late failure', async () => {
+    vi.useFakeTimers()
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    let signal: AbortSignal | null | undefined
+    let rejectLate!: (error: Error) => void
+    vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
+      if (!path.endsWith('/auth/status')) return originalFetch(path, init)
+      signal = init?.signal
+      return new Promise<Response>((_resolve, reject) => { rejectLate = reject })
+    }))
+    mount()
+    await vi.advanceTimersByTimeAsync(0)
+    harness.unmount()
+    const writes = probe.stateWrites
+    expect(signal?.aborted).toBe(true)
+    rejectLate(new Error('late status failure'))
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(probe.stateWrites).toBe(writes)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('cancels an obsolete read when login starts and ignores its late result', async () => {
+    vi.useFakeTimers()
+    stubFetch({ '/auth/login': { url: 'https://example.invalid/device', userCode: 'NEW-CODE' } })
+    const originalFetch = globalThis.fetch
+    vi.stubGlobal('window', {
+      open: vi.fn(() => null),
+      confirm: vi.fn(() => true),
+      setInterval: vi.fn(),
+      clearInterval: vi.fn(),
+    })
+    const signals: Array<AbortSignal | null | undefined> = []
+    const pending: Array<(response: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
+      if (!path.endsWith('/auth/status')) return originalFetch(path, init)
+      signals.push(init?.signal)
+      return new Promise<Response>(resolve => { pending.push(resolve) })
+    }))
+    mount({ status: 'signed-out' })
+    ;(button(now(), en.login).props.onClick as () => void)()
+    expect(signals[0]?.aborted).toBe(true)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(texts(now()).join(' ')).toContain('NEW-CODE')
+    pending[0]!(new Response(JSON.stringify({ status: 'signed-out' })))
+    await vi.advanceTimersByTimeAsync(0)
+    expect(texts(now()).join(' ')).toContain(en.signingIn)
+    expect(texts(now()).join(' ')).toContain('NEW-CODE')
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('gives every option field exactly one page', () => {
