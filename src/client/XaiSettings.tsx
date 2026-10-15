@@ -265,6 +265,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const [status, setStatus] = useState<AccountStatus>({ status: 'loading' })
   // Account mutations invalidate older status reads, including login polling.
   const statusRequestRef = useRef(0)
+  const statusInFlightRef = useRef(false)
   const [busy, setBusy] = useState(false)
   const [proxyUrl, setProxyUrl] = useState('')
   const [savedProxyUrl, setSavedProxyUrl] = useState('')
@@ -515,6 +516,12 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const refresh = useCallback(async () => {
+    // Serialize polls: if /auth/status is slower than the 1-second interval,
+    // every tick used to bump the sequence and doom every completion, leaving
+    // the UI in signing-in forever while requests kept stacking up. A tick
+    // that finds a read in flight just skips; the next one runs after it.
+    if (statusInFlightRef.current) return
+    statusInFlightRef.current = true
     const request = ++statusRequestRef.current
     try {
       const value = await jsonRequest<AccountStatus>(STATUS_PATH)
@@ -523,6 +530,8 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       if (request === statusRequestRef.current) {
         setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
       }
+    } finally {
+      statusInFlightRef.current = false
     }
   }, [t])
 

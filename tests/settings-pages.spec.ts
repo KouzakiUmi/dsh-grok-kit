@@ -715,6 +715,47 @@ describe('five-page settings section', () => {
     expect(countOf('/auth/status')).toBeGreaterThan(1)
   })
 
+  it('serializes auth-status polls so a slow endpoint cannot wedge signing-in', async () => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    const intervals: Array<() => void> = []
+    vi.stubGlobal('window', {
+      open: vi.fn(() => null),
+      confirm: vi.fn(() => true),
+      setInterval: vi.fn((handler: () => void) => { intervals.push(handler); return intervals.length }),
+      clearInterval: vi.fn(),
+    })
+    // Every /auth/status read hangs until the test resolves it, FIFO.
+    const pending: Array<(response: Response) => void> = []
+    vi.stubGlobal('fetch', vi.fn((path: string, init?: RequestInit) => {
+      if (path.endsWith('/auth/status')) {
+        return new Promise<Response>(resolve => { pending.push(resolve) })
+      }
+      return (originalFetch as (path: string, init?: RequestInit) => Promise<Response>)(path, init)
+    }))
+    mount({ status: 'signing-in' })
+    // The mount read is in flight; a poll tick must not stack a second one.
+    // Overlapping reads used to doom every completion (each tick bumped the
+    // sequence) and left the UI in signing-in forever.
+    expect(pending.length).toBe(1)
+    intervals[0]!()
+    await new Promise(resolve => { setTimeout(resolve, 0) })
+    expect(pending.length).toBe(1)
+    // Still signing in: the completing poll keeps the poller alive.
+    pending[0]!(new Response(JSON.stringify({ status: 'signing-in' }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await vi.waitFor(() => expect(texts(now()).join(' ')).toContain(en.signingIn))
+    // A macro-task boundary lets the completed read settle fully (in-flight
+    // flag cleared) before the next tick is allowed to poll again.
+    await new Promise(resolve => { setTimeout(resolve, 0) })
+    // Only with no read in flight does the next tick issue a fresh poll.
+    intervals[0]!()
+    await new Promise(resolve => { setTimeout(resolve, 0) })
+    expect(pending.length).toBe(2)
+    // Authorization completed while polling was serialized: it lands this time.
+    pending[1]!(new Response(JSON.stringify(SIGNED_IN), { status: 200, headers: { 'content-type': 'application/json' } }))
+    await vi.waitFor(() => expect(texts(now()).join(' ')).toContain(en.signedIn))
+  })
+
   it('gives every option field exactly one page', () => {
     stubFetch()
     mount()

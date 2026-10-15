@@ -165,6 +165,29 @@ describe('normalizeSuperGrokQuota', () => {
     } }, undefined)).toBe(false)
   })
 
+  it('rejects calendar-invalid timestamps that Date.parse would roll forward', () => {
+    for (const end of [
+      '2026-02-30T00:00Z', // Feb 30 does not exist; V8 rolls it to March 2
+      '2026-10-19T24:00Z', // hour 24 is forbidden (RFC 3339)
+      '2026-10-19T00:00+25:00', // offset hour out of range
+      '2027-02-29T00:00Z', // not a leap year
+    ]) {
+      const withPercent = normalizeSuperGrokQuota({ config: { creditUsagePercent: 1, billingPeriodEnd: end } }, undefined)
+      expect('resetAt' in withPercent, end).toBe(false)
+      // A percentage-free body with a bogus period end must not cache as partial.
+      expect(() => normalizeSuperGrokQuota({ config: {
+        currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end },
+      } }, undefined), end).toThrow(QuotaResponseError)
+    }
+    // Real calendar dates keep working, including leap days.
+    expect(normalizeSuperGrokQuota({ config: {
+      creditUsagePercent: 1, billingPeriodEnd: '2028-02-29T12:00Z',
+    } }, undefined).resetAt).toBe('2028-02-29T12:00:00.000Z')
+    expect(normalizeSuperGrokQuota({ config: {
+      creditUsagePercent: 1, billingPeriodEnd: '2026-02-28T00:00Z',
+    } }, undefined).resetAt).toBe('2026-02-28T00:00:00.000Z')
+  })
+
   it('only infers a legacy monthly period from parseable billing bounds', () => {
     expect(normalizeSuperGrokQuota({ config: {
       creditUsagePercent: 1,

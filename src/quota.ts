@@ -115,18 +115,37 @@ function trimmedString(value: unknown): string | undefined {
 }
 
 /**
- * RFC 3339 / ISO-8601 offset datetime; the seconds field is optional per
- * RFC 3339, but a fractional part still requires it. Date.parse alone is too
- * lenient (`"0"` becomes 2000-01-01) and would let a percentage-free billing
- * body cache as a partial success with an invented reset date.
+ * RFC 3339 / ISO-8601 offset datetime with capture groups so the calendar
+ * components can be validated below: Date.parse alone rolls invalid dates
+ * forward ("0" becomes 2000-01-01, 2026-02-30 becomes March 2), which would
+ * let an invented reset date be displayed and cached as a partial success.
  */
-const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,9})?)?(?:Z|[+-]\d{2}:\d{2})$/u
+const ISO_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:Z|([+-])(\d{2}):(\d{2}))$/u
+
+const MONTH_DAYS = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31] as const
+
+/** Rejects lexically valid but calendar-invalid timestamps: 2026-02-30, 24:00, +25:00. */
+function isRfc3339CalendarValid(match: RegExpExecArray): boolean {
+  const [year, month, day, hour, minute, second] = [1, 2, 3, 4, 5, 6]
+    .map(index => match[index] === undefined ? 0 : Number(match[index]))
+  const offsetHours = match[9] === undefined ? 0 : Number(match[9])
+  const offsetMinutes = match[10] === undefined ? 0 : Number(match[10])
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const monthDays = month === 2 && leapYear ? 29 : MONTH_DAYS[month - 1]
+  // A leap second (60) is lexically valid per RFC 3339, but Date.parse still
+  // rejects it below; the <= 60 range check only keeps it out of the 61+ bin.
+  return month >= 1 && month <= 12
+    && day >= 1 && day <= monthDays
+    && hour < 24 && minute < 60 && second <= 60
+    && offsetHours < 24 && offsetMinutes < 60
+}
 
 /** Accepts RFC 3339 strings and Unix epoch seconds/milliseconds; otherwise omitted. */
 function parseResetAt(raw: unknown): string | undefined {
   if (typeof raw === 'string') {
     const text = raw.trim()
-    if (!ISO_DATE_TIME.test(text)) return undefined
+    const match = ISO_DATE_TIME.exec(text)
+    if (match === null || !isRfc3339CalendarValid(match)) return undefined
     const ms = Date.parse(text)
     return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined
   }
