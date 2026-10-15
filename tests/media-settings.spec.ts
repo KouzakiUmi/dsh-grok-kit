@@ -10,7 +10,11 @@ vi.mock('react', () => ({
     if (hooks.collectEffects) { hooks.effects.push(fn); hooks.dependencies.push(dependencies) }
   },
   useMemo: (fn: () => unknown) => fn(),
-  useRef: (initial: unknown) => ({ current: initial }),
+  useRef: (initial: unknown) => {
+    const index = hooks.cursor++
+    if (!(index in hooks.values)) hooks.values[index] = { current: initial }
+    return hooks.values[index]
+  },
   useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) => snapshot(),
   useState: (initial: unknown) => {
     const index = hooks.cursor++
@@ -72,14 +76,23 @@ async function fixture(initial: Record<string, unknown> = {}) {
   render()
   hooks.collectEffects = false
   for (const effect of hooks.effects) effect()
-  await vi.waitFor(() => expect(hooks.values[6]).toHaveProperty('imagineTool', options.imagineTool))
+  await vi.waitFor(() => expect(hooks.values.some(value => typeof value === 'object' && value !== null
+    && 'imagineTool' in value && value.imagineTool === options.imagineTool)).toBe(true))
+  const page = (label: string) => {
+    const action = elements(render(), element => element.type === 'button' && String(element.props['aria-label'] ?? '').startsWith(label))[0]!
+    expect(action).toBeDefined()
+    if (action.props['aria-current'] !== 'page') (action.props.onClick as () => void)()
+  }
+  page(en.navMedia)
   const input = (label: string) => {
+    page(label === en.backendSearch ? en.navSearch : en.navMedia)
     const row = elements(render(), element => element.type === 'label' && text(element.props.children) === label)[0]!
     expect(row).toBeDefined()
     return elements(row, element => element.type === 'input')[0]!
   }
   const change = (label: string, checked: boolean) => (input(label).props.onChange as (event: unknown) => void)({ target: { checked } })
-  const buttonOf = (label: string) => elements(render(), element => element.type === 'button' && text(element.props.children) === label)[0]
+  const buttonOf = (label: string) => elements(render(), element => element.type === 'button'
+    && (text(element.props.children) === label || text(element.props.children).startsWith(`${label} ·`)))[0]
   const button = (label: string) => buttonOf(label)!
   const click = (label: string) => { (buttonOf(label)!.props.onClick as () => void)() }
   const save = async () => {
@@ -88,9 +101,9 @@ async function fixture(initial: Record<string, unknown> = {}) {
     expect(saveButton.props.disabled).toBe(false)
     ;(saveButton.props.onClick as () => void)()
     await vi.waitFor(() => expect(posts).toHaveLength(count + 1))
-    await vi.waitFor(() => expect((hooks.values[8] as Set<unknown>).size).toBe(0))
+    await vi.waitFor(() => expect(buttonOf(en.optionsSave)?.props.disabled).toBe(true))
   }
-  return { render, input, change, button, hasButton: (label: string) => buttonOf(label) !== undefined, click, save, posts }
+  return { render, input, change, button, hasButton: (label: string) => buttonOf(label) !== undefined, click, save, posts, page }
 }
 
 describe('settings-only media risk confirmation', () => {
@@ -150,13 +163,19 @@ describe('settings-only media risk confirmation', () => {
     expect(f.posts[0]).toEqual({ imagineTool: false, editTool: false, videoTool: true, mediaRiskAcknowledged: true })
     ;(f.button(en.optionsReset).props.onClick as () => void)()
     await vi.waitFor(() => expect(f.posts).toHaveLength(2))
-    expect(f.posts[1]).toMatchObject({ imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false })
+    expect(f.posts[1]).toEqual({
+      imagineTool: null, editTool: null, videoTool: null, mediaRiskAcknowledged: false,
+      videoModel: null, videoMaxBytes: null,
+    })
     expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
   })
 
   it('refreshes the local capability panel after a video close or reset, without remounting on unrelated saves', async () => {
     const f = await fixture({ videoTool: true, mediaRiskAcknowledged: true })
-    const panelKey = () => elements(f.render(), element => element.type === CapabilitiesView)[0]!.key
+    const panelKey = () => {
+      f.page(en.navMedia)
+      return elements(f.render(), element => element.type === CapabilitiesView)[0]!.key
+    }
     const initialKey = panelKey()
     f.change(en.videoTool, false)
     await f.save()

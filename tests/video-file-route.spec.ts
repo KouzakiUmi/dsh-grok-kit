@@ -5,6 +5,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { AttachmentStore, FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { registerGrokVideoFileRoute, GROK_VIDEO_FILE_PATH } from '../src/video-file-route.ts'
+import { GROK_VIDEO_FILE_PATH as SHARED_VIDEO_FILE_PATH } from '../src/video-config.ts'
 
 const ID = 'a067d873-d64a-4e67-a9d5-d80c3e7a56b3'
 const servers: Server[] = []
@@ -51,6 +52,10 @@ async function fixture(options: { enabled?: boolean | (() => boolean); bytes?: n
 }
 
 describe('task-scoped video download route', () => {
+  it('keeps the client download URL aligned with the registered host route', () => {
+    expect(SHARED_VIDEO_FILE_PATH).toBe(GROK_VIDEO_FILE_PATH)
+  })
+
   it('blocks history downloads after the current media switch closes', async () => {
     let enabled = true
     const f = await fixture({ enabled: () => enabled })

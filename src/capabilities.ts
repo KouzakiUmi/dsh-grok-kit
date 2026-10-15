@@ -10,8 +10,9 @@
  * The tracker records what the plugin itself observed (first version: video
  * task probes only); every other feature stays `unverified` until something
  * explicitly calls {@link CapabilityTracker.observe}. Nothing here probes an
- * upstream, persists state, or fabricates quota numbers — quota stays
- * `unavailable` until its source is located. `reset()` clears the recorded
+ * upstream, persists state, or fabricates quota numbers. Its legacy quota
+ * field stays unavailable for compatibility; account quota is read separately
+ * through the quota route. `reset()` clears the recorded
  * history (used on sign-out so one account's diagnostics never leak to the
  * next viewer).
  */
@@ -48,7 +49,7 @@ export interface CapabilityFeatureState {
   message?: string
 }
 
-/** Quota block: first version has no located source, so it is always unavailable. */
+/** Legacy snapshot field; live account quota uses the independent quota route. */
 export interface CapabilityQuotaState {
   state: 'unavailable'
   message: string
@@ -60,7 +61,7 @@ export interface CapabilitySnapshot {
   videoEnabled: boolean
 }
 
-const QUOTA_UNAVAILABLE_MESSAGE = 'Quota information is not available yet.'
+const QUOTA_UNAVAILABLE_MESSAGE = 'Subscription quota is available from the account quota endpoint.'
 
 /** Observation messages are redacted and truncated before they are stored. */
 const MAX_MESSAGE_LENGTH = 300

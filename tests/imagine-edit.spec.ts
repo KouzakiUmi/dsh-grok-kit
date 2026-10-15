@@ -235,6 +235,8 @@ describe('applyGrokImagineEditTool', () => {
 
   it('retries once with a refreshed token after a 401', async () => {
     const seen: string[] = []
+    const rejectedResponse = new Response('expired', { status: 401 })
+    const cancel = vi.spyOn(rejectedResponse.body!, 'cancel')
     const retryTokens: XaiOAuthTokenSource = {
       available: () => true,
       resolve: async () => 'tok1',
@@ -243,7 +245,7 @@ describe('applyGrokImagineEditTool', () => {
     const { registered } = register(async (_input: unknown, init?: RequestInit) => {
       seen.push(String((init?.headers as Record<string, string>).authorization))
       return seen.length === 1
-        ? new Response('expired', { status: 401 })
+        ? rejectedResponse
         : new Response(JSON.stringify({ data: [{ b64_json: Buffer.from(PNG).toString('base64') }] }), { status: 200 })
     }, undefined, { tokens: retryTokens })
     const dataUri = `data:image/png;base64,${Buffer.from(PNG).toString('base64')}`
@@ -252,6 +254,24 @@ describe('applyGrokImagineEditTool', () => {
       { signal: new AbortController().signal, agent: { session: { header: { cwd: '/tmp/ws' } } } },
     )
     expect(seen).toEqual(['Bearer tok1', 'Bearer tok2'])
+    expect(cancel).toHaveBeenCalledOnce()
+  })
+
+  it.each(['reject', 'unchanged'] as const)('handles an edit refresh that is %s without leaking or hiding the first response', async mode => {
+    const response = new Response('expired credential detail', { status: 401 })
+    const cancel = vi.spyOn(response.body!, 'cancel')
+    const fetchImpl = vi.fn(async () => response)
+    const save = vi.fn(async () => ({}))
+    const tokens: XaiOAuthTokenSource = {
+      available: () => true, resolve: async () => 'old-token',
+      refresh: () => { if (mode === 'reject') throw new Error('synthetic rotation failure'); return Promise.resolve('old-token') },
+    }
+    await expect(runImageEdit({ tokens, prompt: 'test', imageSpecs: [`data:image/png;base64,${Buffer.from(PNG).toString('base64')}`], fetchImpl, save }))
+      .rejects.toThrow(mode === 'reject' ? 'synthetic rotation failure' : 'expired credential detail')
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    expect(save).not.toHaveBeenCalled()
+    if (mode === 'reject') expect(cancel).toHaveBeenCalledOnce()
+    else { expect(cancel).not.toHaveBeenCalled(); expect(response.bodyUsed).toBe(true) }
   })
 
   it('reads a full attachment reference through the store and sends it as a data URI', async () => {

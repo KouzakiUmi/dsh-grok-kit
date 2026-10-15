@@ -597,6 +597,10 @@ function ImagineResultCard({ block, sessionId, sessions, openFile, t: translate 
   const isEdit = toolNameOf(block) === 'grok_imagine_edit'
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [viewer, setViewer] = useState<{ src: string; label: string } | null>(null)
+  // Stable identity: ImagineLightbox keys its modal effect on onClose, so a
+  // fresh closure every render would run that effect's cleanup — which closes
+  // the dialog — on every unrelated re-render of this card.
+  const closeViewer = useCallback(() => { setViewer(null) }, [])
   useEffect(() => {
     if (copyState === 'idle') return
     const timer = window.setTimeout(() => { setCopyState('idle') }, 2000)
@@ -738,7 +742,7 @@ function ImagineResultCard({ block, sessionId, sessions, openFile, t: translate 
       />
       {viewer === null
         ? null
-        : <ImagineLightbox src={viewer.src} alt={viewer.label} t={t} onClose={() => setViewer(null)} />}
+        : <ImagineLightbox src={viewer.src} alt={viewer.label} t={t} onClose={closeViewer} />}
     </>
   )
 }

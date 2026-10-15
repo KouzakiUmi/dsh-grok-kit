@@ -1,5 +1,20 @@
 # 更新记录 / Changelog
 
+## 0.2.4（2026-10-15）
+
+- 修复账号切换时旧身份读取进入视频任务或下载的问题，同账号并发读取仍可用；额度请求超时、取消或卸载时释放响应与读取器，不额外发起请求。
+- Fixed stale account identities reaching video tasks or downloads while preserving concurrent reads for the same account. Quota timeouts, cancellation, and unload now release responses and readers without extra requests.
+- 登录入口明确兼容 X Subscription 与原 SuperGrok / X Premium 订阅，共用官方 Grok OAuth 流程；已登录账号增加重新授权入口与账号替换确认弹窗，并提供官方订阅仪表盘管理链接。
+- Sign-in explicitly supports The X Subscription alongside legacy SuperGrok / X Premium using official Grok OAuth; signed-in users can reauthorize to switch accounts with replacement confirmation, and the account panel links directly to the official subscription dashboard.
+- 账号页新增官方共享订阅额度展示，复用现有 OAuth 与代理配置；成功结果按账号缓存 60 秒（无自动轮询），严格展示官方接口返回的百分比、重置周期与预付余额，不估算 token 余额或编造未报告数据，统一计费标记仅读取官方布尔值。
+- Account settings now display official shared subscription quota reusing existing OAuth and proxy settings; successful results are cached for 60 seconds per account without automatic polling, strictly displaying reported percentages, billing periods, and prepaid balances without estimating tokens or fabricating unreported fields.
+- 设置面板重构为五大独立分页（账号、模型、搜索与对话、媒体与任务、网络），顶部常驻吸顶状态与导航并适配宿主弹窗背景；保存与重置操作严格隔离至当前页，切换分页保留其他页未保存草稿，重置媒体页同步撤销媒体确认。
+- Settings are now reorganized into five tabs (Account, Models, Search & conversation, Media & tasks, Network) with a sticky status/navigation bar matching the host dialog theme; save and reset actions are page-scoped while preserving unsaved drafts across tab navigation, and resetting media revokes risk acknowledgment.
+- 加固登录与凭据流程：轮询请求设置 10 秒超时并在组件卸载或新操作时取消，修复轮询挂起与排队堆积；授权失败保留诊断提示，取消或失败后恢复已保存凭据与状态，旧状态读取与迟到响应不再覆盖新状态。
+- Hardened sign-in and credential flows: status polling enforces a 10-second deadline and cancels on unmount or user action, preventing request pileup; failure diagnostics are retained across re-renders, saved credentials restore gracefully on cancellation, and stale responses cannot overwrite newer states.
+- 完善请求取消与资源清理：凭据读取与等待严格遵循调用者取消信号；搜索与媒体请求在 401 重试或失败时及时释放响应体；搜索在结果解码后复检取消状态以防止迟到成功返回；视频任务替换时取消旧查询等待并隔离迟到错误。
+- Improved cancellation and resource cleanup: credential reads honor caller abort signals; search and media requests release response bodies on 401 retry or failure; search re-checks abort signals after decoding to prevent late completions; replaced video tasks cancel older waits and discard late errors.
+
 ## 0.2.3（2026-10-14）
 
 - 新增实验性视频工具 `grok_video_generate`、`grok_video_status`、`grok_video_resume`：单图生成视频、任务持久化与恢复、按账号隔离的下载，以及会话视频卡片。

@@ -23,6 +23,35 @@ describe('imagineModelId', () => {
 })
 
 describe('applyGrokImagineTool', () => {
+  it.each(['rotate', 'reject', 'unchanged'] as const)('handles a generation refresh that is %s and releases only a discarded 401 body', async mode => {
+    const rejectedResponse = new Response('expired credential detail', { status: 401 })
+    const cancel = vi.spyOn(rejectedResponse.body!, 'cancel')
+    const fetch = vi.fn().mockResolvedValueOnce(rejectedResponse).mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ b64_json: Buffer.from(PNG).toString('base64') }] })))
+    const saveImage = vi.fn(async () => ({ attachmentId: 'synthetic-image', mediaType: 'image/png', bytes: PNG.byteLength, width: 1, height: 1, name: 'test.png' }))
+    const tokens: XaiOAuthTokenSource = {
+      available: () => true, resolve: async () => 'old-token',
+      refresh: () => { if (mode === 'reject') throw new Error('synthetic rotation failure'); return Promise.resolve(mode === 'rotate' ? 'new-token' : 'old-token') },
+    }
+    let execute!: (args: { prompt: string }, exec: { signal: AbortSignal }) => Promise<unknown>
+    applyGrokImagineTool({ tools: { register: (definition: { execute: typeof execute }) => { execute = definition.execute } } } as never, {
+      tokens, session: { liveModelIds: () => undefined } as unknown as XaiOAuthSession,
+      resolveAttachments: () => ({ saveImage } as never), fetch,
+    })
+    const result = execute({ prompt: 'test' }, { signal: new AbortController().signal })
+    if (mode === 'rotate') {
+      await result
+      expect(fetch).toHaveBeenCalledTimes(2)
+      expect(saveImage).toHaveBeenCalledOnce()
+      expect(cancel).toHaveBeenCalledOnce()
+    } else {
+      await expect(result).rejects.toThrow(mode === 'reject' ? 'synthetic rotation failure' : 'expired credential detail')
+      expect(fetch).toHaveBeenCalledOnce()
+      expect(saveImage).not.toHaveBeenCalled()
+      if (mode === 'reject') expect(cancel).toHaveBeenCalledOnce()
+      else { expect(cancel).not.toHaveBeenCalled(); expect(rejectedResponse.bodyUsed).toBe(true) }
+    }
+  })
+
   it('saveImage path renders an ImageBlock; missing cwd fails without writing process.cwd', async () => {
     const saveImage = vi.fn(async () => ({
       attachmentId: 'att_1',

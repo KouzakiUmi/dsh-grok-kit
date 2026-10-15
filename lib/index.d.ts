@@ -374,6 +374,8 @@ type XaiOAuthWebAuthStatus = {
   selected: string[];
   catalogSource: CatalogSource;
   catalogError?: string;
+  /** A failed reauthorization need not invalidate the saved account. */
+  loginError?: string;
   grokImportAvailable: boolean;
   sharedGrokAuth: boolean;
 } | {
@@ -387,7 +389,7 @@ interface LoginChallenge {
   userCode?: string;
 }
 /** Register the plugin-owned OAuth routes when the Web server is composed. */
-declare function registerXaiOAuthAuthRoutes(ctx: Context, session: XaiOAuthSession, cordisConfig?: Record<string, unknown>): void;
+declare function registerXaiOAuthAuthRoutes(ctx: Context, session: XaiOAuthSession, cordisConfig?: Record<string, unknown>, onAccountChange?: () => void): void;
 //#endregion
 //#region src/grok-import.d.ts
 /** Same client id pi-ai / Grok CLI use for the device-code grant. */
@@ -631,8 +633,9 @@ declare function writeStoredProxyUrl(url: string): Promise<void>;
  */
 declare function setXaiProxyUrl(url: string): boolean;
 /**
- * Install a transparent global-fetch hook that routes ONLY x.ai origins
- * through this plugin's ProxyAgent; every other request goes to the
+ * Install a transparent global-fetch hook that routes x.ai origins and the
+ * exact official Grok billing host through this plugin's ProxyAgent;
+ * every other request goes to the
  * original fetch untouched. Reference counted: every install returns its
  * OWN idempotent disposer, and the original fetch is restored only after
  * the LAST owner releases — and only if our wrapper is still installed
@@ -835,7 +838,7 @@ interface CapabilityFeatureState {
   httpStatus?: number;
   message?: string;
 }
-/** Quota block: first version has no located source, so it is always unavailable. */
+/** Legacy snapshot field; live account quota uses the independent quota route. */
 interface CapabilityQuotaState {
   state: 'unavailable';
   message: string;
@@ -887,8 +890,14 @@ interface GrokCapabilityRouteOptions {
 }
 declare function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabilityRouteOptions): void;
 //#endregion
-//#region src/video-file-route.d.ts
+//#region src/video-config.d.ts
+/** Opt-in video defaults shared by host configuration and settings presentation. */
+/** Browser-safe shared route contract; no host imports are needed by the client. */
 declare const GROK_VIDEO_FILE_PATH = "/plugins/dsh-grok-kit/video/file";
+declare const DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5";
+declare const DEFAULT_VIDEO_MAX_BYTES: number;
+//#endregion
+//#region src/video-file-route.d.ts
 interface DownloadTask {
   taskId: string;
   state: string;
@@ -902,11 +911,6 @@ interface VideoFileRouteOptions {
   maxBytes?: number;
 }
 declare function registerGrokVideoFileRoute(ctx: Context, options: VideoFileRouteOptions): void;
-//#endregion
-//#region src/video-config.d.ts
-/** Opt-in video defaults shared by host configuration and settings presentation. */
-declare const DEFAULT_VIDEO_MODEL = "grok-imagine-video-1.5";
-declare const DEFAULT_VIDEO_MAX_BYTES: number;
 //#endregion
 //#region src/lock-rescue.d.ts
 /**

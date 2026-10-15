@@ -15,7 +15,7 @@ import { assertMediaEnabled } from './media-options.ts'
 export const XAI_IMAGES_URL = 'https://api.x.ai/v1/images/generations'
 export const DEFAULT_IMAGINE_MODEL = 'grok-imagine-image-2.0'
 const FALLBACK_IMAGINE_MODEL = 'grok-imagine-image'
-const USER_AGENT = 'dsh-grok-kit/0.2.3'
+const USER_AGENT = 'dsh-grok-kit/0.2.4'
 /** v1 renders exactly one image per call (the API bills per n). */
 const MAX_N = 1
 
@@ -114,8 +114,14 @@ async function requestImage(
   })
   let response = await post(access)
   if (response.status === 401 && tokens.refresh !== undefined) {
-    const refreshed = await tokens.refresh(access, signal)
+    let refreshed: string | undefined
+    try { refreshed = await tokens.refresh(access, signal) } catch (error) {
+      // Best-effort cleanup; propagate the original credential failure.
+      void response.body?.cancel().catch(() => undefined)
+      throw error
+    }
     if (refreshed !== undefined && refreshed.length > 0 && refreshed !== access) {
+      void response.body?.cancel().catch(() => undefined)
       response = await post(refreshed)
     }
   }

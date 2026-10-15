@@ -40,6 +40,8 @@ import { applyGrokVideoTools } from './video-tools.ts'
 import { CapabilityTracker } from './capabilities.ts'
 import { registerGrokCapabilityRoutes } from './capability-routes.ts'
 import { registerGrokVideoFileRoute } from './video-file-route.ts'
+import { SuperGrokQuotaClient } from './quota.ts'
+import { registerGrokQuotaRoute } from './quota-routes.ts'
 import { DEFAULT_MAX_IMAGE_BYTES as DEFAULT_EDIT_MAX_IMAGE_BYTES, MAX_SOURCE_IMAGES as EDIT_MAX_SOURCE_IMAGES } from './imagine-edit-core.ts'
 import {
   applyGrokSearchTools,
@@ -321,17 +323,36 @@ export function apply(ctx: Context, config: Config): void {
   }, 'dsh-grok-kit: xAI proxy hook')
 
   const session = new XaiOAuthSession(new XaiOAuthCredentialStore(), () => {
+    // Model selection and catalog retries are not account changes. Auth routes
+    // invalidate account-scoped data separately, including failed transitions.
     ctx.emit('llm/adapters-updated')
   })
   // Stop the session's background catalog retry timer on plugin unload.
   ctx.effect(() => () => session.dispose(), 'dsh-grok-kit: session retry lifecycle')
   const tokens = createXaiOAuthSearchTokenSource(session)
   const capabilities = new CapabilityTracker()
+  const quota = new SuperGrokQuotaClient({ tokens })
+  ctx.effect(() => () => quota.dispose(), 'dsh-grok-kit: quota lifecycle')
+  ctx.inject(['webServer'], webCtx => registerGrokQuotaRoute(webCtx, quota))
   let capabilityIdentity: string | undefined
+  // Auth transitions invalidate every earlier read. Within one auth epoch,
+  // only the newest completed read may update the tracker; concurrent reads
+  // for that same account can still return its identity.
+  let identityGeneration = 0
+  let identityRead = 0
+  let observedIdentityRead = 0
   const currentIdentity = async (): Promise<string | undefined> => {
+    const generation = identityGeneration
+    const read = ++identityRead
     const identity = await tokens.identity?.()
+    if (generation !== identityGeneration) return undefined
+    if (read < observedIdentityRead) return identity === capabilityIdentity ? identity : undefined
+    observedIdentityRead = read
     // Unknown identity is deliberately fail-closed: never retain a previous account's observations.
     if (identity !== capabilityIdentity || identity === undefined) capabilities.reset()
+    // First capability initialization does not invalidate a cached quota for
+    // that same account. Unknown identity still fails closed immediately.
+    if (identity === undefined || (capabilityIdentity !== undefined && identity !== capabilityIdentity)) quota.reset()
     capabilityIdentity = identity
     return identity
   }
@@ -408,6 +429,12 @@ export function apply(ctx: Context, config: Config): void {
     webCtx,
     session,
     config as unknown as Record<string, unknown>,
+    () => {
+      identityGeneration += 1
+      quota.reset()
+      capabilities.reset()
+      capabilityIdentity = undefined
+    },
   ))
 
   const searchModel = effectiveConfig.searchModel ?? DEFAULT_XAI_SEARCH_MODEL

@@ -43,14 +43,20 @@ export function oauthIdentityOf(credential: { type: string; accountId?: string; 
 
 const inFlightRefresh = new Map<string, Map<string, Promise<string | undefined>>>()
 
-/** Cancellation belongs to a caller, not to a shared credential rotation. */
-function waitForRefresh(pending: Promise<string | undefined>, signal?: AbortSignal): Promise<string | undefined> {
-  signal?.throwIfAborted()
+/** Stop this caller's wait, not the shared credential read or rotation. */
+function waitForCredential<T>(pending: Promise<T>, signal?: AbortSignal): Promise<T> {
   if (signal === undefined) return pending
   return new Promise((resolve, reject) => {
-    const onAbort = () => reject(signal.reason)
-    signal.addEventListener('abort', onAbort, { once: true })
-    pending.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+    const cleanup = () => signal.removeEventListener('abort', onAbort)
+    const onAbort = () => { cleanup(); reject(signal.reason) }
+    // Observe settlement even when the signal is already aborted, so a late
+    // rejection from the continuing operation cannot become unhandled.
+    pending.then(
+      value => { cleanup(); resolve(value) },
+      error => { cleanup(); reject(error) },
+    )
+    if (signal.aborted) onAbort()
+    else signal.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -67,10 +73,10 @@ export function createXaiOAuthSearchTokenSource(session: XaiOAuthSession): XaiOA
     },
     async resolve(signal?: AbortSignal): Promise<string | undefined> {
       signal?.throwIfAborted()
-      const credential = await session.store.read(XAI_PI_PROVIDER)
+      const credential = await waitForCredential(session.store.read(XAI_PI_PROVIDER), signal)
       signal?.throwIfAborted()
       if (credential?.type !== 'oauth') return undefined
-      const auth = await session.models.getAuth(XAI_PI_PROVIDER)
+      const auth = await waitForCredential(session.models.getAuth(XAI_PI_PROVIDER), signal)
       signal?.throwIfAborted()
       if (auth?.source !== 'OAuth') return undefined
       const accessToken = auth.auth.apiKey
@@ -85,13 +91,13 @@ export function createXaiOAuthSearchTokenSource(session: XaiOAuthSession): XaiOA
         inFlightRefresh.set(storeKey, refreshes)
       }
       const existing = refreshes.get(rejectedAccessToken)
-      if (existing !== undefined) return waitForRefresh(existing, signal)
+      if (existing !== undefined) return waitForCredential(existing, signal)
       const pending = refreshRejected(session, rejectedAccessToken).finally(() => {
         if (refreshes.get(rejectedAccessToken) === pending) refreshes.delete(rejectedAccessToken)
         if (refreshes.size === 0) inFlightRefresh.delete(storeKey)
       })
       refreshes.set(rejectedAccessToken, pending)
-      return waitForRefresh(pending, signal)
+      return waitForCredential(pending, signal)
     },
   }
 }

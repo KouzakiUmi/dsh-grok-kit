@@ -16,7 +16,9 @@
  *     visuals and the same state actions as the session toolview — the old
  *     debug-style row dump is gone);
  *   - no automatic probing, no timer polling of the upstream, no invented
- *     quota numbers — quota is displayed as unavailable with the host message;
+ *     quota numbers. The snapshot payload still parses its `quota` field so
+ *     the wire contract stays frozen, but nothing renders it here any more:
+ *     the account page's own `QuotaView` owns the quota reading;
  *   - loading and error states are real, and every fetch is aborted when the
  *     component unmounts;
  *   - signed-out viewers receive the shape with all features `unverified`
@@ -61,7 +63,11 @@ export interface CapabilityFeature {
 
 export interface CapabilitySnapshot {
   features: CapabilityFeature[]
-  /** Always `unavailable` in the first version; never fabricated here. */
+  /**
+   * Parsed but never rendered here: kept so the frozen route payload stays
+   * compatible with callers that still read it (the account page's
+   * `QuotaView` reads the quota from its own route).
+   */
   quota: { state: 'unavailable'; message: string }
   videoEnabled: boolean
 }
@@ -261,8 +267,9 @@ function featureStateLabel(t: SettingsTranslate, state: CapabilityFeatureState):
 }
 
 /**
- * Capability panel: features, quota and the video gate, followed by the local
- * video task list. One read on mount plus explicit refresh — no polling.
+ * Capability panel: features, the video gate and the local video task list.
+ * One read on mount plus explicit refresh — no polling. Mounted only while its
+ * page is active, so re-entering the page re-reads the host's local record.
  */
 export function CapabilitiesView({ t, signedIn }: { t: SettingsTranslate; signedIn: boolean }) {
   const [status, setStatus] = useState<CapabilitiesStatus>({ kind: 'loading' })
@@ -328,15 +335,6 @@ export function CapabilitiesView({ t, signedIn }: { t: SettingsTranslate; signed
               </li>
             ))}
           </ul>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={rowStyle}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' }}>{t('quotaTitle')}</span>
-              <span style={{ ...badgeStyle, color: 'var(--dsw-alias-label-tertiary, #81858c)' }}>{'unavailable'}</span>
-            </div>
-            <p style={bodyStyle}>{t('quotaUnavailable')}</p>
-            {status.data.quota.message === '' ? null : <p style={hintStyle}>{status.data.quota.message}</p>}
-          </div>
 
           {/* Task history is account-scoped: never mounted for a signed-out
               viewer, and dropped together with this subtree on any account

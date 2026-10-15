@@ -1,4 +1,6 @@
 /** Opt-in video defaults shared by host configuration and settings presentation. */
+/** Browser-safe shared route contract; no host imports are needed by the client. */
+export const GROK_VIDEO_FILE_PATH = '/plugins/dsh-grok-kit/video/file'
 export const DEFAULT_VIDEO_MODEL = 'grok-imagine-video-1.5'
 export const DEFAULT_VIDEO_MAX_BYTES = 100 * 1024 * 1024
 export const MIN_VIDEO_MAX_BYTES = 1024 * 1024

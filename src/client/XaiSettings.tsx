@@ -8,10 +8,11 @@
 
 /** Plugin-owned xAI Grok account page inside the dsh Settings shell. */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { XaiOAuthSettingsKey } from './locales.ts'
 import { CapabilitiesView } from './capabilities-view.tsx'
+import { QuotaView } from './quota-view.tsx'
 import { mediaTogglePatch } from './media-options.ts'
 
 const STATUS_PATH = '/plugins/dsh-grok-kit/auth/status'
@@ -22,6 +23,7 @@ const MODELS_PATH = '/plugins/dsh-grok-kit/auth/models'
 const PROXY_PATH = '/plugins/dsh-grok-kit/auth/proxy'
 const OPTIONS_PATH = '/plugins/dsh-grok-kit/auth/options'
 const POLL_INTERVAL_MS = 1_000
+const STATUS_TIMEOUT_MS = 10_000
 
 type OptionKey =
   | 'backendSearch'
@@ -40,21 +42,52 @@ type OptionKey =
 
 type OptionValue = boolean | number | string | undefined
 
-const ALL_OPTION_KEYS: readonly OptionKey[] = [
-  'backendSearch',
-  'nestedSearchTools',
-  'statefulResponses',
-  'imagineTool',
-  'editTool',
-  'videoTool',
-  'mediaRiskAcknowledged',
-  'videoModel',
-  'videoMaxBytes',
-  'searchModel',
-  'searchMaxResults',
-  'webSearchTimeoutMs',
-  'xSearchTimeoutMs',
-]
+/**
+ * The five pages of this settings section. Only the active page is mounted, so
+ * a backgrounded page never keeps a video download or a capability read
+ * running; every draft it owns lives in this component instead of in the page
+ * body, so switching pages keeps unsaved options and proxy edits.
+ */
+const SETTINGS_PAGES = ['account', 'models', 'search', 'media', 'network'] as const
+
+type SettingsPageId = (typeof SETTINGS_PAGES)[number]
+
+/** Page label, doubled as the sticky header's navigation button text. */
+const PAGE_LABEL_KEYS: Record<SettingsPageId, XaiOAuthSettingsKey> = {
+  account: 'navAccount',
+  models: 'navModels',
+  search: 'navSearch',
+  media: 'navMedia',
+  network: 'navNetwork',
+}
+
+/**
+ * Which option keys each page owns for ordinary edits. Save is scoped to the
+ * active page's dirty keys from this list, so one page can never write another
+ * page's overrides and a draft left unsaved elsewhere is never dropped by
+ * this page's save.
+ */
+const PAGE_OPTION_KEYS: Record<SettingsPageId, readonly OptionKey[]> = {
+  account: [],
+  models: [],
+  network: [],
+  search: ['backendSearch', 'statefulResponses', 'nestedSearchTools', 'searchModel', 'searchMaxResults', 'webSearchTimeoutMs', 'xSearchTimeoutMs'],
+  media: ['imagineTool', 'editTool', 'videoTool', 'mediaRiskAcknowledged'],
+}
+
+/**
+ * Extra keys Reset may clear even though the form does not edit them.
+ * Media still displays videoModel / videoMaxBytes as read-only; a stale
+ * stored videoMaxBytes would keep interrupting downloads after the user
+ * believes this page was reset.
+ */
+const PAGE_RESET_ONLY_KEYS: Partial<Record<SettingsPageId, readonly OptionKey[]>> = {
+  media: ['videoModel', 'videoMaxBytes'],
+}
+
+function pageResetKeys(pageId: SettingsPageId): readonly OptionKey[] {
+  return [...PAGE_OPTION_KEYS[pageId], ...(PAGE_RESET_ONLY_KEYS[pageId] ?? [])]
+}
 
 function optBool(value: OptionValue | undefined, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback
@@ -73,6 +106,7 @@ type AccountStatus =
     selected?: string[]
     catalogSource?: CatalogSource
     catalogError?: string
+    loginError?: string
     grokImportAvailable?: boolean
     sharedGrokAuth?: boolean
   }
@@ -153,6 +187,33 @@ const optionInputStyle: CSSProperties = {
 }
 const badgeStyle: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 999, border: '1px solid var(--dsw-alias-border-l2)', fontSize: 12, fontWeight: 500, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' }
 const sourceBadgeStyle: CSSProperties = { ...badgeStyle, fontWeight: 600 }
+/* Sticky header: match the host Modal surface so its background blends into
+   the settings panel. Keep it opaque and above the cards so scrolling content
+   cannot show through the shared title, account status or navigation. */
+const stickyBarStyle: CSSProperties = {
+  position: 'sticky',
+  top: 0,
+  zIndex: 1,
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 12,
+  padding: '12px 0 14px',
+  background: 'var(--dsw-alias-bg-layer-2, var(--dsw-alias-bg-base))',
+}
+const commonStatusStyle: CSSProperties = { ...statusStyle, fontSize: 13, flexWrap: 'wrap' }
+const tabBarStyle: CSSProperties = { display: 'flex', flexWrap: 'wrap', gap: 8 }
+const tabStyle: CSSProperties = { ...buttonStyle, minHeight: 30, padding: '4px 12px', fontSize: 13 }
+const activeTabStyle: CSSProperties = {
+  ...buttonStyle,
+  minHeight: 30,
+  padding: '4px 12px',
+  fontSize: 13,
+  borderColor: 'var(--dsw-alias-brand-primary)',
+  background: 'var(--dsw-alias-brand-primary)',
+  color: 'var(--dsw-alias-label-primary-foreground, white)',
+  fontWeight: 600,
+}
+const pageStyleInner: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 18 }
 
 function sourceBadge(source: CatalogSource | undefined): { text: string; color: string } {
   switch (source) {
@@ -182,11 +243,12 @@ function displayName(id: string): string {
     .join(' ')
 }
 
-async function jsonRequest<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
+async function jsonRequest<T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
     method,
     headers: { accept: 'application/json', ...body === undefined ? {} : { 'content-type': 'application/json' } },
     credentials: 'same-origin',
+    ...signal === undefined ? {} : { signal },
     ...body === undefined ? {} : { body: JSON.stringify(body) },
   })
   const value: unknown = await response.json().catch(() => undefined)
@@ -203,16 +265,39 @@ async function jsonRequest<T>(path: string, method = 'GET', body?: unknown): Pro
 export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   if (t === undefined) throw new Error('xAI Grok settings requires its translation function')
   const [status, setStatus] = useState<AccountStatus>({ status: 'loading' })
+  // Account mutations invalidate older status reads, including login polling.
+  const statusRequestRef = useRef(0)
+  const statusAbortRef = useRef<AbortController | undefined>(undefined)
+  const invalidateStatusRead = useCallback(() => {
+    ++statusRequestRef.current
+    const pending = statusAbortRef.current
+    statusAbortRef.current = undefined
+    pending?.abort()
+  }, [])
   const [busy, setBusy] = useState(false)
   const [proxyUrl, setProxyUrl] = useState('')
+  const [savedProxyUrl, setSavedProxyUrl] = useState('')
+  const proxyEditedRef = useRef(false)
+  const proxySavedRef = useRef(false)
   const [proxyBusy, setProxyBusy] = useState(false)
   const [proxyFeedback, setProxyFeedback] = useState<'idle' | 'saved' | 'error'>('idle')
   const [popupBlocked, setPopupBlocked] = useState(false)
   const [options, setOptions] = useState<Partial<Record<OptionKey, OptionValue>>>({})
   const [storedOptions, setStoredOptions] = useState<Partial<Record<OptionKey, OptionValue>>>({})
   const [optionsDirty, setOptionsDirty] = useState<ReadonlySet<OptionKey>>(new Set())
+  // Mirror of the dirty set: the initial load lands asynchronously and must not
+  // overwrite a field the user already edited while it was in flight.
+  const optionsDirtyRef = useRef<ReadonlySet<OptionKey>>(new Set())
+  // Keep touched keys after saving/resetting as well: a late initial GET must
+  // not roll a committed value back to the snapshot from before that write.
+  const optionsTouchedRef = useRef<ReadonlySet<OptionKey>>(new Set())
   const [optionsBusy, setOptionsBusy] = useState(false)
-  const [optionsFeedback, setOptionsFeedback] = useState<'idle' | 'saved' | 'error'>('idle')
+  // Feedback is bound to the page whose request produced it: a late 'saved'
+  // from the media page can never be shown on the search page while that
+  // page is still dirty.
+  // A missing `page` means the failure belongs to the initial load, not to one
+  // page's save, so both option pages may show it.
+  const [optionsFeedback, setOptionsFeedback] = useState<{ page?: SettingsPageId; state: 'saved' | 'error' } | undefined>()
   // An off→on media toggle parks here for the inline risk confirmation; the
   // switch does not move until the user confirms inside the card.
   const [pendingMediaGroup, setPendingMediaGroup] = useState<'images' | 'video' | null>(null)
@@ -222,6 +307,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   // task rows or diagnostics carried over from the previous account — even an
   // A→B import that stays "signed-in" gets a new key.
   const [accountGeneration, setAccountGeneration] = useState(0)
+  // Active page. Only the active page body is mounted; every draft it owns
+  // still lives here, so switching pages never discards an unsaved edit.
+  const [page, setPage] = useState<SettingsPageId>('account')
   // A saved video choice/revocation also invalidates the local runtime
   // capability snapshot, without probing upstream or reloading the account.
   const [capabilityGeneration, setCapabilityGeneration] = useState(0)
@@ -232,22 +320,100 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     stored?: Partial<Record<OptionKey, OptionValue>>
   }
 
-  const applyOptionsPayload = (value: OptionsPayload): void => {
-    setOptions(value.effective ?? value.options ?? {})
-    setStoredOptions(value.stored ?? {})
-    setOptionsDirty(new Set())
+  /**
+   * Apply a server payload.
+   *
+   * The initial load replaces untouched fields. A page-scoped save or reset passes
+   * `clearedKeys` and then moves ONLY those keys: another page's unsaved draft
+   * is never overwritten by a response that did not cover it, its dirty flag
+   * survives, and a key the server no longer reports as an override is dropped
+   * from the stored view so the form falls back to auto / default.
+   */
+  const applyOptionsPayload = (value: OptionsPayload, clearedKeys?: readonly OptionKey[]): void => {
+    const effective = value.effective ?? value.options ?? {}
+    const stored = value.stored ?? {}
+    if (clearedKeys === undefined) {
+      const drafts = optionsDirtyRef.current
+      const protectedKeys = optionsTouchedRef.current
+      setOptions(previous => {
+        const next = { ...effective }
+        for (const key of protectedKeys) {
+          if (key in previous) next[key] = previous[key]
+          else delete next[key]
+        }
+        return next
+      })
+      setStoredOptions(previous => {
+        const next = { ...stored }
+        for (const key of protectedKeys) {
+          if (key in previous) next[key] = previous[key]
+          else delete next[key]
+        }
+        return next
+      })
+      setOptionsDirty(new Set(drafts))
+      return
+    }
+    optionsTouchedRef.current = new Set([...optionsTouchedRef.current, ...clearedKeys])
+    setOptions(previous => {
+      const next = { ...previous }
+      for (const key of clearedKeys) {
+        if (key in effective) next[key] = effective[key]
+        else delete next[key]
+      }
+      return next
+    })
+    setStoredOptions(previous => {
+      const next = { ...previous }
+      for (const key of clearedKeys) {
+        if (key in stored) next[key] = stored[key]
+        else delete next[key]
+      }
+      return next
+    })
+    setOptionsDirty(previous => {
+      const next = new Set(previous)
+      for (const key of clearedKeys) next.delete(key)
+      return next
+    })
   }
 
   const markOption = (key: OptionKey, value: OptionValue): void => {
     setOptions(previous => ({ ...previous, [key]: value }))
     setOptionsDirty(previous => new Set(previous).add(key))
-    setOptionsFeedback('idle')
+    optionsDirtyRef.current = new Set(optionsDirtyRef.current).add(key)
+    optionsTouchedRef.current = new Set(optionsTouchedRef.current).add(key)
+    const owner = SETTINGS_PAGES.find(pageId => PAGE_OPTION_KEYS[pageId].includes(key))
+    setOptionsFeedback(previous => previous?.page === owner ? undefined : previous)
   }
 
+  /**
+   * Numeric option edit. An empty field is an explicit "clear my override".
+   * Anything else that is not a finite number ('1e999', a pasted non-number)
+   * is rejected outright: JSON.stringify(NaN) is `null`, so writing it would
+   * silently delete the stored override instead of applying what was typed.
+   */
+  const markOptionNumber = (key: OptionKey, raw: string): void => {
+    if (raw.trim() === '') {
+      markOption(key, undefined)
+      return
+    }
+    const value = Number(raw)
+    if (!Number.isFinite(value)) return
+    markOption(key, value)
+  }
+
+  const pageHasDraft = (pageId: SettingsPageId): boolean =>
+    pageId === 'network' ? proxyUrl.trim() !== savedProxyUrl
+      : PAGE_OPTION_KEYS[pageId].some(key => optionsDirty.has(key))
+
+  /** Feedback visible on one page: its own, or a page-independent load error. */
+  const feedbackFor = (pageId: SettingsPageId): 'saved' | 'error' | undefined =>
+    optionsFeedback === undefined
+      ? undefined
+      : optionsFeedback.page === undefined || optionsFeedback.page === pageId ? optionsFeedback.state : undefined
   const applyMediaPatch = (patch: Record<string, boolean>): void => {
-    setOptions(previous => ({ ...previous, ...patch }))
-    setOptionsDirty(previous => new Set([...previous, ...(Object.keys(patch) as OptionKey[])]))
-    setOptionsFeedback('idle')
+    for (const [key, value] of Object.entries(patch)) markOption(key as OptionKey, value)
   }
 
   const markMedia = (group: 'images' | 'video', enabled: boolean): void => {
@@ -255,7 +421,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       // Park the toggle: the switch stays off until the inline confirmation
       // below the media rows is accepted.
       setPendingMediaGroup(group)
-      setOptionsFeedback('idle')
+      setOptionsFeedback(previous => previous?.page === 'media' ? undefined : previous)
       return
     }
     const patch = mediaTogglePatch(options, group, false)
@@ -273,47 +439,58 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
 
   const cancelPendingMedia = (): void => {
     setPendingMediaGroup(null)
-    setOptionsFeedback('idle')
+    setOptionsFeedback(previous => previous?.page === 'media' ? undefined : previous)
   }
 
   const loadOptions = useCallback(async () => {
     try {
       applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH))
     } catch {
-      setOptionsFeedback('error')
+      setOptionsFeedback({ state: 'error' })
     }
   }, [])
 
-  const saveOptions = async (): Promise<void> => {
+  /** Save only the active page's dirty keys; every other page keeps its draft. */
+  const saveOptions = async (pageId: SettingsPageId): Promise<void> => {
+    const keys = PAGE_OPTION_KEYS[pageId].filter(key => optionsDirty.has(key))
+    if (keys.length === 0) return
     setOptionsBusy(true)
     try {
       const patch: Record<string, unknown> = {}
-      for (const key of optionsDirty) patch[key] = options[key] ?? null
-      applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch))
-      if (optionsDirty.has('videoTool') || optionsDirty.has('mediaRiskAcknowledged')) setCapabilityGeneration(generation => generation + 1)
-      setOptionsFeedback('saved')
+      for (const key of keys) patch[key] = options[key] ?? null
+      applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch), keys)
+      const remaining = new Set(optionsDirtyRef.current)
+      for (const key of keys) remaining.delete(key)
+      optionsDirtyRef.current = remaining
+      setOptionsFeedback({ page: pageId, state: 'saved' })
+      if (keys.includes('videoTool') || keys.includes('mediaRiskAcknowledged')) setCapabilityGeneration(generation => generation + 1)
     } catch {
-      setOptionsFeedback('error')
+      setOptionsFeedback({ page: pageId, state: 'error' })
     } finally {
       setOptionsBusy(false)
     }
   }
 
-  const resetOptions = async (): Promise<void> => {
+  /** Reset only the active page's overrides back to the defaults. */
+  const resetOptions = async (pageId: SettingsPageId): Promise<void> => {
+    const keys = pageResetKeys(pageId)
+    if (keys.length === 0) return
     setOptionsBusy(true)
     try {
       const patch: Record<string, unknown> = {}
-      for (const key of ALL_OPTION_KEYS) patch[key] = null
-      // Consent revocation must override even an old opt-in Cordis config.
-      patch.mediaRiskAcknowledged = false
-      // A parked inline confirmation would re-sign consent on top of the
-      // reset, so drop it together with the reset itself.
-      setPendingMediaGroup(null)
-      applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch))
-      setCapabilityGeneration(generation => generation + 1)
-      setOptionsFeedback('saved')
+      for (const key of keys) patch[key] = null
+      if (pageId === 'media') {
+        patch.mediaRiskAcknowledged = false
+        setPendingMediaGroup(null)
+      }
+      applyOptionsPayload(await jsonRequest<OptionsPayload>(OPTIONS_PATH, 'POST', patch), keys)
+      const remaining = new Set(optionsDirtyRef.current)
+      for (const key of keys) remaining.delete(key)
+      optionsDirtyRef.current = remaining
+      setOptionsFeedback({ page: pageId, state: 'saved' })
+      if (pageId === 'media') setCapabilityGeneration(generation => generation + 1)
     } catch {
-      setOptionsFeedback('error')
+      setOptionsFeedback({ page: pageId, state: 'error' })
     } finally {
       setOptionsBusy(false)
     }
@@ -322,7 +499,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const loadProxy = useCallback(async () => {
     try {
       const value = await jsonRequest<{ proxyUrl: string }>(PROXY_PATH)
-      setProxyUrl(value.proxyUrl ?? '')
+      // Still learn the baseline after an edit, but never replace a newer save.
+      if (!proxySavedRef.current) setSavedProxyUrl(value.proxyUrl ?? '')
+      if (!proxyEditedRef.current) setProxyUrl(value.proxyUrl ?? '')
     } catch {
       setProxyFeedback('error')
     }
@@ -331,7 +510,11 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const saveProxy = async (): Promise<void> => {
     setProxyBusy(true)
     try {
-      await jsonRequest<{ proxyUrl: string }>(PROXY_PATH, 'POST', { proxyUrl })
+      const value = await jsonRequest<{ proxyUrl: string }>(PROXY_PATH, 'POST', { proxyUrl })
+      proxyEditedRef.current = true
+      proxySavedRef.current = true
+      setProxyUrl(value.proxyUrl ?? '')
+      setSavedProxyUrl(value.proxyUrl ?? '')
       setProxyFeedback('saved')
     } catch {
       setProxyFeedback('error')
@@ -341,14 +524,42 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const refresh = useCallback(async () => {
+    // Serialize polls: if /auth/status is slower than the 1-second interval,
+    // every tick used to bump the sequence and doom every completion, leaving
+    // the UI in signing-in forever while requests kept stacking up. A tick
+    // that finds a read in flight just skips; the next one runs after it.
+    if (statusAbortRef.current !== undefined) return
+    const abort = new AbortController()
+    statusAbortRef.current = abort
+    const request = ++statusRequestRef.current
+    let rejectAborted!: (reason?: unknown) => void
+    const aborted = new Promise<never>((_resolve, reject) => { rejectAborted = reject })
+    const onAbort = () => rejectAborted(abort.signal.reason)
+    abort.signal.addEventListener('abort', onAbort, { once: true })
+    const timer = setTimeout(() => { abort.abort(new Error(t('requestFailed'))) }, STATUS_TIMEOUT_MS)
     try {
-      setStatus(await jsonRequest<AccountStatus>(STATUS_PATH))
+      // Cover both fetch and body decoding, even if a transport ignores abort.
+      const value = await Promise.race([jsonRequest<AccountStatus>(STATUS_PATH, 'GET', undefined, abort.signal), aborted])
+      if (request === statusRequestRef.current) setStatus(value)
     } catch (error: unknown) {
-      setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+      if (request === statusRequestRef.current) {
+        // A transient read failure must not stop OAuth polling or hide the
+        // device code. The next tick can observe server-side completion.
+        setStatus(previous => previous.status === 'signing-in'
+          ? previous
+          : { status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+      }
+    } finally {
+      clearTimeout(timer)
+      abort.signal.removeEventListener('abort', onAbort)
+      if (statusAbortRef.current === abort) statusAbortRef.current = undefined
     }
   }, [t])
 
-  useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    void refresh()
+    return invalidateStatusRead
+  }, [refresh, invalidateStatusRead])
   useEffect(() => { void loadProxy() }, [loadProxy])
   useEffect(() => { void loadOptions() }, [loadOptions])
   useEffect(() => {
@@ -363,8 +574,11 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     if (status.status === 'signing-in') return
     if (status.status !== 'loading' && status.sharedGrokAuth === true) {
       if (!window.confirm(t('confirmLoginShared'))) return
+    } else if (status.status === 'signed-in') {
+      if (!window.confirm(t('confirmLoginPrivate'))) return
     }
     // Only once the user actually committed to a sign-in.
+    invalidateStatusRead()
     setAccountGeneration(generation => generation + 1)
     const popup = window.open('about:blank', '_blank')
     if (popup !== null) popup.opener = null
@@ -395,11 +609,13 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const importGrok = async (): Promise<void> => {
     // Hide old account data during import and remount again after it commits.
     // A pre-request bump alone could mount a panel that fetches the old account.
+    invalidateStatusRead()
     setAccountGeneration(generation => generation + 1)
     setStatus({ status: 'loading' })
     setBusy(true)
     try {
       const imported = await jsonRequest<AccountStatus>(IMPORT_PATH, 'POST')
+      invalidateStatusRead()
       setAccountGeneration(generation => generation + 1)
       setStatus(imported)
     } catch (error: unknown) {
@@ -410,6 +626,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const saveModels = async (selected: string[]): Promise<void> => {
+    invalidateStatusRead()
     setBusy(true)
     try {
       setStatus(await jsonRequest<AccountStatus>(MODELS_PATH, 'POST', { selected }))
@@ -424,14 +641,21 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     if (status.status === 'signed-in' && status.sharedGrokAuth === true) {
       if (!window.confirm(t('confirmLogoutShared'))) return
     }
+    // Hide the outgoing account BEFORE the bump remounts the quota, capability
+    // and task panels: while the sign-out is still in flight they would
+    // otherwise re-read the account that is on its way out.
+    setStatus({ status: 'loading' })
+    invalidateStatusRead()
     setAccountGeneration(generation => generation + 1)
     setBusy(true)
     try {
       // The route returns the full signed-out status (incl. grokImportAvailable),
       // so the Grok CLI import button stays available right after sign-out.
       setStatus(await jsonRequest<AccountStatus>(LOGOUT_PATH, 'POST'))
-    } catch (error: unknown) {
-      setStatus({ status: 'error', message: error instanceof Error ? error.message : t('requestFailed') })
+    } catch {
+      // Sign-out failed, so the account is unchanged: re-read its real status
+      // instead of guessing, which also surfaces a transport error.
+      await refresh()
     } finally {
       setBusy(false)
     }
@@ -452,336 +676,402 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const selectedIds = status.status === 'signed-in' ? status.selected ?? status.models ?? [] : []
   const source = status.status === 'signed-in' ? sourceBadge(status.catalogSource) : null
 
+  /** Remount key: every account-changing action drops the previous account's
+   *  quota reading, capability record and task rows. */
+  const accountKey = `${status.status}:${String(accountGeneration)}`
+
+  /** Save / reset row: always names the page whose own options it acts on. */
+  const optionActions = (pageId: SettingsPageId) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+      {pageHasDraft(pageId) ? <p role="status" style={{ ...bodyStyle, margin: 0, width: '100%' }}>{t('unsavedChangesHint')}</p> : null}
+      <button type="button" style={buttonStyle} disabled={optionsBusy || !pageHasDraft(pageId)} onClick={() => { void saveOptions(pageId) }}>
+        {optionsBusy ? t('working') : `${t('optionsSave')} · ${t(PAGE_LABEL_KEYS[pageId])}`}
+      </button>
+      <button type="button" style={buttonStyle} disabled={optionsBusy} onClick={() => { void resetOptions(pageId) }}>
+        {`${t('optionsReset')} · ${t(PAGE_LABEL_KEYS[pageId])}`}
+      </button>
+      {feedbackFor(pageId) === 'saved'
+        ? <p role="status" style={{ ...bodyStyle, margin: 0, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('optionsSaved')}</p>
+        : null}
+      {feedbackFor(pageId) === 'error'
+        ? <p role="alert" style={{ ...errorStyle, margin: 0 }}>{t('optionsError')}</p>
+        : null}
+    </div>
+  )
+
   return (
     <section style={pageStyle} aria-labelledby="xai-oauth-settings-title">
-      <header style={headerStyle}>
-        <div style={logoStyle} aria-hidden="true">ɡ</div>
-        <div style={{ minWidth: 0 }}>
-          <h2 id="xai-oauth-settings-title" style={titleStyle}>{t('title')}</h2>
-          <p style={{ ...bodyStyle, marginTop: 4 }}>{t('intro')}</p>
-        </div>
-      </header>
-
-      {/* Account card */}
-      <div style={cardStyle}>
-        <div style={rowStyle}>
-          <div style={statusStyle} role="status">
-            <span aria-hidden="true" style={dotStyle(status.status)} />
-            <span>{label}</span>
+      {/* Sticky header: the shared title, the account status every page shows
+          and the five-page navigation. Plain buttons with aria-current — the
+          host settings dialog owns its own focus handling. */}
+      <div style={stickyBarStyle}>
+        <header style={headerStyle}>
+          <div style={logoStyle} aria-hidden="true">ɡ</div>
+          <div style={{ minWidth: 0 }}>
+            <h2 id="xai-oauth-settings-title" style={titleStyle}>{t('title')}</h2>
+            <p style={{ ...bodyStyle, marginTop: 4 }}>{t('intro')}</p>
           </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {status.status === 'loading'
-              ? null
-              : status.status === 'signed-in'
-                ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signOut() }}>{busy ? t('working') : t(shared ? 'logoutShared' : 'logout')}</button>
-                : (
-                    <>
-                      <button type="button" style={primaryButtonStyle} disabled={busy || status.status === 'signing-in'} onClick={() => { void signIn() }}>{busy ? t('working') : status.status === 'error' ? t('loginAgain') : t(shared ? 'loginShared' : 'login')}</button>
-                      {status.grokImportAvailable === true
-                        ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void importGrok() }}>{t('importGrok')}</button>
-                        : null}
-                    </>
-                  )}
-          </div>
+        </header>
+        <div style={commonStatusStyle} role="status">
+          <span aria-hidden="true" style={dotStyle(status.status)} />
+          <span style={{ color: 'var(--dsw-alias-label-secondary)' }}>{t('statusLabel')}</span>
+          <span>{label}</span>
         </div>
-
-        {/* dsh 0.1.2 repurposed --dsw-alias-label-dimmed to a near-invisible
-            tint (light: neutral-bluish-200) and removed state-info-primary;
-            the disclaimer is legally required text, so it keeps a readable
-            secondary color, and hints follow the host's tertiary convention. */}
-        <p style={{ ...bodyStyle, fontSize: 12, color: 'var(--dsw-alias-label-secondary, #61666b)' }}>{t('unofficialNotice')}</p>
-
-        {status.status === 'error' ? <p style={errorStyle}>{status.message}</p> : null}
-        {status.status !== 'loading' && status.sharedGrokAuth === true
-          ? <p style={bodyStyle}>{t('sharedGrok')}</p>
-          : null}
-        {status.status !== 'signed-in' && status.status !== 'loading' && status.grokImportAvailable === true
-          ? <p style={bodyStyle}>{t('importHint')}</p>
-          : null}
-
-        {status.status === 'signing-in' && status.userCode !== undefined
-          ? (
-              <div style={codeBoxStyle}>
-                <span style={bodyStyle}>{t('userCode')}</span>
-                <span style={codeStyle}>{status.userCode}</span>
-              </div>
-            )
-          : null}
-        {status.status === 'signing-in' && status.url !== undefined
-          ? (
-              <p style={bodyStyle}>
-                {t(popupBlocked ? 'popupBlocked' : 'openUrl')}
-                {' '}
-                <a href={status.url} target="_blank" rel="noreferrer" style={linkStyle}>{status.url}</a>
-              </p>
-            )
-          : null}
+        <nav aria-label={t('nav')} style={tabBarStyle}>
+          {SETTINGS_PAGES.map(id => (
+            <button
+              key={id}
+              type="button"
+              style={page === id ? activeTabStyle : tabStyle}
+              aria-current={page === id ? 'page' : undefined}
+              aria-label={pageHasDraft(id) ? `${t(PAGE_LABEL_KEYS[id])} — ${t('unsavedChanges')}` : t(PAGE_LABEL_KEYS[id])}
+              title={pageHasDraft(id) ? t('unsavedChangesHint') : undefined}
+              onClick={() => { setPage(id) }}
+            >
+              {pageHasDraft(id)
+                ? <>{t(PAGE_LABEL_KEYS[id])}<span aria-hidden="true"> •</span></>
+                : t(PAGE_LABEL_KEYS[id])}
+            </button>
+          ))}
+        </nav>
       </div>
 
-      {/* Models card */}
-      {status.status === 'signed-in'
+      {/* Account page: the shared quota reading and the auth actions. */}
+      {page === 'account'
         ? (
-            <div style={cardStyle}>
-              <div style={rowStyle}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('models')}</h3>
-                  <span style={badgeStyle}>{String(modelIds.length)}</span>
-                  {source === null ? null : <span style={{ ...sourceBadgeStyle, color: source.color }}>{source.text}</span>}
+            <div style={pageStyleInner}>
+              <QuotaView key={accountKey} t={t} signedIn={status.status === 'signed-in'} accountLoading={status.status === 'loading' || status.status === 'signing-in'} />
+              <div style={cardStyle}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {status.status === 'loading'
+                    ? null
+                    : status.status === 'signed-in'
+                      ? <>
+                          <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signIn() }}>{busy ? t('working') : t('loginAgain')}</button>
+                          <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void signOut() }}>{busy ? t('working') : t(shared ? 'logoutShared' : 'logout')}</button>
+                        </>
+                      : (
+                          <>
+                            <button type="button" style={primaryButtonStyle} disabled={busy || status.status === 'signing-in'} onClick={() => { void signIn() }}>{busy ? t('working') : status.status === 'error' ? t('loginAgain') : t(shared ? 'loginShared' : 'login')}</button>
+                            {status.grokImportAvailable === true
+                              ? <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void importGrok() }}>{t('importGrok')}</button>
+                              : null}
+                          </>
+                        )}
                 </div>
-                <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void saveModels([]) }}>{t('selectAll')}</button>
+
+                <p style={bodyStyle}>{t('subscriptionLoginHint')}</p>
+                <a href="https://grok.com/dashboard" target="_blank" rel="noreferrer" style={linkStyle}>{t('subscriptionDashboard')}</a>
+
+                {/* dsh 0.1.2 repurposed --dsw-alias-label-dimmed to a near-invisible
+                    tint (light: neutral-bluish-200) and removed state-info-primary;
+                    the disclaimer is legally required text, so it keeps a readable
+                    secondary color, and hints follow the host's tertiary convention. */}
+                <p style={{ ...bodyStyle, fontSize: 12, color: 'var(--dsw-alias-label-secondary, #61666b)' }}>{t('unofficialNotice')}</p>
+
+                {status.status === 'error' ? <p style={errorStyle}>{status.message}</p> : null}
+                {status.status === 'signed-in' && status.loginError !== undefined
+                  ? <p role="status" style={errorStyle}>{t('loginFailedStoredAccount')}{' '}{status.loginError}</p>
+                  : null}
+                {status.status !== 'loading' && status.sharedGrokAuth === true
+                  ? <p style={bodyStyle}>{t('sharedGrok')}</p>
+                  : null}
+                {status.status !== 'signed-in' && status.status !== 'loading' && status.grokImportAvailable === true
+                  ? <p style={bodyStyle}>{t('importHint')}</p>
+                  : null}
+
+                {status.status === 'signing-in' && status.userCode !== undefined
+                  ? (
+                      <div style={codeBoxStyle}>
+                        <span style={bodyStyle}>{t('userCode')}</span>
+                        <span style={codeStyle}>{status.userCode}</span>
+                      </div>
+                    )
+                  : null}
+                {status.status === 'signing-in' && status.url !== undefined
+                  ? (
+                      <p style={bodyStyle}>
+                        {t(popupBlocked ? 'popupBlocked' : 'openUrl')}
+                        {' '}
+                        <a href={status.url} target="_blank" rel="noreferrer" style={linkStyle}>{status.url}</a>
+                      </p>
+                    )
+                  : null}
               </div>
-              <p style={bodyStyle}>
-                {status.catalogSource === 'live' ? t('catalogLive')
-                  : status.catalogSource === 'cache' ? t('catalogCache')
-                    : t('catalogFallback')}
-              </p>
-              <p style={bodyStyle}>{t('modelHint')}</p>
-              <ul style={listStyle}>
-                {modelIds.map(id => {
-                  const checked = selectedIds.includes(id)
-                  return (
-                    <li key={id}>
-                      <label style={modelRowStyle}>
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          disabled={busy}
-                          onChange={() => {
-                            const current = new Set(selectedIds)
-                            if (checked) current.delete(id)
-                            else current.add(id)
-                            void saveModels([...current])
-                          }}
-                        />
-                        <span style={modelNameStyle}>{displayName(id)}</span>
-                        <span style={modelIdStyle}>{id}</span>
-                      </label>
-                    </li>
-                  )
-                })}
-              </ul>
-              {status.catalogError === undefined ? null : <p style={errorStyle}>{t('catalogError')}</p>}
             </div>
           )
         : null}
 
-      {/* Proxy card */}
-      <div style={cardStyle}>
-        <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('proxyTitle')}</h3>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          <input
-            type="text"
-            value={proxyUrl}
-            placeholder={t('proxyPlaceholder')}
-            disabled={proxyBusy}
-            aria-label={t('proxyTitle')}
-            onChange={(event) => {
-              setProxyUrl(event.target.value)
-              setProxyFeedback('idle')
-            }}
-            style={{
-              flex: '1 1 260px',
-              minHeight: 34,
-              padding: '6px 12px',
-              border: '1px solid var(--dsw-alias-border-l2)',
-              borderRadius: 10,
-              background: 'var(--dsw-alias-bg-layer-1)',
-              color: 'var(--dsw-alias-label-primary)',
-              font: 'inherit',
-              fontSize: 14,
-            }}
-          />
-          <button type="button" style={buttonStyle} disabled={proxyBusy} onClick={() => { void saveProxy() }}>
-            {proxyBusy ? t('working') : t('proxySave')}
-          </button>
-        </div>
-        <p style={bodyStyle}>{t('proxyHint')}</p>
-        {proxyFeedback === 'saved'
-          ? <p style={{ ...bodyStyle, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('proxySaved')}</p>
-          : null}
-        {proxyFeedback === 'error' ? <p style={errorStyle}>{t('proxyError')}</p> : null}
-      </div>
-
-      {/* Search & feature options card */}
-      <div style={cardStyle}>
-        <div style={rowStyle}>
-          <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('optionsTitle')}</h3>
-          <button type="button" style={buttonStyle} disabled={optionsBusy} onClick={() => { void resetOptions() }}>
-            {t('optionsReset')}
-          </button>
-        </div>
-        <p style={bodyStyle}>{t('optionsHint')}</p>
-        <p style={bodyStyle}>{t('mediaRiskHint')}</p>
-
-        <label style={optionRowStyle}>
-          <input
-            type="checkbox"
-            checked={optBool(options.backendSearch, false)}
-            disabled={optionsBusy}
-            onChange={(event) => markOption('backendSearch', event.target.checked)}
-          />
-          <span>{t('backendSearch')}</span>
-        </label>
-        <p style={optionHintStyle}>{t('backendSearchHint')}</p>
-
-        <div style={optionRowStyle}>
-          <label style={optionRowStyle}>
-            <input
-              type="checkbox"
-              checked={optBool(options.statefulResponses, false)}
-              disabled={optionsBusy}
-              onChange={(event) => markOption('statefulResponses', event.target.checked)}
-            />
-            <span>{t('statefulResponses')}</span>
-          </label>
-          <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
-        </div>
-        <p style={optionHintStyle}>{t('statefulResponsesHint')}</p>
-
-        <div style={optionRowStyle}>
-          <label style={optionRowStyle}>
-            <input
-              type="checkbox"
-              checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
-              disabled={optionsBusy}
-              onChange={(event) => markMedia('images', event.target.checked)}
-            />
-            <span>{t('imagineTool')}</span>
-          </label>
-          <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
-        </div>
-        <p style={optionHintStyle}>{t('imagineToolHint')}</p>
-        <p style={optionHintStyle}>
-          {`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}
-        </p>
-
-        <div style={optionRowStyle}>
-          <label style={optionRowStyle}>
-            <input
-              type="checkbox"
-              checked={optBool(options.videoTool, false)}
-              disabled={optionsBusy}
-              onChange={(event) => markMedia('video', event.target.checked)}
-            />
-            <span>{t('videoTool')}</span>
-          </label>
-          <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
-        </div>
-        <p style={optionHintStyle}>{t('videoToolHint')}</p>
-        {/* Read-only presentation of the remaining video parameters: the first
-            version edits videoTool only, so these stay informational. */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-          <span style={optionRowStyle}>{`${t('videoModelLabel')}: ${String(options.videoModel ?? '—')}`}</span>
-          <span style={optionRowStyle}>{`${t('videoMaxBytesLabel')}: ${String(options.videoMaxBytes ?? '—')}`}</span>
-        </div>
-
-        {pendingMediaGroup !== null ? (
-          <div style={mediaConfirmStyle}>
-            <p style={{ ...errorStyle, margin: '0 0 4px', fontWeight: 600 }}>
-              {pendingMediaGroup === 'images' ? t('imagineTool') : t('videoTool')}
-            </p>
-            <p style={{ ...errorStyle, margin: '0 0 6px' }}>{t('mediaConfirmPrompt')}</p>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button type="button" style={primaryButtonStyle} disabled={optionsBusy} onClick={confirmPendingMedia}>{t('mediaConfirmYes')}</button>
-              <button type="button" style={buttonStyle} disabled={optionsBusy} onClick={cancelPendingMedia}>{t('mediaConfirmNo')}</button>
+      {/* Models page */}
+      {page === 'models'
+        ? (
+            <div style={pageStyleInner}>
+              {status.status === 'signed-in'
+                ? (
+                    <div style={cardStyle}>
+                      <div style={rowStyle}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('models')}</h3>
+                          <span style={badgeStyle}>{String(modelIds.length)}</span>
+                          {source === null ? null : <span style={{ ...sourceBadgeStyle, color: source.color }}>{source.text}</span>}
+                        </div>
+                        <button type="button" style={buttonStyle} disabled={busy} onClick={() => { void saveModels([]) }}>{t('selectAll')}</button>
+                      </div>
+                      <p style={bodyStyle}>
+                        {status.catalogSource === 'live' ? t('catalogLive')
+                          : status.catalogSource === 'cache' ? t('catalogCache')
+                            : t('catalogFallback')}
+                      </p>
+                      <p style={bodyStyle}>{t('modelHint')}</p>
+                      <ul style={listStyle}>
+                        {modelIds.map(id => {
+                          const checked = selectedIds.includes(id)
+                          return (
+                            <li key={id}>
+                              <label style={modelRowStyle}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  disabled={busy}
+                                  onChange={() => {
+                                    const current = new Set(selectedIds)
+                                    if (checked) current.delete(id)
+                                    else current.add(id)
+                                    void saveModels([...current])
+                                  }}
+                                />
+                                <span style={modelNameStyle}>{displayName(id)}</span>
+                                <span style={modelIdStyle}>{id}</span>
+                              </label>
+                            </li>
+                          )
+                        })}
+                      </ul>
+                      {status.catalogError === undefined ? null : <p style={errorStyle}>{t('catalogError')}</p>}
+                    </div>
+                  )
+                : null}
             </div>
-          </div>
-        ) : null}
+          )
+        : null}
 
-        <label style={optionRowStyle}>
-          <span>{t('nestedSearchTools')}</span>
-          <select
-            value={
-              optionsDirty.has('nestedSearchTools')
-                ? options.nestedSearchTools === undefined ? 'auto' : String(options.nestedSearchTools)
-                : storedOptions.nestedSearchTools === undefined ? 'auto' : String(storedOptions.nestedSearchTools)
-            }
-            disabled={optionsBusy}
-            onChange={(event) => markOption(
-              'nestedSearchTools',
-              event.target.value === 'auto' ? undefined : event.target.value === 'true',
-            )}
-            style={{ ...optionInputStyle, flex: '0 1 auto' }}
-          >
-            <option value="auto">{t('nestedSearchToolsAuto')}</option>
-            <option value="true">on</option>
-            <option value="false">off</option>
-          </select>
-        </label>
-        <p style={optionHintStyle}>{t('nestedSearchToolsHint')}</p>
+      {/* Search page: the search switches, the stateful-conversation switch and
+          the nested-search parameters. */}
+      {page === 'search'
+        ? (
+            <div style={pageStyleInner}>
+              <div style={cardStyle}>
+                <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('navSearch')}</h3>
+                <p style={bodyStyle}>{t('optionsHint')}</p>
+                <label style={optionRowStyle}>
+                  <input
+                    type="checkbox"
+                    checked={optBool(options.backendSearch, false)}
+                    disabled={optionsBusy}
+                    onChange={(event) => markOption('backendSearch', event.target.checked)}
+                  />
+                  <span>{t('backendSearch')}</span>
+                </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                <p style={optionHintStyle}>{t('backendSearchHint')}</p>
 
-        <label style={optionRowStyle}>
-          <span>{t('searchModel')}</span>
-          <input
-            type="text"
-            value={String(options.searchModel ?? '')}
-            placeholder="grok-build-0.1"
-            disabled={optionsBusy}
-            onChange={(event) => markOption('searchModel', event.target.value.trim() === '' ? undefined : event.target.value)}
-            style={optionInputStyle}
-          />
-        </label>
-        <p style={optionHintStyle}>{t('searchModelHint')}</p>
+                <label style={optionRowStyle}>
+                  <input
+                    type="checkbox"
+                    checked={optBool(options.statefulResponses, false)}
+                    disabled={optionsBusy}
+                    onChange={(event) => markOption('statefulResponses', event.target.checked)}
+                  />
+                  <span>{t('statefulResponses')}</span>
+                </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                <p style={optionHintStyle}>{t('statefulResponsesHint')}</p>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-          <label style={optionRowStyle}>
-            <span>{t('searchMaxResults')}</span>
-            <input
-              type="number"
-              min={1}
-              value={String(options.searchMaxResults ?? '')}
-              placeholder="8"
-              disabled={optionsBusy}
-              onChange={(event) => markOption('searchMaxResults', event.target.value === '' ? undefined : Number(event.target.value))}
-              style={optionInputStyle}
-            />
-          </label>
-          <label style={optionRowStyle}>
-            <span>{t('webSearchTimeoutMs')}</span>
-            <input
-              type="number"
-              min={1000}
-              value={String(options.webSearchTimeoutMs ?? '')}
-              placeholder="60000"
-              disabled={optionsBusy}
-              onChange={(event) => markOption('webSearchTimeoutMs', event.target.value === '' ? undefined : Number(event.target.value))}
-              style={optionInputStyle}
-            />
-          </label>
-          <label style={optionRowStyle}>
-            <span>{t('xSearchTimeoutMs')}</span>
-            <input
-              type="number"
-              min={1000}
-              value={String(options.xSearchTimeoutMs ?? '')}
-              placeholder="120000"
-              disabled={optionsBusy}
-              onChange={(event) => markOption('xSearchTimeoutMs', event.target.value === '' ? undefined : Number(event.target.value))}
-              style={optionInputStyle}
-            />
-          </label>
-        </div>
-        <p style={optionHintStyle}>{t('searchMaxResultsHint')} · {t('webSearchTimeoutHint')} · {t('xSearchTimeoutHint')}</p>
+                <label style={optionRowStyle}>
+                  <span>{t('nestedSearchTools')}</span>
+                  <select
+                    value={
+                      optionsDirty.has('nestedSearchTools')
+                        ? options.nestedSearchTools === undefined ? 'auto' : String(options.nestedSearchTools)
+                        : storedOptions.nestedSearchTools === undefined ? 'auto' : String(storedOptions.nestedSearchTools)
+                    }
+                    disabled={optionsBusy}
+                    onChange={(event) => markOption(
+                      'nestedSearchTools',
+                      event.target.value === 'auto' ? undefined : event.target.value === 'true',
+                    )}
+                    style={{ ...optionInputStyle, flex: '0 1 auto' }}
+                  >
+                    <option value="auto">{t('nestedSearchToolsAuto')}</option>
+                    <option value="true">on</option>
+                    <option value="false">off</option>
+                  </select>
+                </label>
+                <p style={optionHintStyle}>{t('nestedSearchToolsHint')}</p>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-          <button type="button" style={buttonStyle} disabled={optionsBusy || optionsDirty.size === 0} onClick={() => { void saveOptions() }}>
-            {optionsBusy ? t('working') : t('optionsSave')}
-          </button>
-          {optionsFeedback === 'saved'
-            ? <p style={{ ...bodyStyle, margin: 0, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('optionsSaved')}</p>
-            : null}
-          {optionsFeedback === 'error' ? <p style={{ ...errorStyle, margin: 0 }}>{t('optionsError')}</p> : null}
-        </div>
-      </div>
+                <label style={optionRowStyle}>
+                  <span>{t('searchModel')}</span>
+                  <input
+                    type="text"
+                    value={String(options.searchModel ?? '')}
+                    placeholder="grok-build-0.1"
+                    disabled={optionsBusy}
+                    onChange={(event) => markOption('searchModel', event.target.value.trim() === '' ? undefined : event.target.value)}
+                    style={optionInputStyle}
+                  />
+                </label>
+                <p style={optionHintStyle}>{t('searchModelHint')}</p>
 
-      {/* Capability status + local video task list (frozen plugin routes).
-          The key remounts the panel on every account change, so a previous
-          account's tasks/diagnostics and blob URLs never survive a switch. */}
-      <CapabilitiesView
-        key={`${status.status}:${String(accountGeneration)}:${String(capabilityGeneration)}`}
-        t={t}
-        signedIn={status.status === 'signed-in'}
-      />
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+                  <label style={optionRowStyle}>
+                    <span>{t('searchMaxResults')}</span>
+                    <input
+                      type="number"
+                      min={1}
+                      value={String(options.searchMaxResults ?? '')}
+                      placeholder="8"
+                      disabled={optionsBusy}
+                      onChange={(event) => markOptionNumber('searchMaxResults', event.target.value)}
+                      style={optionInputStyle}
+                    />
+                  </label>
+                  <label style={optionRowStyle}>
+                    <span>{t('webSearchTimeoutMs')}</span>
+                    <input
+                      type="number"
+                      min={1000}
+                      value={String(options.webSearchTimeoutMs ?? '')}
+                      placeholder="60000"
+                      disabled={optionsBusy}
+                      onChange={(event) => markOptionNumber('webSearchTimeoutMs', event.target.value)}
+                      style={optionInputStyle}
+                    />
+                  </label>
+                  <label style={optionRowStyle}>
+                    <span>{t('xSearchTimeoutMs')}</span>
+                    <input
+                      type="number"
+                      min={1000}
+                      value={String(options.xSearchTimeoutMs ?? '')}
+                      placeholder="120000"
+                      disabled={optionsBusy}
+                      onChange={(event) => markOptionNumber('xSearchTimeoutMs', event.target.value)}
+                      style={optionInputStyle}
+                    />
+                  </label>
+                </div>
+                <p style={optionHintStyle}>{t('searchMaxResultsHint')} · {t('webSearchTimeoutHint')} · {t('xSearchTimeoutHint')}</p>
+                {optionActions('search')}
+              </div>
+            </div>
+          )
+        : null}
+
+      {/* Media page: the image / video switches, the capability record and the
+          local task list. Mounted only while this page is active, so leaving it
+          aborts its in-flight reads and revokes its blob URLs. */}
+      {page === 'media'
+        ? (
+            <div style={pageStyleInner}>
+              <div style={cardStyle}>
+                <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('navMedia')}</h3>
+                <p style={bodyStyle}>{t('optionsHint')}</p>
+                <p style={bodyStyle}>{t('mediaRiskHint')}</p>
+                <label style={optionRowStyle}>
+                  <input
+                    type="checkbox"
+                    checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
+                    disabled={optionsBusy}
+                    onChange={(event) => markMedia('images', event.target.checked)}
+                  />
+                  <span>{t('imagineTool')}</span>
+                </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                <p style={optionHintStyle}>{t('imagineToolHint')}</p>
+                <p style={optionHintStyle}>{`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}</p>
+
+                <label style={optionRowStyle}>
+                  <input
+                    type="checkbox"
+                    checked={optBool(options.videoTool, false)}
+                    disabled={optionsBusy}
+                    onChange={(event) => markMedia('video', event.target.checked)}
+                  />
+                  <span>{t('videoTool')}</span>
+                </label>
+                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                <p style={optionHintStyle}>{t('videoToolHint')}</p>
+                {/* Read-only presentation of the remaining video parameters: the first
+                    version edits videoTool only, so these stay informational. */}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
+                  <span style={optionRowStyle}>{`${t('videoModelLabel')}: ${String(options.videoModel ?? '—')}`}</span>
+                  <span style={optionRowStyle}>{`${t('videoMaxBytesLabel')}: ${String(options.videoMaxBytes ?? '—')}`}</span>
+                </div>
+                {pendingMediaGroup !== null ? (
+                  <div style={mediaConfirmStyle}>
+                    <p style={{ ...errorStyle, margin: '0 0 4px', fontWeight: 600 }}>{pendingMediaGroup === 'images' ? t('imagineTool') : t('videoTool')}</p>
+                    <p style={{ ...errorStyle, margin: '0 0 6px' }}>{t('mediaConfirmPrompt')}</p>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button type="button" style={primaryButtonStyle} disabled={optionsBusy} onClick={confirmPendingMedia}>{t('mediaConfirmYes')}</button>
+                      <button type="button" style={buttonStyle} disabled={optionsBusy} onClick={cancelPendingMedia}>{t('mediaConfirmNo')}</button>
+                    </div>
+                  </div>
+                ) : null}
+                {optionActions('media')}
+              </div>
+
+              {/* Capability status + local video task list (frozen plugin routes).
+                  The key remounts the panel on every account change, so a previous
+                  account's tasks/diagnostics and blob URLs never survive a switch. */}
+              <CapabilitiesView key={`${accountKey}:${String(capabilityGeneration)}`} t={t} signedIn={status.status === 'signed-in'} />
+            </div>
+          )
+        : null}
+
+      {/* Network page: the xAI-only proxy. */}
+      {page === 'network'
+        ? (
+            <div style={pageStyleInner}>
+              <div style={cardStyle}>
+                <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('proxyTitle')}</h3>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <input
+                    type="text"
+                    value={proxyUrl}
+                    placeholder={t('proxyPlaceholder')}
+                    disabled={proxyBusy}
+                    aria-label={t('proxyTitle')}
+                    onChange={(event) => {
+                      proxyEditedRef.current = true
+                      setProxyUrl(event.target.value)
+                      setProxyFeedback('idle')
+                    }}
+                    style={{
+                      flex: '1 1 260px',
+                      minHeight: 34,
+                      padding: '6px 12px',
+                      border: '1px solid var(--dsw-alias-border-l2)',
+                      borderRadius: 10,
+                      background: 'var(--dsw-alias-bg-layer-1)',
+                      color: 'var(--dsw-alias-label-primary)',
+                      font: 'inherit',
+                      fontSize: 14,
+                    }}
+                  />
+                  <button type="button" style={buttonStyle} disabled={proxyBusy} onClick={() => { void saveProxy() }}>
+                    {proxyBusy ? t('working') : t('proxySave')}
+                  </button>
+                </div>
+                <p style={bodyStyle}>{t('proxyHint')}</p>
+                {pageHasDraft('network') ? <p role="status" style={bodyStyle}>{t('unsavedChangesHint')}</p> : null}
+                {proxyFeedback === 'saved'
+                  ? <p role="status" style={{ ...bodyStyle, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('proxySaved')}</p>
+                  : null}
+                {proxyFeedback === 'error' ? <p role="alert" style={errorStyle}>{t('proxyError')}</p> : null}
+              </div>
+            </div>
+          )
+        : null}
     </section>
   )
 }

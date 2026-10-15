@@ -426,15 +426,21 @@ export async function runImageEdit(options: RunImageEditOptions): Promise<EditSa
       authorization: `Bearer ${bearer}`,
       'content-type': 'application/json',
       accept: 'application/json',
-      'user-agent': 'dsh-grok-kit/0.2.3',
+      'user-agent': 'dsh-grok-kit/0.2.4',
     },
     body: JSON.stringify(body),
     ...signal === undefined ? {} : { signal },
   })
   let response = await post(access)
   if (response.status === 401 && tokens.refresh !== undefined) {
-    const refreshed = await tokens.refresh(access, signal)
+    let refreshed: string | undefined
+    try { refreshed = await tokens.refresh(access, signal) } catch (error) {
+      // Best-effort cleanup; propagate the original credential failure.
+      void response.body?.cancel().catch(() => undefined)
+      throw error
+    }
     if (typeof refreshed === 'string' && refreshed.length > 0 && refreshed !== access) {
+      void response.body?.cancel().catch(() => undefined)
       logger?.('grok_imagine_edit: retrying once after 401 with a refreshed token')
       response = await post(refreshed)
     }

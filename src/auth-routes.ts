@@ -81,6 +81,8 @@ export type XaiOAuthWebAuthStatus =
     selected: string[]
     catalogSource: CatalogSource
     catalogError?: string
+    /** A failed reauthorization need not invalidate the saved account. */
+    loginError?: string
     grokImportAvailable: boolean
     sharedGrokAuth: boolean
   }
@@ -114,13 +116,27 @@ export class XaiOAuthWebAuth {
   /** Serializes import/logout against each other and against an in-flight login. */
   private exclusive: Promise<void> = Promise.resolve()
   private exclusivePending = 0
+  /** Retained across status/catalog reads; cleared by the next auth action. */
+  private loginError: string | undefined
 
-  constructor(private readonly session: XaiOAuthSession) {}
+  constructor(
+    private readonly session: XaiOAuthSession,
+    /** Invalidate account-scoped views/cache even if catalog refresh later fails. */
+    private readonly onAccountChange: () => void = () => undefined,
+  ) {}
 
   async status(): Promise<XaiOAuthWebAuthStatus> {
     if (this.operation !== undefined) return this.state
     if (this.state.status === 'error') {
-      return { ...this.state, grokImportAvailable: await grokImportAvailable() }
+      const failed = this.state
+      const stored = await this.readStoredStatus()
+      // A newer login/import/logout wins over this asynchronous recovery read.
+      if (this.operation !== undefined || this.state !== failed) return this.state
+      if (stored.status === 'signed-in') {
+        this.state = stored
+        return this.state
+      }
+      return { ...failed, grokImportAvailable: stored.grokImportAvailable, sharedGrokAuth: stored.sharedGrokAuth }
     }
     return this.readStoredStatus()
   }
@@ -171,7 +187,9 @@ export class XaiOAuthWebAuth {
     const run = this.exclusive.then(async () => {
       this.cancellation?.abort(new Error('xAI Grok sign-in cancelled'))
       await this.operation?.catch(() => undefined)
-      await fn()
+      this.loginError = undefined
+      this.onAccountChange()
+      try { await fn() } finally { this.onAccountChange() }
     })
     this.exclusivePending += 1
     this.exclusive = run.catch(() => undefined)
@@ -179,6 +197,8 @@ export class XaiOAuthWebAuth {
   }
 
   private start(): void {
+    this.loginError = undefined
+    this.onAccountChange()
     const cancellation = new AbortController()
     this.cancellation = cancellation
     this.challenge = undefined
@@ -195,14 +215,17 @@ export class XaiOAuthWebAuth {
       },
       (error: unknown) => {
         this.rejectChallenge(error)
+        const message = safeMessage(error)
+        this.loginError = message
         this.state = {
           status: 'error',
-          message: safeMessage(error),
+          message,
           grokImportAvailable: false,
           sharedGrokAuth: this.session.store.sharedWithGrokCli,
         }
       },
     ).finally(() => {
+      this.onAccountChange()
       this.operation = undefined
       this.cancellation = undefined
     })
@@ -264,6 +287,7 @@ export class XaiOAuthWebAuth {
       grokImportAvailable: grok && !shared,
       sharedGrokAuth: shared,
       ...this.session.catalogError === undefined ? {} : { catalogError: this.session.catalogError },
+      ...this.loginError === undefined ? {} : { loginError: this.loginError },
     }
   }
 
@@ -411,8 +435,9 @@ export function registerXaiOAuthAuthRoutes(
   ctx: Context,
   session: XaiOAuthSession,
   cordisConfig: Record<string, unknown> = {},
+  onAccountChange?: () => void,
 ): void {
-  const auth = new XaiOAuthWebAuth(session)
+  const auth = new XaiOAuthWebAuth(session, onAccountChange)
   // Keep merge/check/write in order across tabs: a stale unrelated save must
   // not resurrect switches that another request just closed.
   let optionsWrite = Promise.resolve()
