@@ -863,28 +863,34 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
               <div style={cardStyle}>
                 <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('navSearch')}</h3>
                 <p style={bodyStyle}>{t('optionsHint')}</p>
-                <label style={optionRowStyle}>
-                  <input
-                    type="checkbox"
-                    checked={optBool(options.backendSearch, false)}
-                    disabled={optionsBusy}
-                    onChange={(event) => markOption('backendSearch', event.target.checked)}
-                  />
-                  <span>{t('backendSearch')}</span>
-                </label>
-                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                {/* Badge stays in the switch's row wrapper: a bare flex-column
+                    child would stretch into a full-width strip. */}
+                <div style={optionRowStyle}>
+                  <label style={optionRowStyle}>
+                    <input
+                      type="checkbox"
+                      checked={optBool(options.backendSearch, false)}
+                      disabled={optionsBusy}
+                      onChange={(event) => markOption('backendSearch', event.target.checked)}
+                    />
+                    <span>{t('backendSearch')}</span>
+                  </label>
+                  <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                </div>
                 <p style={optionHintStyle}>{t('backendSearchHint')}</p>
 
-                <label style={optionRowStyle}>
-                  <input
-                    type="checkbox"
-                    checked={optBool(options.statefulResponses, false)}
-                    disabled={optionsBusy}
-                    onChange={(event) => markOption('statefulResponses', event.target.checked)}
-                  />
-                  <span>{t('statefulResponses')}</span>
-                </label>
-                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                <div style={optionRowStyle}>
+                  <label style={optionRowStyle}>
+                    <input
+                      type="checkbox"
+                      checked={optBool(options.statefulResponses, false)}
+                      disabled={optionsBusy}
+                      onChange={(event) => markOption('statefulResponses', event.target.checked)}
+                    />
+                    <span>{t('statefulResponses')}</span>
+                  </label>
+                  <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                </div>
                 <p style={optionHintStyle}>{t('statefulResponsesHint')}</p>
 
                 <label style={optionRowStyle}>
@@ -977,29 +983,33 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                 <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('navMedia')}</h3>
                 <p style={bodyStyle}>{t('optionsHint')}</p>
                 <p style={bodyStyle}>{t('mediaRiskHint')}</p>
-                <label style={optionRowStyle}>
-                  <input
-                    type="checkbox"
-                    checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
-                    disabled={optionsBusy}
-                    onChange={(event) => markMedia('images', event.target.checked)}
-                  />
-                  <span>{t('imagineTool')}</span>
-                </label>
-                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                <div style={optionRowStyle}>
+                  <label style={optionRowStyle}>
+                    <input
+                      type="checkbox"
+                      checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
+                      disabled={optionsBusy}
+                      onChange={(event) => markMedia('images', event.target.checked)}
+                    />
+                    <span>{t('imagineTool')}</span>
+                  </label>
+                  <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                </div>
                 <p style={optionHintStyle}>{t('imagineToolHint')}</p>
                 <p style={optionHintStyle}>{`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}</p>
 
-                <label style={optionRowStyle}>
-                  <input
-                    type="checkbox"
-                    checked={optBool(options.videoTool, false)}
-                    disabled={optionsBusy}
-                    onChange={(event) => markMedia('video', event.target.checked)}
-                  />
-                  <span>{t('videoTool')}</span>
-                </label>
-                <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                <div style={optionRowStyle}>
+                  <label style={optionRowStyle}>
+                    <input
+                      type="checkbox"
+                      checked={optBool(options.videoTool, false)}
+                      disabled={optionsBusy}
+                      onChange={(event) => markMedia('video', event.target.checked)}
+                    />
+                    <span>{t('videoTool')}</span>
+                  </label>
+                  <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                </div>
                 <p style={optionHintStyle}>{t('videoToolHint')}</p>
                 {/* Read-only presentation of the remaining video parameters: the first
                     version edits videoTool only, so these stay informational. */}

@@ -38,9 +38,9 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 
 ### The X Subscription and legacy plans
 
-**Sign in with Grok / X Subscription** uses the same official Grok OAuth flow for The X Subscription and legacy SuperGrok / X Premium plans. Signed-in users can reauthorize to switch accounts without first deleting shared credentials. The account page also links to the [official subscription dashboard](<https://grok.com/dashboard>).
+**Sign in with Grok / X Subscription** uses the same official Grok OAuth flow for the X Subscription and legacy SuperGrok / X Premium plans. Signed-in users can reauthorize to switch accounts without first deleting shared credentials. The account page also links to the [official subscription dashboard](<https://grok.com/dashboard>).
 
-Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the proxy omits the percentage, readable subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. This compatibility does not add Cursor authentication, models or Agent integration.
+Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the proxy omits the percentage, readable subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. This sign-in and quota work inside dsh only — they cannot be used to sign in to Cursor or to connect other models or agents.
 
 ## Search in the main model turn
 
@@ -144,7 +144,7 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 
 ### Video tasks (experimental)
 
-Provides image-to-video, durable task recovery, and account-scoped downloads, off by default via `grok_video_generate` / `grok_video_status` / `grok_video_resume`. Settings are separated into Account, Models, Search & conversation, Media & tasks, and Network, with sticky shared status and navigation. Account reads official shared subscription quota through the existing OAuth login; only reported percentages, periods and optional balances are displayed, never token-based estimates. Media shows local capability observations and tasks. Restart after enabling. Generation consumes subscription usage; stopping the wait does not cancel the upstream job. See the [video guide](VIDEO.md) for configuration and limitations.
+Provides image-to-video, durable task recovery, and account-scoped downloads via `grok_video_generate` / `grok_video_status` / `grok_video_resume`, all off by default. The "Media & tasks" settings page shows local capability observations and the task list. Enabling requires the risk confirmation and a DSH restart; generation consumes subscription usage, and stopping the wait only stops waiting — it does not cancel a submitted job. See the [video guide](VIDEO.md) for configuration and limitations.
 
 ### Enabling media tools and understanding the risks
 
@@ -178,7 +178,7 @@ Legacy media enablement without acknowledgment stays inactive; confirm explicitl
 
 The bundle defaults come from `cordis.patch.yml`. For a manually reduced or recomposed setup, inspect the final values with `dsh --profile web --dump-config`.
 
-Settings split related keys between Search & chat and Media & tasks. Saves/resets apply only to the current page and drafts survive page switches (restart to apply; untouched keys still follow the bundle defaults). `proxyUrl` on Network applies immediately on save. See the [roadmap](ROADMAP.zh.md) for delivery status and future candidates.
+Settings split related keys between Search & conversation and Media & tasks. Saves/resets apply only to the current page and drafts survive page switches (restart to apply; untouched keys still follow the bundle defaults). `proxyUrl` on Network applies immediately on save. See the [roadmap](ROADMAP.zh.md) for delivery status and future candidates.
 
 ## Sign-in document, proxy, and security boundaries
 
