@@ -27,7 +27,7 @@ pnpm dsh plugin --profile web add dsh-grok-kit
 也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.4
+dsh plugin --profile web add dsh-grok-kit@0.2.5
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：

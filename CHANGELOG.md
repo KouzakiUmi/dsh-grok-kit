@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.2.5（2026-10-15）
+
+- 修复“搜索与对话”和“媒体与任务”设置页中四个“实验性”徽标的布局，恢复为开关旁的小标签。
+- Fixed four Experimental badges on Search & conversation and Media & tasks so they sit beside their switches.
+- 澄清订阅额度、代理配置、设置分页及视频使用说明，减少界面与文档歧义。
+- Clarified subscription quota, proxy configuration, settings tabs, and video usage wording across the interface and documentation.
+
 ## 0.2.4（2026-10-15）
 
 - 修复账号切换时旧身份读取进入视频任务或下载的问题，同账号并发读取仍可用；额度请求超时、取消或卸载时释放响应与读取器，不额外发起请求。

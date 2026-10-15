@@ -40,7 +40,7 @@
 
 账号页的 **登录 Grok / X 订阅**共用官方 Grok OAuth，兼容 X Subscription 与原 SuperGrok / X Premium 订阅；已登录时可重新授权以切换账号，不必先删除共享凭据。账号页也提供[官方订阅管理入口](<https://grok.com/dashboard>)。
 
-额度使用官方 billing/settings 返回的百分比、周期、套餐及预付余额。代理未报告百分比时仍显示可读的订阅详情，已用/剩余保持未知，不冒充 0% 或无限额度。统一计费标记来自接口，不根据套餐名猜测；仅展示当前登录身份，不汇总不同工作区或席位。这套登录和额度只在 dsh 里有效，不能用来登录 Cursor 或接入其他模型、Agent。
+额度使用官方 billing/settings 返回的百分比、周期、套餐及预付余额。接口未返回使用百分比时仍显示订阅详情，已用/剩余保持未知，不冒充 0% 或无限额度。统一计费标记来自接口，不根据套餐名猜测；仅展示当前登录身份，不汇总不同工作区或席位。本插件不提供 Cursor 登录或其他模型、外部 Agent 的接入。
 
 ## 主循环融合搜索
 
@@ -97,7 +97,7 @@ dsh web
 也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.4
+dsh plugin --profile web add dsh-grok-kit@0.2.5
 dsh web
 ```
 
@@ -110,7 +110,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.4** 更新 X Subscription 登录入口，支持重新授权、账号切换及共享订阅额度展示（按账号缓存 60 秒，不估算未报告的数值）。设置拆为五页，按页保存并保留草稿，同时修复登录轮询挂起和迟到响应覆盖。图片、编辑和视频工具仍默认关闭，已经明确确认过的配置保留；未确认的旧开启值不生效。首次开启请在「媒体与任务」页确认风险、保存并重启。宿主支持范围不变：DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.5** 修复搜索与媒体页的“实验性”徽标布局，并澄清订阅用量、代理和视频说明。登录、搜索和媒体功能行为不变；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。宿主支持仍为 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
@@ -187,7 +187,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#423793019a8dfb8a1fb1b
 - 浏览器状态接口、错误信息和诊断不会返回 token 值
 - 插件接口只接受本机回环连接与回环 Host，并校验浏览器来源。桌面端的 `dsh-app://app` 页面受信任；没有 Origin、但携带 Fetch Metadata 的本机请求也可写入设置。该标记不是桌面身份或权限证明：本插件不隔离本机进程或桌面渲染器。不要将接口暴露到局域网或公网，也不要在不可信的多用户环境共享凭据目录。
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
-- xAI 专用 fetch hook 会在插件卸载时恢复；它不会永久修改系统或进程环境变量
+- 代理通过同一 DSH 进程的全局 `fetch` hook 按目标域名分流：匹配 `x.ai`、其子域名及 `cli-chat-proxy.grok.com`，因此也会影响其他组件通过该 hook 发往这些地址的请求。其他请求交给原有 `fetch` 处理，不强制直连；插件卸载时恢复 hook，不永久修改系统或进程环境变量。
 - Windows 上的 Node mode bit 不等于 NTFS ACL；如果用户目录或 `$DSH_HOME` 位于共享位置，请自行收紧目录权限
 - 凭据写入的锁委托官方 `@deepseek-ai/dsh-atomic-write`（锁文件 `$DSH_HOME/.xai-oauth-auth.json.lock`）。同一台机器、同一 PID 命名空间内，后来者可以用独占 claim 文件加二次存活性检查，接管并回收确认已退出的进程留下的锁；对方还活着、权限不明、内容损坏或是空锁时，继续等待直至超时（宁可失败也不抢锁）。凭据和锁目录必须放在本机文件系统上，且处于同一 PID 命名空间——跨机器或跨容器共用同一目录会让 PID 对不上号，互斥可能失效并发生并发双写。运行期间手动替换凭据或锁文件会破坏这些保证；确需清理时，先停掉所有相关进程
 

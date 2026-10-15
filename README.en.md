@@ -40,7 +40,7 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 
 **Sign in with Grok / X Subscription** uses the same official Grok OAuth flow for the X Subscription and legacy SuperGrok / X Premium plans. Signed-in users can reauthorize to switch accounts without first deleting shared credentials. The account page also links to the [official subscription dashboard](<https://grok.com/dashboard>).
 
-Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the proxy omits the percentage, readable subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. This sign-in and quota work inside dsh only — they cannot be used to sign in to Cursor or to connect other models or agents.
+Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the billing response omits the usage percentage, subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
 
 ## Search in the main model turn
 
@@ -97,7 +97,7 @@ dsh web
 You can also pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.4
+dsh plugin --profile web add dsh-grok-kit@0.2.5
 dsh web
 ```
 
@@ -110,7 +110,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.4** updates The X Subscription sign-in entry with reauthorization, account switching, and shared subscription quota (cached per account for 60 seconds, without estimating missing values). Settings now have five tabs with page-scoped saves and retained drafts; hung login polls and stale status responses are fixed. Image generation, editing, and video remain off by default. Previously acknowledged choices are preserved; legacy enablement without acknowledgment stays inactive. To enable a tool for the first time, confirm the risks under "Media & tasks", save, and restart. Host support is unchanged: DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.5** fixes Experimental badge layout on the search and media pages and clarifies subscription usage, proxy, and video copy. Sign-in, search, and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
@@ -187,7 +187,7 @@ Settings split related keys between Search & conversation and Media & tasks. Sav
 - Browser status routes, errors, and diagnostics do not return token values
 - Plugin routes accept only loopback connections and loopback Host names, with browser-origin checks. The desktop `dsh-app://app` page is trusted; local requests without Origin but with Fetch Metadata may also write settings. This marker is not proof of desktop identity or authorization: the plugin does not isolate local processes or the desktop renderer. Do not expose these routes to a LAN or the internet, or share credential directories in an untrusted multi-user environment.
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
-- The xAI-only fetch hook is restored when the plugin is disposed and does not permanently change system or process environment variables
+- The proxy uses a global `fetch` hook in the same DSH process, matching `x.ai`, its subdomains, and `cli-chat-proxy.grok.com`. Requests from other components passing through that hook to these hosts are also affected. Other requests pass to the original `fetch` unchanged, not forced to connect directly. The hook is restored on disposal without permanently changing system or process environment variables.
 - On Windows, Node mode bits are not NTFS ACLs. Restrict the directory ACL yourself if the user profile or `$DSH_HOME` is stored in a shared location
 - Writer locks: credential writes delegate to the official `@deepseek-ai/dsh-atomic-write` (lock file `$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, a contender can take over and reclaim locks left by proven-exited processes using an exclusive claim file plus a second liveness check; locks held by live PIDs, with unclear ownership, malformed content, or empty files keep waiting until timeout (fail-closed). The credential and lock directory must live on a local filesystem within one PID namespace — sharing it across machines or containers desynchronizes PIDs and can break mutual exclusion into concurrent double writes. Replacing credential or lock files by hand while things run defeats these guarantees; stop every related process before cleaning up
 

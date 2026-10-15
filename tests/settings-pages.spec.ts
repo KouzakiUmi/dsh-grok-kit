@@ -983,6 +983,28 @@ describe('five-page settings section', () => {
     expect(button(now(), en.optionsSave).props.disabled).toBe(true)
   })
 
+  it.each([en.navSearch, en.navMedia])('keeps experimental badges beside their switches on %s', async page => {
+    stubFetch()
+    mount()
+    clickPage(page)
+    await settled()
+    const tree = now()
+    const badges = find(tree, node => node.type === 'span' && texts(node).join('') === en.experimentalTag)
+    expect(badges).toHaveLength(2)
+    for (const badge of badges) {
+      const parents = find(tree, node => {
+        const children = node.props.children
+        return (Array.isArray(children) ? children : [children]).includes(badge)
+      })
+      expect(parents).toHaveLength(1)
+      expect(parents[0]?.type).toBe('div')
+      const style = parents[0]?.props.style as Record<string, unknown>
+      expect(style.display).toBe('flex')
+      expect(style.flexDirection).not.toBe('column')
+      expect(find(parents[0], node => node.type === 'input' && node.props.type === 'checkbox')).toHaveLength(1)
+    }
+  })
+
   it('announces a failed save without dropping the draft or its marker', async () => {
     stubFetch()
     const originalFetch = globalThis.fetch

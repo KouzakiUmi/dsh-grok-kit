@@ -27,7 +27,7 @@ pnpm dsh plugin --profile web add dsh-grok-kit
 Or pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.4
+dsh plugin --profile web add dsh-grok-kit@0.2.5
 ```
 
 If `dsh` is not on PATH, run via pinned `npx`:
