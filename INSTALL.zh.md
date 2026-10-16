@@ -6,7 +6,7 @@
 
 ## 先决条件
 
-- PATH 上有 DeepSeek Harness 的 `dsh`（当前冻结支持 **0.2.0-rc.2**，配套 `@earendil-works/pi-ai@0.87.1`，Node 22/24；不再支持旧 0.1 宿主线）
+- PATH 上有 DeepSeek Harness 的 `dsh`，Core 为 **0.2.1-alpha.3**，由宿主提供 `@earendil-works/pi-ai@1.2.0`（Node 22/24；不支持旧宿主线）。宿主必须让插件能够解析 pi-ai；可选 peer 仅避免自动补装，运行时仍然必需
 - xAI 允许走 OAuth API 的 X Subscription 或原 SuperGrok / X Premium 账号
 - 能打开浏览器完成 device-code 授权
 
@@ -33,8 +33,8 @@ dsh plugin --profile web add dsh-grok-kit@0.2.5
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 ```
 
 如果这个 profile 已装过 GitHub 来源，先尝试显式请求 npm 最新版：

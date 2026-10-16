@@ -11,7 +11,7 @@
  * profile, so a logged-out stub session is enough. Network is used only by
  * the scratch `npm install` itself.
  *
- * Usage: node scripts/verify-host-compat.mjs [0.2.0-rc.2]
+ * Usage: node scripts/verify-host-compat.mjs [0.2.1-alpha.3]
  * Requires `npm run build` (or a committed lib/) first.
  */
 import { execFileSync } from 'node:child_process'
@@ -21,30 +21,20 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HOST_SETS = {
-  '0.2.0-rc.2': { dsh: '0.2.0-rc.2', piAi: '0.87.1', schemastery: '3.18.4', cordis: '4.0.4' },
+  '0.2.1-alpha.3': { dsh: '0.2.1-alpha.3', piAi: '1.2.0', schemastery: '3.18.5-alpha.2', cordis: '4.0.5-alpha.2' },
 }
-// Components absent from a given host line (renamed/absorbed upstream) are
-// excluded from that leg's frozen fixture; everything else stays pinned.
-const FIXTURE_EXCLUSIONS = {
-  '0.2.0-rc.2': ['dsh-code-runtime'],
-}
-// Test-fixture freeze: every @deepseek-ai host component the probe tree can
-// pull (explicit installs plus the required peers npm auto-installs) is
-// pinned to the exact same rc as its leg, so a later rc in the registry
-// (e.g. dsh-authorization@0.1.5-rc.3 peering dsh-llm ^0.1.5-rc.3) cannot
-// drift the fixture into an ERESOLVE. This freezes the probe only;
-// production peer ranges in package.json stay untouched.
+// Freeze the host fixture independently of the plugin's optional peers.
+// pi-ai is pulled by the host adapter, not installed on behalf of the plugin.
 const DSH_FIXTURE_COMPONENTS = [
   'dsh-agent',
   'dsh-attachment',
   'dsh-atomic-write',
   'dsh-authorization',
   'dsh-brand',
-  'dsh-code-runtime',
   'dsh-credentials',
   'dsh-fs',
   'dsh-home-paths',
-  'dsh-invariants',
+  'dsh-host-webserver',
   'dsh-launch-environment',
   'dsh-llm',
   'dsh-llm-pi-ai',
@@ -70,13 +60,13 @@ function run(file, args, opts = {}) {
   return execFileSync(file, args, { encoding: 'utf8', shell, ...opts })
 }
 
-const requested = process.argv[2] ?? '0.2.0-rc.2'
+const requested = process.argv[2] ?? '0.2.1-alpha.3'
 const set = HOST_SETS[requested]
 if (set === undefined) {
   console.error(`verify-host-compat: unknown host set "${requested}" (known: ${Object.keys(HOST_SETS).join(', ')})`)
   process.exit(2)
 }
-const fixtureComponents = DSH_FIXTURE_COMPONENTS.filter(name => !(FIXTURE_EXCLUSIONS[requested] ?? []).includes(name))
+const fixtureComponents = DSH_FIXTURE_COMPONENTS
 if (!existsSync(join(root, 'lib', 'index.js'))) {
   console.error('verify-host-compat: lib/index.js is missing — run `npm run build` first')
   process.exit(2)
@@ -107,6 +97,15 @@ const env = {
 const probeSource = `
 import { createXaiOAuthAdapter } from 'dsh-grok-kit'
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai'
+import { realpathSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+
+const pluginEntry = import.meta.resolve('dsh-grok-kit')
+const hostEntry = import.meta.resolve('@deepseek-ai/dsh-llm-pi-ai')
+const pluginPi = realpathSync(fileURLToPath(import.meta.resolve('@earendil-works/pi-ai', pluginEntry)))
+const hostPi = realpathSync(fileURLToPath(import.meta.resolve('@earendil-works/pi-ai', hostEntry)))
+if (pluginPi !== hostPi) throw new Error('plugin and host adapter resolve different pi-ai copies')
+console.log('pi-ai identity OK: plugin shares the host runtime')
 
 const store = {
   async find() { return undefined },
@@ -149,11 +148,14 @@ try {
     name: 'dsh-grok-kit-host-compat-probe',
     private: true,
     version: '0.0.0',
+    // Freeze the transitive host runtime without adding pi-ai as a direct dependency.
+    overrides: { '@earendil-works/pi-ai': set.piAi },
   }, null, 2))
   writeFileSync(join(probeDir, 'probe.mjs'), probeSource)
 
   run('npm', [
     'install',
+    '--ignore-scripts',
     '--no-audit',
     '--no-fund',
     '--loglevel=error',
@@ -161,7 +163,6 @@ try {
     ...fixtureComponents.map(name => `@deepseek-ai/${name}@${set.dsh}`),
     `@deepseek-ai/schemastery@${set.schemastery}`,
     `@deepseek-ai/cordis@${set.cordis}`,
-    `@earendil-works/pi-ai@${set.piAi}`,
   ], { cwd: probeDir, env, stdio: 'inherit' })
 
   for (const name of fixtureComponents) {
@@ -175,7 +176,7 @@ try {
     throw new Error(`probe resolved pi-ai ${installedPiAi}, expected ${set.piAi}`)
   }
 
-  run('node', ['probe.mjs'], { cwd: probeDir, env, stdio: 'inherit' })
+  run('node', ['--experimental-import-meta-resolve', 'probe.mjs'], { cwd: probeDir, env, stdio: 'inherit' })
   console.log(`verify-host-compat[${requested}]: OK — resolveModel path clean on dsh-llm-pi-ai ${set.dsh} / pi-ai ${set.piAi}`)
 } finally {
   if (tarball !== undefined) rmSync(tarball, { force: true })

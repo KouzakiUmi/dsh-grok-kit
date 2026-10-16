@@ -10,7 +10,7 @@
   <a href="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml"><img src="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/dsh-grok-kit"><img src="https://img.shields.io/npm/v/dsh-grok-kit.svg" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-4d6bfe.svg" alt="Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2-4d6bfe" alt="DeepSeek Harness 0.2.0-rc.2">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.1--alpha.3-4d6bfe" alt="DeepSeek Harness 0.2.1-alpha.3">
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
@@ -104,13 +104,13 @@ dsh web
 如果 PATH 中没有 `dsh`，可以使用同一个 CLI 包（固定宿主版本）：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 ```
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.5** 修复搜索与媒体页的“实验性”徽标布局，并澄清订阅用量、代理和视频说明。登录、搜索和媒体功能行为不变；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。宿主支持仍为 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.5** 修复搜索与媒体页的“实验性”徽标布局，并澄清订阅用量、代理和视频说明。登录、搜索和媒体功能行为不变；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。当前宿主目标已更新为 DeepSeek Harness Core `0.2.1-alpha.3` 与宿主提供的 `@earendil-works/pi-ai@1.2.0`（Node 22/24），不支持旧宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
@@ -193,7 +193,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d3
 
 ## 兼容性与限制
 
-- 当前支持矩阵冻结为：DeepSeek Harness `0.2.0-rc.2` + `@earendil-works/pi-ai@0.87.1`（Node 22/24）。不再宣称兼容旧 0.1 宿主线。
+- 当前支持目标为：DeepSeek Harness Core `0.2.1-alpha.3` + `@earendil-works/pi-ai@1.2.0`（Node 22/24）。pi-ai 由宿主提供，插件仅声明可选 peer，不单独安装副本；宿主必须让插件能够解析该包。独立 CLI 也需要此运行时依赖。“可选”仅用于避免包管理器自动补装，并非运行时可以缺省。不再宣称兼容旧宿主线。
 - 某些订阅档位可能允许浏览器登录，却对聊天或服务端搜索返回 HTTP 403；这是账户资格/服务策略问题，不等同于 token 过期
 - HTTP 401 会在串行刷新后重试一次；403 不会按 token 过期处理
 - 不支持与另一个注册相同 xAI OAuth 路由的 bundle 同时安装；请先按 [INSTALL.zh.md](INSTALL.zh.md) 的迁移步骤移除冲突 bundle

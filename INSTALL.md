@@ -6,7 +6,7 @@ Idempotent runbook for humans and automation agents.
 
 ## Prerequisites
 
-- DeepSeek Harness `dsh` on PATH (frozen support for **0.2.0-rc.2** paired with `@earendil-works/pi-ai@0.87.1`, Node 22/24; compatibility with the legacy 0.1 line is no longer supported); a source checkout that runs `pnpm dsh` works too
+- DeepSeek Harness `dsh` on PATH with Core **0.2.1-alpha.3** and host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24; older hosts are unsupported). The host must expose pi-ai to the plugin: it is an optional peer to prevent automatic installation, but required at runtime. A source checkout that runs `pnpm dsh` works too
 - An X Subscription or legacy SuperGrok / X Premium account that xAI allows on the OAuth API
 - A browser you can use to approve the device-code login
 
@@ -33,8 +33,8 @@ dsh plugin --profile web add dsh-grok-kit@0.2.5
 If `dsh` is not on PATH, run via pinned `npx`:
 
 ```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 ```
 
 If this profile already has the GitHub source, explicitly request the latest npm release first:

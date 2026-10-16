@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * Isolated DSH pack-install smoke (DSH 0.2.0-rc.2): npm pack, `dsh plugin add` into
+ * Isolated DSH pack-install smoke (DSH 0.2.1-alpha.3): npm pack, `dsh plugin add` into
  * the `web` profile, booted `--help`, and the plugin entry.
  * Isolates DSH_HOME / HOME / USERPROFILE and package-manager config/cache.
  * Does not read real user credentials.
  *
  * Requires the selected `dsh` version on PATH (CI installs it). Optional DSH_BIN.
  *
- * Usage: node scripts/pack-install-smoke.mjs [0.2.0-rc.2]
+ * Usage: node scripts/pack-install-smoke.mjs [0.2.1-alpha.3]
  */
 import { execFileSync } from 'node:child_process'
 import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -16,9 +16,9 @@ import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HOST_SETS = {
-  '0.2.0-rc.2': { dsh: '0.2.0-rc.2', piAi: '0.87.1' },
+  '0.2.1-alpha.3': { dsh: '0.2.1-alpha.3', piAi: '1.2.0' },
 }
-const requestedDsh = process.argv[2] ?? '0.2.0-rc.2'
+const requestedDsh = process.argv[2] ?? '0.2.1-alpha.3'
 if (!Object.hasOwn(HOST_SETS, requestedDsh)) {
   console.error(`pack-install-smoke: unknown host version "${requestedDsh}" (known: ${Object.keys(HOST_SETS).join(', ')})`)
   process.exit(2)
@@ -128,7 +128,7 @@ try {
   console.log(`pack-install-smoke: packed ${tarball}`)
 
   // pnpm 11 hard-fails installs when dependency build scripts are neither allowed nor
-  // explicitly denied (ERR_PNPM_IGNORED_BUILDS). pi-ai 0.87.1 pins @google/genai and pulls
+  // explicitly denied (ERR_PNPM_IGNORED_BUILDS). pi-ai 1.2.0 pins @google/genai and pulls
   // protobufjs, both shipping build scripts. Declare them denied at the profile root where
   // `dsh plugin add` runs pnpm so the smoke measures pack/install/boot rather than builds.
   const profileDir = join(dshHome, 'profiles', PROFILE)

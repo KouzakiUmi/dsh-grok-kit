@@ -10,7 +10,7 @@
   <a href="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml"><img src="https://github.com/MaRi23333/dsh-grok-kit/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://www.npmjs.com/package/dsh-grok-kit"><img src="https://img.shields.io/npm/v/dsh-grok-kit.svg" alt="npm version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-4d6bfe.svg" alt="Apache-2.0"></a>
-  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.0--rc.2-4d6bfe" alt="DeepSeek Harness 0.2.0-rc.2">
+  <img src="https://img.shields.io/badge/DeepSeek%20Harness-0.2.1--alpha.3-4d6bfe" alt="DeepSeek Harness 0.2.1-alpha.3">
   <img src="https://img.shields.io/badge/status-unofficial%20community%20plugin-7c84a8" alt="Unofficial community plugin">
 </p>
 
@@ -104,13 +104,13 @@ dsh web
 If `dsh` is not on PATH, run the same CLI package through `npx` (pinned to the supported host version):
 
 ```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
-npx @deepseek-ai/dsh@0.2.0-rc.2 web
+npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 ```
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.5** fixes Experimental badge layout on the search and media pages and clarifies subscription usage, proxy, and video copy. Sign-in, search, and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.5** fixes Experimental badge layout on the search and media pages and clarifies subscription usage, proxy, and video copy. Sign-in, search, and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. The current host target is DeepSeek Harness Core `0.2.1-alpha.3` with host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24); older host lines are unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
@@ -193,7 +193,7 @@ Settings split related keys between Search & conversation and Media & tasks. Sav
 
 ## Compatibility and limitations
 
-- Supported host matrix is frozen at: DeepSeek Harness `0.2.0-rc.2` + `@earendil-works/pi-ai@0.87.1` (Node 22/24). Compatibility with the legacy 0.1 host line is no longer claimed.
+- Supported host target: DeepSeek Harness Core `0.2.1-alpha.3` + `@earendil-works/pi-ai@1.2.0` (Node 22/24). pi-ai is host-provided: the plugin declares an optional peer instead of installing its own copy, and the host must make it resolvable by the plugin. The standalone CLI also requires this runtime dependency. “Optional” only prevents automatic peer installation; it does not make pi-ai optional at runtime. Compatibility with older host lines is no longer claimed.
 - Some subscription tiers may allow browser sign-in but return HTTP 403 for chat or server-side search; this is an entitlement/service-policy result, not necessarily an expired token
 - HTTP 401 is retried once after serialized refresh; 403 is not treated as token expiry
 - Running this bundle alongside another bundle that registers the same xAI OAuth route is unsupported; follow the migration steps in [INSTALL.md](INSTALL.md) and remove the conflicting bundle first

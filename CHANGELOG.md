@@ -1,5 +1,10 @@
 # 更新记录 / Changelog
 
+## 未发布 / Unreleased
+
+- 宿主目标更新为 Core `0.2.1-alpha.3` / pi-ai `1.2.0`；pi-ai 改为宿主提供的可选 peer，开发依赖单独固定，不再作为插件的直接运行时依赖。移除旧 Provider 强转及已被 Core 移除的空 invariants 服务注册。
+- Target Core `0.2.1-alpha.3` / pi-ai `1.2.0`; pi-ai is now a host-provided optional peer with a separately pinned development dependency, not a direct plugin runtime dependency. Removed the legacy Provider cast and empty registration against Core's removed invariants service.
+
 ## 0.2.5（2026-10-15）
 
 - 修复“搜索与对话”和“媒体与任务”设置页中四个“实验性”徽标的布局，恢复为开关旁的小标签。

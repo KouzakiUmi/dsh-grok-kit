@@ -36,7 +36,7 @@
 本插件面向 SuperGrok 等 **Grok 订阅 OAuth**，不是 xAI API-key / PAYG 接入。官方 API 文档只用于发现接口契约，不证明订阅权益；不增加 API key 回退、独立管理密钥或额外 API 计费后端。
 
 - [官方代码执行文档](<https://docs.x.ai/developers/tools/code-execution>)确认 Responses 工具类型为 `code_interpreter`；[官方主循环图片文档](<https://docs.x.ai/developers/tools/image-generation>)确认 `image_generation`，成品位于 `image_generation_call.result`，为无 data-URL 前缀的 base64。示例使用 API key，不能据此认定本插件的 OAuth 订阅令牌拥有对应权限。
-- 当前锁定的 pi-ai 0.87.1 的 Responses 解析层仅为 reasoning、message、function_call、custom_tool_call 建立输出槽；尚无主循环图片输出项承载。不要仅注入图片工具就宣称实现图片展示/附件保存；先补齐宿主/上游契约，不新建平行请求管道。Python 最终文本与执行过程展示也须区分。
+- 当前宿主提供的 pi-ai 1.2.0 的 Responses 解析层仍仅为 reasoning、message、function_call、custom_tool_call 建立输出槽；尚无主循环图片输出项承载（已核实 1.2.0 发行包中无 `image_generation_call` 处理）。不要仅注入图片工具就宣称实现图片展示/附件保存；先补齐宿主/上游契约，不新建平行请求管道。Python 最终文本与执行过程展示也须区分。
 - [官方 STT 文档](<https://docs.x.ai/developers/model-capabilities/audio/speech-to-text>)提供 `/v1/stt` 接口；当前 OAuth 适用性未验证。真实探测、录音权限、音频上传与计费需分别明确授权，未实现空入口。
 - [Grok Build](<https://docs.x.ai/build/overview>)有 ACP 形态，但不等于能复用本插件凭据。[权限](<https://docs.x.ai/build/features/permissions>)默认 Ask；[沙箱](<https://docs.x.ai/build/features/sandbox>)默认关闭，文档只列 Linux/macOS 的隔离机制，不能宣称 Windows 上获得相同隔离。ACP 通用[取消规范](<https://agentclientprotocol.com/protocol/v1/cancellation>)允许实现可选取消，不能将发送通知等同于上游任务已停止；具体 prompt-turn 与进程生命周期还须核验。
 - 云端 [Files](<https://docs.x.ai/developers/files>) / [Collections](<https://docs.x.ai/developers/files/collections>) 官方示例使用 API key；OAuth 是否可用仍未知，不自动上传或转公开。[ZDR 视频存储](<https://docs.x.ai/build/settings/zdr-video-storage>)只说明生成视频的存储安排，不能作为整个代码仓库或遥测的零保留证明。
