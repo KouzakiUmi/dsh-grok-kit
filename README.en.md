@@ -96,7 +96,7 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-You can also pin version 0.2.3:
+You can also pin version 0.2.6:
 
 ```sh
 dsh plugin --profile web add dsh-grok-kit@0.2.6
@@ -117,7 +117,7 @@ If this profile previously used the GitHub source, first try `dsh plugin --profi
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.

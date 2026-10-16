@@ -24,7 +24,7 @@ From a DeepSeek Harness source checkout, prefix the same command with `pnpm`:
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-Or pin version 0.2.3:
+Or pin version 0.2.6:
 
 ```sh
 dsh plugin --profile web add dsh-grok-kit@0.2.6
@@ -48,7 +48,7 @@ If the source does not switch, run `dsh plugin --profile web remove dsh-grok-kit
 For a reproducible install, pin a full Git commit (the command below pins the shown commit rather than following the rolling default branch):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
 ```
 
 `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is **not** a reproducible pin.

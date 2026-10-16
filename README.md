@@ -96,7 +96,7 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-也可以固定安装 0.2.3：
+也可以固定安装 0.2.6：
 
 ```sh
 dsh plugin --profile web add dsh-grok-kit@0.2.6
@@ -117,7 +117,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。
