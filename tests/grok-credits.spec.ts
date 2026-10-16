@@ -112,8 +112,10 @@ describe('parseGrokCreditsGrpcWeb (GROK-QUOTA-CREDITS-001)', () => {
   })
 
   it('rejects a truncated length-delimited field instead of decoding the partial bytes', () => {
-    // The config field declares 100 bytes but only 3 follow: parsing must fail.
-    const message = Buffer.from([0x0a, 100, 0x0d, 0x00, 0x00])
+    // The config field declares 100 bytes but only 5 follow — exactly one
+    // complete float field. Without the bounds check that decodes into a
+    // fabricated creditUsagePercent of 0; parsing must fail instead.
+    const message = Buffer.from([0x0a, 100, 0x0d, 0x00, 0x00, 0x00, 0x00])
     const header = Buffer.alloc(5)
     header.writeUInt32BE(message.length, 1)
     expect(parseGrokCreditsGrpcWeb(Buffer.concat([header, message]))).toBeUndefined()

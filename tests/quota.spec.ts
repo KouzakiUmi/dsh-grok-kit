@@ -710,7 +710,10 @@ describe('SuperGrokQuotaClient gRPC-web credits fallback (GROK-QUOTA-CREDITS-001
     expect(headers.referer).toBe('https://grok.com/?_s=usage')
     expect(headers.authorization).toBe('Bearer token-1')
     expect(headers['x-xai-token-auth']).toBe('xai-grok-cli')
-    expect(grpcCall!.init.body).toEqual(GROK_GRPC_EMPTY_FRAME)
+    // Pin the literal bytes: a constant-to-constant comparison would still
+    // pass if the constant itself were corrupted.
+    expect(GROK_GRPC_EMPTY_FRAME).toEqual(new Uint8Array([0, 0, 0, 0, 0]))
+    expect(grpcCall!.init.body).toEqual(new Uint8Array([0, 0, 0, 0, 0]))
     client.dispose()
   })
 
