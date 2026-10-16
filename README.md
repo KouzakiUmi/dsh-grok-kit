@@ -187,7 +187,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d3
 - 浏览器状态接口、错误信息和诊断不会返回 token 值
 - 插件接口只接受本机回环连接与回环 Host，并校验浏览器来源。桌面端的 `dsh-app://app` 页面受信任；没有 Origin、但携带 Fetch Metadata 的本机请求也可写入设置。该标记不是桌面身份或权限证明：本插件不隔离本机进程或桌面渲染器。不要将接口暴露到局域网或公网，也不要在不可信的多用户环境共享凭据目录。
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
-- 代理通过同一 DSH 进程的全局 `fetch` hook 按目标域名分流：匹配 `x.ai`、其子域名及 `cli-chat-proxy.grok.com`，因此也会影响其他组件通过该 hook 发往这些地址的请求。其他请求交给原有 `fetch` 处理，不强制直连；插件卸载时恢复 hook，不永久修改系统或进程环境变量。
+- 代理通过同一 DSH 进程的全局 `fetch` hook 按目标分流：匹配 `x.ai`、其子域名、`cli-chat-proxy.grok.com`，以及 `grok.com` 上精确的 `GetGrokCreditsConfig` 额度回退路径。因此也会影响其他组件通过该 hook 发往这些地址的请求。`grok.com` 的其他路径和其他请求交给原有 `fetch` 处理，不强制直连；插件卸载时恢复 hook，不永久修改系统或进程环境变量。同一 OAuth bearer 在额度回退时也会发往 `grok.com`。
 - Windows 上的 Node mode bit 不等于 NTFS ACL；如果用户目录或 `$DSH_HOME` 位于共享位置，请自行收紧目录权限
 - 凭据写入的锁委托官方 `@deepseek-ai/dsh-atomic-write`（锁文件 `$DSH_HOME/.xai-oauth-auth.json.lock`）。同一台机器、同一 PID 命名空间内，后来者可以用独占 claim 文件加二次存活性检查，接管并回收确认已退出的进程留下的锁；对方还活着、权限不明、内容损坏或是空锁时，继续等待直至超时（宁可失败也不抢锁）。凭据和锁目录必须放在本机文件系统上，且处于同一 PID 命名空间——跨机器或跨容器共用同一目录会让 PID 对不上号，互斥可能失效并发生并发双写。运行期间手动替换凭据或锁文件会破坏这些保证；确需清理时，先停掉所有相关进程
 

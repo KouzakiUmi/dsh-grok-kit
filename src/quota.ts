@@ -13,7 +13,12 @@
  * `GET https://cli-chat-proxy.grok.com/v1/billing?format=credits` (plus an
  * optional `GET /settings` for the plan display name): `creditUsagePercent`
  * is the USED percentage (0–100), legacy responses fall back to
- * `monthlyLimit`/`used` cents. A readable period without a reported percentage
+ * `monthlyLimit`/`used` cents. That REST shape answers HTTP 500 ("Failed to
+ * serialize billing response") on some unified-billing accounts, so an HTTP
+ * 5xx or a transport failure falls back to grok.com's gRPC-web
+ * GetGrokCreditsConfig on the same bearer. 401/403 never fall back, and 429
+ * (or any other non-5xx) stays on the REST error mapping so a rate limit is
+ * not amplified (GROK-QUOTA-CREDITS-001, see ./grok-credits.ts). A readable period without a reported percentage
  * yields partial metadata, never a fabricated usage number. Snapshots are cached per OAuth
  * account partition for 60s; an unknown or mid-flight-changed identity fails
  * closed and never returns another account's data.
@@ -26,6 +31,8 @@
  */
 
 import { sanitizeDiagnosticMessage } from './capabilities.ts'
+import { GROK_GRPC_CREDITS_URL, GROK_GRPC_EMPTY_FRAME, parseGrokCreditsGrpcWeb } from './grok-credits.ts'
+import type { GrokCreditsBillingBody } from './grok-credits.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 
 /** Official Grok CLI billing proxy (forwards to GetGrokCreditsConfig). */
@@ -229,8 +236,8 @@ function discardResponse(response: Response): void {
   try { void response.body?.cancel().catch(() => undefined) } catch { /* Best effort. */ }
 }
 
-/** Bounded JSON read: hard byte ceiling, then a strict JSON parse. */
-export async function readBoundedJson(response: Response, maxBytes: number, signal?: AbortSignal): Promise<unknown> {
+/** Bounded body read: hard byte ceiling, abort-aware. */
+export async function readBoundedBytes(response: Response, maxBytes: number, signal?: AbortSignal): Promise<Buffer> {
   if (signal?.aborted) {
     discardResponse(response)
     signal.throwIfAborted()
@@ -258,7 +265,12 @@ export async function readBoundedJson(response: Response, maxBytes: number, sign
     }
     reader.releaseLock()
   }
-  const text = Buffer.concat(chunks).toString('utf8').trim()
+  return Buffer.concat(chunks)
+}
+
+/** Bounded JSON read: hard byte ceiling, then a strict JSON parse. */
+export async function readBoundedJson(response: Response, maxBytes: number, signal?: AbortSignal): Promise<unknown> {
+  const text = (await readBoundedBytes(response, maxBytes, signal)).toString('utf8').trim()
   if (text.length === 0) throw new Error('quota response body is empty')
   return JSON.parse(text) as unknown
 }
@@ -308,6 +320,32 @@ function quotaRequestInit(bearer: string, signal: AbortSignal): RequestInit {
     },
     // A billing proxy must answer directly; following a redirect would send
     // the bearer somewhere the user never configured.
+    redirect: 'error',
+    signal,
+  }
+}
+
+/**
+ * gRPC-web credits probe request: the same OAuth bearer used for
+ * cli-chat-proxy is sent to grok.com, plus the gRPC-web envelope (empty
+ * request message, grok.com origin — the browser client sends exactly these;
+ * GROK-QUOTA-CREDITS-001). Callers with a configured proxy must route this
+ * exact URL (see isXaiProxyTarget); other grok.com paths stay direct.
+ */
+function grpcCreditsRequestInit(bearer: string, signal: AbortSignal): RequestInit {
+  return {
+    method: 'POST',
+    headers: {
+      accept: 'application/grpc-web+proto',
+      'content-type': 'application/grpc-web+proto',
+      'x-grpc-web': '1',
+      origin: 'https://grok.com',
+      referer: 'https://grok.com/?_s=usage',
+      authorization: `Bearer ${bearer}`,
+      'x-xai-token-auth': GROK_TOKEN_AUTH,
+      'x-grok-client-version': GROK_CLIENT_VERSION,
+    },
+    body: GROK_GRPC_EMPTY_FRAME,
     redirect: 'error',
     signal,
   }
@@ -452,45 +490,16 @@ export class SuperGrokQuotaClient {
     }
     // Token resolution (getAuth) may ignore its signal: race it so the budget
     // is real, and let the shared disposal abort it mid-flight.
-    let bearer = await raceAbort(Promise.resolve(this.tokens.resolve(combined)), combined)
+    const bearer = await raceAbort(Promise.resolve(this.tokens.resolve(combined)), combined)
     if (bearer === undefined || bearer.length === 0) {
       this.dropCache()
       return { state: 'signed-out' }
     }
-    let round = await this.fetchRound(bearer, combined)
-    if (combined.aborted) { discardResponse(round.billing); combined.throwIfAborted() }
-    if (round.billing.status === 401) {
-      discardResponse(round.billing)
-      // At most one refresh, on the shared official chain; 403/429 never
-      // refresh. A refresh that returns nothing new cannot be retried.
-      const refreshed = await raceAbort(Promise.resolve(this.tokens.refresh?.(bearer, combined)), combined)
-      if (refreshed === undefined || refreshed.length === 0 || refreshed === bearer) {
-        return { state: 'error', reason: 'auth' }
-      }
-      bearer = refreshed
-      round = await this.fetchRound(bearer, combined)
-      if (combined.aborted) { discardResponse(round.billing); combined.throwIfAborted() }
-      if (round.billing.status === 401) {
-        discardResponse(round.billing)
-        return { state: 'error', reason: 'auth' }
-      }
-    }
-    if (!round.billing.ok) {
-      discardResponse(round.billing)
-      return { state: 'error', reason: round.billing.status === 403 ? 'restricted' : 'temporary' }
-    }
-    let billingBody: unknown
-    try {
-      billingBody = await readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES, combined)
-    } catch (error) {
-      // Aborts (deadline/disposal/caller) propagate to the state mapping in
-      // get(); a readable but unusable body is an invalid response.
-      if (combined.aborted) throw error
-      return { state: 'error', reason: 'invalid' }
-    }
+    const resolved = await this.resolveBilling(bearer, combined)
+    if ('state' in resolved) return { state: 'error', reason: resolved.reason }
     let data: NormalizedQuota
     try {
-      data = normalizeSuperGrokQuota(billingBody, round.settings)
+      data = normalizeSuperGrokQuota(resolved.body, resolved.settings)
     } catch {
       return { state: 'error', reason: 'invalid' }
     }
@@ -508,6 +517,107 @@ export class SuperGrokQuotaClient {
       this.cache = { identity, snapshot, fetchedAt: this.now() }
     }
     return snapshot
+  }
+
+  /**
+   * Resolve the billing body and its settings companion. The REST credits
+   * shape runs first (with at most one 401 refresh on the shared official
+   * chain). HTTP 5xx and transport errors fall back to the gRPC-web credits
+   * probe on the same bearer before the failure is reported
+   * (GROK-QUOTA-CREDITS-001). 401/403 never fall back, so a revoked login
+   * cannot surface as usage data; 429 and other non-5xx statuses stay on the
+   * REST mapping so a rate limit is not amplified by a second probe.
+   */
+  private async resolveBilling(bearer: string, signal: AbortSignal): Promise<BillingResolution> {
+    let token = bearer
+    let round: QuotaRound
+    try {
+      round = await this.fetchRound(token, signal)
+    } catch (error) {
+      return this.grpcOrRethrow(token, signal, error)
+    }
+    if (signal.aborted) { discardResponse(round.billing); signal.throwIfAborted() }
+    if (round.billing.status === 401) {
+      discardResponse(round.billing)
+      // At most one refresh, on the shared official chain; 403/429 never
+      // refresh. A refresh that returns nothing new cannot be retried.
+      const refreshed = await raceAbort(Promise.resolve(this.tokens.refresh?.(token, signal)), signal)
+      if (refreshed === undefined || refreshed.length === 0 || refreshed === token) {
+        return { state: 'error', reason: 'auth' }
+      }
+      token = refreshed
+      try {
+        round = await this.fetchRound(token, signal)
+      } catch (error) {
+        return this.grpcOrRethrow(token, signal, error)
+      }
+      if (signal.aborted) { discardResponse(round.billing); signal.throwIfAborted() }
+      if (round.billing.status === 401) {
+        discardResponse(round.billing)
+        return { state: 'error', reason: 'auth' }
+      }
+    }
+    if (!round.billing.ok) {
+      const status = round.billing.status
+      discardResponse(round.billing)
+      if (status === 403) return { state: 'error', reason: 'restricted' }
+      // 429 and any other non-5xx stay on the REST mapping. The fallback
+      // exists for the billing proxy's serialization 500, not for rate limits.
+      if (status < 500) return { state: 'error', reason: 'temporary' }
+      // The parallel settings read has already settled here and still carries
+      // the plan name alongside the gRPC fallback body.
+      const grpcBody = await this.probeCreditsGrpc(token, signal)
+      return grpcBody === undefined
+        ? { state: 'error', reason: 'temporary' }
+        : { body: grpcBody, settings: round.settings }
+    }
+    try {
+      return { body: await readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES, signal), settings: round.settings }
+    } catch (error) {
+      // Aborts (deadline/disposal/caller) propagate to the state mapping in
+      // get(); a readable but unusable body is an invalid response.
+      if (signal.aborted) throw error
+      return { state: 'error', reason: 'invalid' }
+    }
+  }
+
+  /** Transport-failure path: the gRPC-web probe may still answer on this bearer. */
+  private async grpcOrRethrow(token: string, signal: AbortSignal, error: unknown): Promise<BillingResolution> {
+    if (signal.aborted) throw error
+    const grpcBody = await this.probeCreditsGrpc(token, signal)
+    if (grpcBody === undefined) throw error
+    return { body: grpcBody, settings: undefined }
+  }
+
+  /**
+   * gRPC-web credits fallback (GROK-QUOTA-CREDITS-001). Any failure returns
+   * undefined so the REST outcome keeps deciding the snapshot state; caller
+   * aborts still propagate. Accept the body only when grpc-status is 0 on
+   * the HTTP header or the 0x80 trailer, and neither source reports another
+   * status. Trailers-only responses are decided by the HTTP header.
+   */
+  private async probeCreditsGrpc(bearer: string, signal: AbortSignal): Promise<GrokCreditsBillingBody | undefined> {
+    try {
+      const response = await raceAbort(
+        this.fetcher(GROK_GRPC_CREDITS_URL, grpcCreditsRequestInit(bearer, signal)), signal, discardResponse,
+      )
+      if (signal.aborted) { discardResponse(response); signal.throwIfAborted() }
+      const grpcStatus = response.headers.get('grpc-status')
+      // A non-zero header status is already a failure; do not trust a data
+      // frame that might still parse. Absent or 0 still needs the body
+      // trailer check inside parseGrokCreditsGrpcWeb.
+      if (response.ok && (grpcStatus === null || grpcStatus.trim() === '0')) {
+        return parseGrokCreditsGrpcWeb(
+          await readBoundedBytes(response, MAX_QUOTA_RESPONSE_BYTES, signal),
+          { headerStatus: grpcStatus },
+        )
+      }
+      discardResponse(response)
+      return undefined
+    } catch (error) {
+      if (signal.aborted) throw error
+      return undefined
+    }
   }
 
   private async fetchRound(bearer: string, signal: AbortSignal): Promise<QuotaRound> {
@@ -573,3 +683,8 @@ interface QuotaRound {
   billing: Response
   settings: unknown
 }
+
+/** A parsed billing body plus the settings companion the plan name comes from. */
+type BillingResolution =
+  | { body: unknown; settings: unknown }
+  | { state: 'error'; reason: QuotaErrorReason }

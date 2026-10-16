@@ -5,11 +5,12 @@
  * of its own (stored in `$DSH_HOME/.xai-oauth-proxy.json`, editable on its
  * settings page). Nothing global is touched except one transparent
  * `globalThis.fetch` hook that routes ONLY `x.ai` origins (api.x.ai / x.ai
- * and subdomains, plus the exact cli-chat-proxy.grok.com billing host)
- * through this plugin's ProxyAgent and passes every other
- * request to the original fetch untouched. While the plugin is loaded the
- * hook applies to ALL x.ai requests in this process — including the catalog
- * `xai` API-key route — and it is restored on plugin dispose.
+ * and subdomains, plus the exact cli-chat-proxy.grok.com billing host and
+ * the exact grok.com GetGrokCreditsConfig path) through this plugin's
+ * ProxyAgent and passes every other request to the original fetch
+ * untouched. While the plugin is loaded the hook applies to ALL matching
+ * requests in this process — including the catalog `xai` API-key route —
+ * and it is restored on plugin dispose.
  *
  * Effective URL precedence: stored setting > plugin config `proxyUrl` >
  * `DSH_XAI_PROXY` (plugin-scoped env for headless/CLI use). HTTP/HTTPS
@@ -21,6 +22,7 @@ import { dirname, join, resolve } from 'node:path'
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
+import { GROK_GRPC_CREDITS_URL } from './grok-credits.ts'
 
 const PROXY_FILE_VERSION = 1
 const PROXY_FILENAME = '.xai-oauth-proxy.json'
@@ -98,12 +100,21 @@ function urlHref(input: unknown): string {
   return ''
 }
 
-/** xAI API origins plus the exact official Grok subscription billing proxy. */
+const GROK_CREDITS_PATH = new URL(GROK_GRPC_CREDITS_URL).pathname
+
+/**
+ * xAI API origins, the exact official Grok subscription billing proxy, and
+ * the exact grok.com GetGrokCreditsConfig fallback. Other grok.com paths stay
+ * direct so a configured proxy is not a general grok.com tunnel
+ * (GROK-QUOTA-CREDITS-001).
+ */
 export function isXaiProxyTarget(input: unknown): boolean {
   if (input === undefined || input === null) return false
   try {
-    const host = new URL(urlHref(input)).hostname.toLowerCase()
-    return host === 'x.ai' || host.endsWith('.x.ai') || host === 'cli-chat-proxy.grok.com'
+    const url = new URL(urlHref(input))
+    const host = url.hostname.toLowerCase()
+    if (host === 'x.ai' || host.endsWith('.x.ai') || host === 'cli-chat-proxy.grok.com') return true
+    return host === 'grok.com' && url.pathname === GROK_CREDITS_PATH
   } catch {
     return false
   }
@@ -149,9 +160,9 @@ export function setXaiProxyUrl(url: string): boolean {
 }
 
 /**
- * Install a transparent global-fetch hook that routes x.ai origins and the
- * exact official Grok billing host through this plugin's ProxyAgent;
- * every other request goes to the
+ * Install a transparent global-fetch hook that routes x.ai origins, the
+ * exact official Grok billing host, and the exact GetGrokCreditsConfig path
+ * through this plugin's ProxyAgent; every other request goes to the
  * original fetch untouched. Reference counted: every install returns its
  * OWN idempotent disposer, and the original fetch is restored only after
  * the LAST owner releases — and only if our wrapper is still installed
