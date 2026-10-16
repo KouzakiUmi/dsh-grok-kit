@@ -42,6 +42,8 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 
 Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the billing response omits the usage percentage, subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
 
+**0.2.6** fixes “Unable to load quota” for some accounts: if the billing service returns a server error or the connection fails, the plugin tries the `grok.com` quota endpoint with the same sign-in credential and configured proxy. Invalid sign-ins, access denials, and rate limits do not trigger this extra fallback request. See [CHANGELOG.md](CHANGELOG.md).
+
 ## Search in the main model turn
 
 The same model id does not guarantee the same experience across integrations. [xAI documents that `grok-4.6` is available in both Grok Build and the public API](https://docs.x.ai/build/overview); the important search difference is whether server-side tools share the main conversation request.
@@ -97,7 +99,7 @@ dsh web
 You can also pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.6
 dsh web
 ```
 
@@ -110,7 +112,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.5** fixes Experimental badge layout on the search and media pages and clarifies subscription usage, proxy, and video copy. Sign-in, search, and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.6** fixes quota loading for some accounts by adding a fallback when the billing service fails. Search and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 

@@ -27,7 +27,7 @@ pnpm dsh plugin --profile web add dsh-grok-kit
 也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.6
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -110,7 +110,7 @@ Web UI：
 
 ## 代理
 
-可选。在 设置 → xAI Grok → 网络页的“网络代理（仅 xAI）”里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。代理对 x.ai 与 Grok 官方额度请求生效，包括 `grok.com` 上精确的 `GetGrokCreditsConfig` 回退路径；该主机的其他路径和其余请求不变。
+可选。在 设置 → xAI Grok → 网络页的“网络代理（仅 xAI）”里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。代理对 x.ai 与 Grok 官方额度请求生效，包括 `grok.com` 上精确的 `GetGrokCreditsConfig` 回退路径。同一 DSH 进程内其他发往这些目标的请求也可能受影响；其他路径和请求沿用原有网络设置，不强制直连。
 
 ## 卸载
 

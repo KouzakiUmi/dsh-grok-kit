@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.2.6（2026-10-17）
+
+- 修复部分账号因计费接口服务端错误而无法加载额度的问题；服务端错误或连接故障时，使用同一 OAuth 登录凭据回退读取 `grok.com` 的额度接口。
+- Fixed quota loading for some accounts affected by billing-service errors. Server errors or connection failures now fall back to the `grok.com` quota endpoint using the same OAuth sign-in credential.
+- 额度回退沿用已配置的代理；校验响应状态、大小与用量数据，失败时不显示估算额度。登录失效、权限不足和限流不触发额外回退。
+- The quota fallback uses the configured proxy and validates response status, size, and usage data without showing estimates on failure. Invalid sign-ins, access denials, and rate limits do not trigger an extra fallback.
+
 ## 0.2.5（2026-10-15）
 
 - 修复“搜索与对话”和“媒体与任务”设置页中四个“实验性”徽标的布局，恢复为开关旁的小标签。

@@ -42,6 +42,8 @@
 
 额度使用官方 billing/settings 返回的百分比、周期、套餐及预付余额。接口未返回使用百分比时仍显示订阅详情，已用/剩余保持未知，不冒充 0% 或无限额度。统一计费标记来自接口，不根据套餐名猜测；仅展示当前登录身份，不汇总不同工作区或席位。本插件不提供 Cursor 登录或其他模型、外部 Agent 的接入。
 
+**0.2.6** 修复部分账号的“无法加载配额”：计费接口遇到服务端错误或连接故障时，会用同一登录凭据尝试 `grok.com` 的额度接口，并沿用已配置的代理。登录失效、权限不足或限流时不会因此多发一次回退请求。更多变更见 [CHANGELOG.md](CHANGELOG.md)。
+
 ## 主循环融合搜索
 
 同一个模型 id，不代表不同接入方式一定有相同的使用体验。[xAI 官方说明 Grok Build 与公开 API 都提供 `grok-4.6`](https://docs.x.ai/build/overview)；真正影响搜索体验的，是服务端工具是否和主对话处在同一轮请求里。
@@ -97,7 +99,7 @@ dsh web
 也可以固定安装 0.2.3：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.6
 dsh web
 ```
 
@@ -110,7 +112,7 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.5** 修复搜索与媒体页的“实验性”徽标布局，并澄清订阅用量、代理和视频说明。登录、搜索和媒体功能行为不变；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。宿主支持仍为 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.6** 修复部分账号的额度读取，新增计费接口故障时的回退。搜索和媒体功能行为不变；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。宿主支持仍为 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 

@@ -27,7 +27,7 @@ pnpm dsh plugin --profile web add dsh-grok-kit
 Or pin version 0.2.3:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.6
 ```
 
 If `dsh` is not on PATH, run via pinned `npx`:
@@ -110,7 +110,7 @@ Nested `grok_web_search` / `x_search` (a second `grok-build-0.1` hop) are regist
 
 ## Proxy
 
-Optional. Set it from Settings → xAI Grok → Network tab under "Network proxy (xAI only)", or via `DSH_XAI_PROXY` (e.g. `http://127.0.0.1:8080`) in the dsh environment / config. Routes x.ai and official Grok billing requests through this proxy, including the exact `grok.com` `GetGrokCreditsConfig` fallback path; other paths on that host and every other request stay direct.
+Optional. Set it from Settings → xAI Grok → Network tab under "Network proxy (xAI only)", or via `DSH_XAI_PROXY` (e.g. `http://127.0.0.1:8080`) in the dsh environment / config. Routes x.ai and official Grok billing requests through this proxy, including the exact `grok.com` `GetGrokCreditsConfig` fallback path. Other requests to these targets in the same DSH process may also be affected; other paths and traffic retain their existing network settings, rather than being forced to connect directly.
 
 ## Uninstall
 
