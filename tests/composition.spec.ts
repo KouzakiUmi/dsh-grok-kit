@@ -36,9 +36,9 @@ describe('bundle composition', () => {
     expect(manifest.dsh.client.platform).toBe('web')
     expect(manifest.peerDependencies['@deepseek-ai/dsh-tools']).toBeTruthy()
     expect(manifest.peerDependencies['@deepseek-ai/dsh-web']).toBeUndefined()
-    // Fork note: pi-ai moved from peerDependencies into dependencies so the
-    // scoped pnpm override can materialize 0.87.1 for this package (the
-    // peer-only copy would hoist past the override). Either location counts.
+    // Host contract since 0.2.1-alpha.3: pi-ai is an optional peer (1.2.0)
+    // supplied by the host at runtime; the plugin installs no own copy. The
+    // assertion accepts either location across packaging layouts.
     expect(manifest.peerDependencies['@earendil-works/pi-ai'] ?? manifest.dependencies?.['@earendil-works/pi-ai']).toBeTruthy()
     expect(manifest.dependencies?.['undici']).toBeTruthy()
   })
