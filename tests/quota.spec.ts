@@ -15,7 +15,7 @@ import {
   normalizeSuperGrokQuota,
   type QuotaSnapshot,
 } from '../src/quota.ts'
-import { GROK_GRPC_CREDITS_URL } from '../src/grok-credits.ts'
+import { GROK_GRPC_CREDITS_URL, GROK_GRPC_EMPTY_FRAME } from '../src/grok-credits.ts'
 import type { XaiOAuthTokenSource } from '../src/token-source.ts'
 import { encodeCreditsGrpcWeb } from './grok-credits-frame.ts'
 
@@ -703,10 +703,31 @@ describe('SuperGrokQuotaClient gRPC-web credits fallback (GROK-QUOTA-CREDITS-001
     expect(grpcCall!.init.method).toBe('POST')
     expect(grpcCall!.init.redirect).toBe('error')
     const headers = grpcCall!.init.headers as Record<string, string>
+    expect(headers.accept).toBe('application/grpc-web+proto')
     expect(headers['content-type']).toBe('application/grpc-web+proto')
     expect(headers['x-grpc-web']).toBe('1')
+    expect(headers.origin).toBe('https://grok.com')
+    expect(headers.referer).toBe('https://grok.com/?_s=usage')
     expect(headers.authorization).toBe('Bearer token-1')
     expect(headers['x-xai-token-auth']).toBe('xai-grok-cli')
+    expect(grpcCall!.init.body).toEqual(GROK_GRPC_EMPTY_FRAME)
+    client.dispose()
+  })
+
+  it('falls back with the rotated bearer after a 401 refresh when the retry still fails', async () => {
+    const refresh = vi.fn(async () => 'token-2')
+    let round = 0
+    const { fetcher, calls } = makeFetchWithGrpc(() => {
+      round += 1
+      return round === 1
+        ? jsonBody({}, 401)
+        : new Response('Failed to serialize billing response', { status: 500 })
+    }, undefined, () => grpcCreditsBody({ percent: 30, start: '2026-10-07T11:18:57Z', end: '2026-10-14T11:18:57Z' }))
+    const client = makeClient({ fetch: fetcher, tokens: makeTokens({ refresh }) })
+    expect(await client.get()).toMatchObject({ state: 'available', usedPercent: 30, remainingPercent: 70 })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    const grpcCall = calls.find(call => call.url === GROK_GRPC_CREDITS_URL)
+    expect((grpcCall!.init.headers as Record<string, string>).authorization).toBe('Bearer token-2')
     client.dispose()
   })
 

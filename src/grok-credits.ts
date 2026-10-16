@@ -72,6 +72,9 @@ function readLengthDelimitedField(message: Uint8Array, fieldNumber: number): Uin
       const length = readVarint(message, offset)
       if (length === undefined) return undefined
       offset = length.next
+      // A truncated payload must fail parsing, never return a short subarray
+      // that decodes into invented data.
+      if (length.next + length.value > message.length) return undefined
       const value = message.subarray(offset, offset + length.value)
       offset += length.value
       if (tag >>> 3 === fieldNumber) return value
@@ -172,7 +175,9 @@ export function parseGrokCreditsGrpcWeb(bytes: Uint8Array): GrokCreditsBillingBo
   const config = readLengthDelimitedField(message, 1) ?? message
   const usedPercent = readFloatField(config, 1)
   const start = readTimestampField(config, 4)
-  const end = readTimestampField(config, 5) ?? start
+  // A missing end stays missing: deriving end = start would invent a reset
+  // date at the period start and still yields no decidable period kind.
+  const end = readTimestampField(config, 5)
   const type = periodType(start, end)
   const currentPeriod = end !== undefined || start !== undefined
     ? {

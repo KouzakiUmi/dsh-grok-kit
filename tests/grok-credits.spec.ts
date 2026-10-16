@@ -96,4 +96,26 @@ describe('parseGrokCreditsGrpcWeb (GROK-QUOTA-CREDITS-001)', () => {
     const bytes = Buffer.concat([compressed, data, trailerHeader, trailerText])
     expect(parseGrokCreditsGrpcWeb(bytes)?.config.creditUsagePercent).toBe(7)
   })
+
+  it('never invents an end for a start-only window', () => {
+    const parsed = parseGrokCreditsGrpcWeb(encodeCreditsGrpcWeb({
+      percent: 43,
+      start: '2026-10-07T11:18:57Z',
+    }))
+    expect(parsed).toEqual({
+      config: {
+        creditUsagePercent: 43,
+        currentPeriod: { start: '2026-10-07T11:18:57.000Z' },
+      },
+    })
+    expect(parsed?.config.currentPeriod).not.toHaveProperty('end')
+  })
+
+  it('rejects a truncated length-delimited field instead of decoding the partial bytes', () => {
+    // The config field declares 100 bytes but only 3 follow: parsing must fail.
+    const message = Buffer.from([0x0a, 100, 0x0d, 0x00, 0x00])
+    const header = Buffer.alloc(5)
+    header.writeUInt32BE(message.length, 1)
+    expect(parseGrokCreditsGrpcWeb(Buffer.concat([header, message]))).toBeUndefined()
+  })
 })
