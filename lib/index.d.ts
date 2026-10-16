@@ -633,9 +633,9 @@ declare function writeStoredProxyUrl(url: string): Promise<void>;
  */
 declare function setXaiProxyUrl(url: string): boolean;
 /**
- * Install a transparent global-fetch hook that routes x.ai origins and the
- * exact official Grok billing host through this plugin's ProxyAgent;
- * every other request goes to the
+ * Install a transparent global-fetch hook that routes x.ai origins, the
+ * exact official Grok billing host, and the exact GetGrokCreditsConfig path
+ * through this plugin's ProxyAgent; every other request goes to the
  * original fetch untouched. Reference counted: every install returns its
  * OWN idempotent disposer, and the original fetch is restored only after
  * the LAST owner releases — and only if our wrapper is still installed
