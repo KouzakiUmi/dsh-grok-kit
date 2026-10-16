@@ -1,8 +1,18 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { fetch as undiciFetch } from 'undici'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { restoreEnv } from './restore-env.ts'
+import { GROK_GRPC_CREDITS_URL } from '../src/grok-credits.ts'
+
+vi.mock('undici', async importOriginal => {
+  const actual = await importOriginal<typeof import('undici')>()
+  return {
+    ...actual,
+    fetch: vi.fn(async () => new Response('proxied')),
+  }
+})
 import {
   applyXaiProxy,
   installXaiFetchHook,
@@ -35,13 +45,57 @@ async function tempHome(): Promise<string> {
 
 describe('proxy settings', () => {
   it('includes the exact billing host without routing unrelated Grok or lookalike hosts', () => {
-    for (const url of ['https://api.x.ai/v1/models', 'https://auth.x.ai', 'https://cli-chat-proxy.grok.com/v1/billing?format=credits']) {
+    for (const url of [
+      'https://api.x.ai/v1/models',
+      'https://auth.x.ai',
+      'https://cli-chat-proxy.grok.com/v1/billing?format=credits',
+      GROK_GRPC_CREDITS_URL,
+    ]) {
       expect(isXaiProxyTarget(url)).toBe(true)
       expect(isXaiProxyTarget(new URL(url))).toBe(true)
       expect(isXaiProxyTarget({ url })).toBe(true)
     }
-    for (const url of ['https://grok.com', 'https://other.grok.com', 'https://cli-chat-proxy.grok.com.evil.example', 'https://evilcli-chat-proxy.grok.com', 'not a url']) {
+    for (const url of [
+      'https://grok.com',
+      'https://grok.com/',
+      'https://other.grok.com',
+      'https://www.grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig',
+      'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig/extra',
+      'https://grok.com.evil.example/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig',
+      'https://cli-chat-proxy.grok.com.evil.example',
+      'https://evilcli-chat-proxy.grok.com',
+      'not a url',
+    ]) {
       expect(isXaiProxyTarget(url)).toBe(false)
+    }
+  })
+
+  it('routes only the credits fallback through the configured proxy', async () => {
+    const direct = vi.fn(async () => new Response('direct'))
+    const previous = globalThis.fetch
+    globalThis.fetch = direct as typeof fetch
+    const dispose = installXaiFetchHook()
+    try {
+      expect(setXaiProxyUrl('http://127.0.0.1:9')).toBe(true)
+      vi.mocked(undiciFetch).mockClear()
+      const proxied = await globalThis.fetch(GROK_GRPC_CREDITS_URL)
+      expect(await proxied.text()).toBe('proxied')
+      expect(direct).not.toHaveBeenCalled()
+      expect(undiciFetch).toHaveBeenCalledOnce()
+      const init = vi.mocked(undiciFetch).mock.calls[0]?.[1] as { dispatcher?: unknown } | undefined
+      expect(init?.dispatcher).toBeTruthy()
+      const other = await globalThis.fetch('https://grok.com/')
+      expect(await other.text()).toBe('direct')
+      expect(undiciFetch).toHaveBeenCalledOnce()
+      setXaiProxyUrl('')
+      direct.mockClear()
+      const cleared = await globalThis.fetch(GROK_GRPC_CREDITS_URL)
+      expect(await cleared.text()).toBe('direct')
+      expect(undiciFetch).toHaveBeenCalledOnce()
+    } finally {
+      dispose()
+      setXaiProxyUrl('')
+      globalThis.fetch = previous
     }
   })
 

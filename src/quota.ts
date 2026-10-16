@@ -14,9 +14,11 @@
  * optional `GET /settings` for the plan display name): `creditUsagePercent`
  * is the USED percentage (0–100), legacy responses fall back to
  * `monthlyLimit`/`used` cents. That REST shape answers HTTP 500 ("Failed to
- * serialize billing response") on some unified-billing accounts, so a
- * non-auth failure falls back to grok.com's gRPC-web GetGrokCreditsConfig on
- * the same bearer (GROK-QUOTA-CREDITS-001, see ./grok-credits.ts). A readable period without a reported percentage
+ * serialize billing response") on some unified-billing accounts, so an HTTP
+ * 5xx or a transport failure falls back to grok.com's gRPC-web
+ * GetGrokCreditsConfig on the same bearer. 401/403 never fall back, and 429
+ * (or any other non-5xx) stays on the REST error mapping so a rate limit is
+ * not amplified (GROK-QUOTA-CREDITS-001, see ./grok-credits.ts). A readable period without a reported percentage
  * yields partial metadata, never a fabricated usage number. Snapshots are cached per OAuth
  * account partition for 60s; an unknown or mid-flight-changed identity fails
  * closed and never returns another account's data.
@@ -324,9 +326,11 @@ function quotaRequestInit(bearer: string, signal: AbortSignal): RequestInit {
 }
 
 /**
- * gRPC-web credits probe request: the same bearer/routing headers as the REST
- * proxy plus the gRPC-web envelope (empty request message, grok.com origin —
- * the browser client sends exactly these; GROK-QUOTA-CREDITS-001).
+ * gRPC-web credits probe request: the same OAuth bearer used for
+ * cli-chat-proxy is sent to grok.com, plus the gRPC-web envelope (empty
+ * request message, grok.com origin — the browser client sends exactly these;
+ * GROK-QUOTA-CREDITS-001). Callers with a configured proxy must route this
+ * exact URL (see isXaiProxyTarget); other grok.com paths stay direct.
  */
 function grpcCreditsRequestInit(bearer: string, signal: AbortSignal): RequestInit {
   return {
@@ -518,10 +522,11 @@ export class SuperGrokQuotaClient {
   /**
    * Resolve the billing body and its settings companion. The REST credits
    * shape runs first (with at most one 401 refresh on the shared official
-   * chain); any non-auth failure — transport error or a non-401/403 status —
-   * falls back to the gRPC-web credits probe on the same bearer before the
-   * failure is reported (GROK-QUOTA-CREDITS-001). Auth outcomes never fall
-   * back, so a revoked login can never surface as usage data.
+   * chain). HTTP 5xx and transport errors fall back to the gRPC-web credits
+   * probe on the same bearer before the failure is reported
+   * (GROK-QUOTA-CREDITS-001). 401/403 never fall back, so a revoked login
+   * cannot surface as usage data; 429 and other non-5xx statuses stay on the
+   * REST mapping so a rate limit is not amplified by a second probe.
    */
   private async resolveBilling(bearer: string, signal: AbortSignal): Promise<BillingResolution> {
     let token = bearer
@@ -556,6 +561,9 @@ export class SuperGrokQuotaClient {
       const status = round.billing.status
       discardResponse(round.billing)
       if (status === 403) return { state: 'error', reason: 'restricted' }
+      // 429 and any other non-5xx stay on the REST mapping. The fallback
+      // exists for the billing proxy's serialization 500, not for rate limits.
+      if (status < 500) return { state: 'error', reason: 'temporary' }
       // The parallel settings read has already settled here and still carries
       // the plan name alongside the gRPC fallback body.
       const grpcBody = await this.probeCreditsGrpc(token, signal)
@@ -584,7 +592,9 @@ export class SuperGrokQuotaClient {
   /**
    * gRPC-web credits fallback (GROK-QUOTA-CREDITS-001). Any failure returns
    * undefined so the REST outcome keeps deciding the snapshot state; caller
-   * aborts still propagate.
+   * aborts still propagate. Accept the body only when grpc-status is 0 on
+   * the HTTP header or the 0x80 trailer, and neither source reports another
+   * status. Trailers-only responses are decided by the HTTP header.
    */
   private async probeCreditsGrpc(bearer: string, signal: AbortSignal): Promise<GrokCreditsBillingBody | undefined> {
     try {
@@ -593,8 +603,14 @@ export class SuperGrokQuotaClient {
       )
       if (signal.aborted) { discardResponse(response); signal.throwIfAborted() }
       const grpcStatus = response.headers.get('grpc-status')
-      if (response.ok && (grpcStatus === null || grpcStatus === '0')) {
-        return parseGrokCreditsGrpcWeb(await readBoundedBytes(response, MAX_QUOTA_RESPONSE_BYTES, signal))
+      // A non-zero header status is already a failure; do not trust a data
+      // frame that might still parse. Absent or 0 still needs the body
+      // trailer check inside parseGrokCreditsGrpcWeb.
+      if (response.ok && (grpcStatus === null || grpcStatus.trim() === '0')) {
+        return parseGrokCreditsGrpcWeb(
+          await readBoundedBytes(response, MAX_QUOTA_RESPONSE_BYTES, signal),
+          { headerStatus: grpcStatus },
+        )
       }
       discardResponse(response)
       return undefined

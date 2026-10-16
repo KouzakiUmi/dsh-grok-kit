@@ -14,7 +14,8 @@
  * parses gRPC-web frames — it sends no network requests. Field numbers and
  * semantics mirror dsh-subusage's grok-credits module so both consumers read
  * the same wire shape. Parsing failures return undefined; no usage number is
- * ever fabricated.
+ * ever fabricated. A body is usable only when grpc-status is 0, from the
+ * 0x80 trailer or from an HTTP header the caller supplies (trailers-only).
  * @module dsh-grok-kit/grok-credits
  */
 
@@ -22,6 +23,11 @@
 export const GROK_GRPC_CREDITS_URL = 'https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig'
 /** gRPC-web empty message frame: 1 flag byte (uncompressed) + 4-byte big-endian zero length. */
 export const GROK_GRPC_EMPTY_FRAME = new Uint8Array([0, 0, 0, 0, 0])
+
+/** Optional HTTP `grpc-status`, used when the transport promoted trailers out of the body. */
+export interface ParseGrokCreditsOptions {
+  headerStatus?: string | null
+}
 
 /** The config fragment normalizeSuperGrokQuota consumes as `body.config`. */
 export interface GrokCreditsBillingBody {
@@ -63,12 +69,24 @@ function skipField(message: Uint8Array, offset: number, wire: number): number | 
   return undefined
 }
 
+/**
+ * Protobuf tags are varints: field numbers above 15 occupy more than one
+ * byte. Reading a single byte would treat the continuation as payload and
+ * shift every later field (GROK-QUOTA-CREDITS-001).
+ */
+function readTag(message: Uint8Array, offset: number): { field: number; wire: number; next: number } | undefined {
+  const tag = readVarint(message, offset)
+  if (tag === undefined) return undefined
+  return { field: tag.value >>> 3, wire: tag.value & 7, next: tag.next }
+}
+
 function readLengthDelimitedField(message: Uint8Array, fieldNumber: number): Uint8Array | undefined {
   let offset = 0
   while (offset < message.length) {
-    const tag = message[offset++]
-    const wire = tag & 7
-    if (wire === 2) {
+    const tag = readTag(message, offset)
+    if (tag === undefined) return undefined
+    offset = tag.next
+    if (tag.wire === 2) {
       const length = readVarint(message, offset)
       if (length === undefined) return undefined
       offset = length.next
@@ -77,10 +95,10 @@ function readLengthDelimitedField(message: Uint8Array, fieldNumber: number): Uin
       if (length.next + length.value > message.length) return undefined
       const value = message.subarray(offset, offset + length.value)
       offset += length.value
-      if (tag >>> 3 === fieldNumber) return value
+      if (tag.field === fieldNumber) return value
       continue
     }
-    const skipped = skipField(message, offset, wire)
+    const skipped = skipField(message, offset, tag.wire)
     if (skipped === undefined) return undefined
     offset = skipped
   }
@@ -90,16 +108,17 @@ function readLengthDelimitedField(message: Uint8Array, fieldNumber: number): Uin
 function readFloatField(message: Uint8Array, fieldNumber: number): number | undefined {
   let offset = 0
   while (offset < message.length) {
-    const tag = message[offset++]
-    const wire = tag & 7
-    if (wire === 5) {
+    const tag = readTag(message, offset)
+    if (tag === undefined) return undefined
+    offset = tag.next
+    if (tag.wire === 5) {
       if (offset + 4 > message.length) return undefined
       const value = new DataView(message.buffer, message.byteOffset + offset, 4).getFloat32(0, true)
       offset += 4
-      if (tag >>> 3 === fieldNumber) return value
+      if (tag.field === fieldNumber) return value
       continue
     }
-    const skipped = skipField(message, offset, wire)
+    const skipped = skipField(message, offset, tag.wire)
     if (skipped === undefined) return undefined
     offset = skipped
   }
@@ -113,16 +132,17 @@ function readTimestampField(message: Uint8Array, fieldNumber: number): string | 
   let offset = 0
   let seconds: number | undefined
   while (offset < nested.length) {
-    const tag = nested[offset++]
-    const wire = tag & 7
-    if (wire === 0) {
+    const tag = readTag(nested, offset)
+    if (tag === undefined) break
+    offset = tag.next
+    if (tag.wire === 0) {
       const value = readVarint(nested, offset)
       if (value === undefined) break
       offset = value.next
-      if (tag >>> 3 === 1) seconds = value.value
+      if (tag.field === 1) seconds = value.value
       continue
     }
-    const skipped = skipField(nested, offset, wire)
+    const skipped = skipField(nested, offset, tag.wire)
     if (skipped === undefined) break
     offset = skipped
   }
@@ -130,21 +150,84 @@ function readTimestampField(message: Uint8Array, fieldNumber: number): string | 
   return new Date(seconds * 1000).toISOString()
 }
 
-/** First uncompressed gRPC-web data frame; compressed frames and grpc-status trailers are skipped. */
-function firstGrpcWebDataMessage(bytes: Uint8Array): Uint8Array | undefined {
+interface GrpcWebScan {
+  message?: Uint8Array
+  /** Trimmed grpc-status from a readable 0x80 trailer, when that line was present. */
+  trailerStatus?: string
+  /** A trailer bit was set but the frame was not a readable uncompressed status. */
+  trailerUnreadable: boolean
+}
+
+/** ASCII header block. Undefined when the frame is not headers; null when headers omit grpc-status. */
+function readTrailerGrpcStatus(frame: Uint8Array): string | null | undefined {
+  for (const byte of frame) {
+    const printable = byte >= 0x20 && byte <= 0x7e
+    const whitespace = byte === 0x09 || byte === 0x0a || byte === 0x0d
+    if (!printable && !whitespace) return undefined
+  }
+  let status: string | undefined
+  for (const line of Buffer.from(frame).toString('ascii').split(/\r\n|\n|\r/)) {
+    if (line.length === 0) continue
+    const colon = line.indexOf(':')
+    if (colon <= 0) return undefined
+    const name = line.slice(0, colon).trim().toLowerCase()
+    if (name.length === 0 || /\s/.test(name)) return undefined
+    if (name !== 'grpc-status') continue
+    const value = line.slice(colon + 1).trim()
+    if (status !== undefined && status !== value) return undefined
+    status = value
+  }
+  return status ?? null
+}
+
+/**
+ * Walk gRPC-web frames. 0x00 is the only uncompressed data frame; 0x80 is the
+ * trailer. Any other flag is not a readable message — including a compressed
+ * trailer (0x81), which cannot be checked and fails closed.
+ */
+function scanGrpcWeb(bytes: Uint8Array): GrpcWebScan | undefined {
   let offset = 0
-  while (offset + 5 <= bytes.length) {
-    const compressed = bytes[offset]
-    const length = (bytes[offset + 1] << 24) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 8) | bytes[offset + 4]
+  let message: Uint8Array | undefined
+  let trailerStatus: string | undefined
+  let trailerUnreadable = false
+  while (offset < bytes.length) {
+    if (offset + 5 > bytes.length) return undefined
+    const flags = bytes[offset]
+    const length = bytes[offset + 1] * 16777216 + bytes[offset + 2] * 65536 + bytes[offset + 3] * 256 + bytes[offset + 4]
     offset += 5
-    if (length < 0 || offset + length > bytes.length) return undefined
+    if (offset + length > bytes.length) return undefined
     const frame = bytes.subarray(offset, offset + length)
     offset += length
-    if (compressed === 0x80 || compressed !== 0) continue
-    if (frame.length >= 11 && Buffer.from(frame.subarray(0, 11)).toString('utf8') === 'grpc-status') continue
-    return frame
+    if ((flags & 0x80) !== 0) {
+      if (flags !== 0x80) {
+        trailerUnreadable = true
+        continue
+      }
+      const status = readTrailerGrpcStatus(frame)
+      if (status === undefined) {
+        trailerUnreadable = true
+        continue
+      }
+      if (status !== null) {
+        if (trailerStatus !== undefined && trailerStatus !== status) trailerUnreadable = true
+        else trailerStatus = status
+      }
+      continue
+    }
+    if (flags !== 0) continue
+    if (message === undefined) message = frame
   }
-  return undefined
+  return { message, trailerStatus, trailerUnreadable }
+}
+
+/** grpc-status 0 from the header or the trailer, and no contradictory status. */
+function grpcStatusAccepted(scan: GrpcWebScan, headerStatus: string | null | undefined): boolean {
+  if (scan.trailerUnreadable) return false
+  const header = headerStatus?.trim()
+  const headerPresent = header !== undefined && header.length > 0
+  if (headerPresent && header !== '0') return false
+  if (scan.trailerStatus !== undefined && scan.trailerStatus !== '0') return false
+  return scan.trailerStatus === '0' || header === '0'
 }
 
 /**
@@ -168,10 +251,14 @@ function periodType(startIso: string | undefined, endIso: string | undefined): s
  * normalizeSuperGrokQuota understands. Parsing failures return undefined —
  * never a fabricated 0%.
  */
-export function parseGrokCreditsGrpcWeb(bytes: Uint8Array): GrokCreditsBillingBody | undefined {
+export function parseGrokCreditsGrpcWeb(
+  bytes: Uint8Array,
+  options?: ParseGrokCreditsOptions,
+): GrokCreditsBillingBody | undefined {
   if (bytes.length === 0) return undefined
-  const message = firstGrpcWebDataMessage(bytes)
-  if (message === undefined) return undefined
+  const scan = scanGrpcWeb(bytes)
+  if (scan?.message === undefined || !grpcStatusAccepted(scan, options?.headerStatus)) return undefined
+  const message = scan.message
   const config = readLengthDelimitedField(message, 1) ?? message
   const usedPercent = readFloatField(config, 1)
   const start = readTimestampField(config, 4)
@@ -187,6 +274,9 @@ export function parseGrokCreditsGrpcWeb(bytes: Uint8Array): GrokCreditsBillingBo
       }
     : undefined
   // A wire value that decoded to a non-number (NaN/Infinity) is unusable, not zero.
+  // Finite values outside 0–100 are returned unchanged: normalizeSuperGrokQuota
+  // rejects them (invalid), matching the REST credits shape. Clamping or
+  // dropping the percent here would hide a bad reading behind partial metadata.
   if (usedPercent !== undefined && !Number.isFinite(usedPercent)) return undefined
   if (usedPercent === undefined && currentPeriod === undefined) return undefined
   return {

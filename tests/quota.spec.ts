@@ -17,7 +17,7 @@ import {
 } from '../src/quota.ts'
 import { GROK_GRPC_CREDITS_URL, GROK_GRPC_EMPTY_FRAME } from '../src/grok-credits.ts'
 import type { XaiOAuthTokenSource } from '../src/token-source.ts'
-import { encodeCreditsGrpcWeb } from './grok-credits-frame.ts'
+import { encodeCreditsGrpcWeb, encodeGrpcStatusTrailer } from './grok-credits-frame.ts'
 
 function jsonBody(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
@@ -776,6 +776,66 @@ describe('SuperGrokQuotaClient gRPC-web credits fallback (GROK-QUOTA-CREDITS-001
     expect(await authClient.get()).toEqual({ state: 'error', reason: 'auth' })
     expect(auth.calls.map(call => call.url)).not.toContain(GROK_GRPC_CREDITS_URL)
     authClient.dispose()
+  })
+
+  it.each([429, 404])('does not fall back on HTTP %s even when the gRPC probe would succeed', async status => {
+    const { fetcher, calls } = makeFetchWithGrpc(
+      () => jsonBody({}, status),
+      undefined,
+      () => grpcCreditsBody({ percent: 10, start: '2026-10-14T03:32:51Z', end: '2026-10-21T03:32:51Z' }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({ state: 'error', reason: 'temporary' })
+    expect(calls.map(call => call.url)).not.toContain(GROK_GRPC_CREDITS_URL)
+    client.dispose()
+  })
+
+  it('does not cache a data frame whose trailer grpc-status is non-zero', async () => {
+    const body = encodeCreditsGrpcWeb({
+      percent: 40,
+      start: '2026-10-14T03:32:51Z',
+      end: '2026-10-21T03:32:51Z',
+      trailerStatus: 13,
+    })
+    const { fetcher } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      undefined,
+      () => new Response(body, { status: 200, headers: { 'content-type': 'application/grpc-web+proto' } }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({ state: 'error', reason: 'temporary' })
+    client.dispose()
+  })
+
+  it('accepts a trailer grpc-status of 0 when the HTTP header omits it', async () => {
+    const body = Buffer.concat([
+      encodeCreditsGrpcWeb({
+        percent: 18,
+        start: '2026-10-14T03:32:51Z',
+        end: '2026-10-21T03:32:51Z',
+        trailerStatus: 'omit',
+      }),
+      encodeGrpcStatusTrailer(0),
+    ])
+    const { fetcher } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      () => jsonBody(SETTINGS_SUCCESS),
+      () => new Response(body, { status: 200, headers: { 'content-type': 'application/grpc-web+proto' } }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toMatchObject({ state: 'available', usedPercent: 18, remainingPercent: 82, plan: 'SuperGrok' })
+    client.dispose()
+  })
+
+  it('maps an out-of-range gRPC percentage to invalid instead of clamping it', async () => {
+    const { fetcher } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      undefined,
+      () => grpcCreditsBody({ percent: 150, start: '2026-10-14T03:32:51Z', end: '2026-10-21T03:32:51Z' }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({ state: 'error', reason: 'invalid' })
+    client.dispose()
   })
 
   it('surfaces a percentage-free gRPC window as partial details, never as 0%', async () => {
