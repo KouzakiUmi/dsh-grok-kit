@@ -11,15 +11,7 @@
  * @module dsh-grok-kit/invariant
  */
 
-import type { Context } from '@deepseek-ai/cordis'
-import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
-
-const PACKAGE_NAME = 'dsh-grok-kit'
-
+/** Core 0.2.1 no longer ships the invariants service. Keep the legacy export inert. */
 export const name = 'grok-kit-invariant'
-export const inject = ['invariants']
 
-const install: InvariantInstaller = () => {}
-
-export const apply = (ctx: Context): Promise<() => void> =>
-  Promise.resolve(ctx.invariants.register(PACKAGE_NAME, install))
+export const apply = (): Promise<() => void> => Promise.resolve(() => {})

@@ -2,6 +2,9 @@
 
 ## 未发布 / Unreleased
 
+- 宿主目标更新为 Core `0.2.1-alpha.3` / pi-ai `1.2.0`；pi-ai 改为宿主提供的可选 peer，开发依赖单独固定，不再作为插件的直接运行时依赖。移除旧 Provider 强转及已被 Core 移除的空 invariants 服务注册。
+- Target Core `0.2.1-alpha.3` / pi-ai `1.2.0`; pi-ai is now a host-provided optional peer with a separately pinned development dependency, not a direct plugin runtime dependency. Removed the legacy Provider cast and empty registration against Core's removed invariants service.
+
 - 进程内保留重新授权失败提示，不再因后续状态读取或模型选择而丢失；新的登录、导入或退出动作清除旧提示，不改写凭据。
 - Reauthorization failure diagnostics remain in memory across status reads and model selection; a new login, import or logout clears the old notice without rewriting credentials.
 - 同账号模型目录通知与首次媒体身份初始化不再清除 60 秒配额缓存；实际账号变更、未知身份与明确认证操作仍使缓存失效并隔离迟到结果。
