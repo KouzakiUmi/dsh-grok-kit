@@ -24,10 +24,10 @@ dsh plugin --profile web add dsh-grok-kit
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-也可以固定安装 0.2.3：
+也可以固定安装 0.2.6：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.6
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -48,7 +48,7 @@ dsh plugin --profile web add dsh-grok-kit@latest
 需要可复现安装时，可固定到完整 Git 提交（以下命令固定到所示提交，不跟随默认分支滚动）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
 ```
 
 不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 会跟随 `main`，**不是**可复现锚点。
@@ -110,7 +110,7 @@ Web UI：
 
 ## 代理
 
-可选。在 设置 → xAI Grok → 网络页的“网络代理（仅 xAI）”里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。代理对 x.ai 与 Grok 官方额度请求生效，其余请求不变。
+可选。在 设置 → xAI Grok → 网络页的“网络代理（仅 xAI）”里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。代理对 x.ai 与 Grok 官方额度请求生效，包括 `grok.com` 上精确的 `GetGrokCreditsConfig` 回退路径。同一 DSH 进程内其他发往这些目标的请求也可能受影响；其他路径和请求沿用原有网络设置，不强制直连。
 
 ## 卸载
 

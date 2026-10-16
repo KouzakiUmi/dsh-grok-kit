@@ -15,7 +15,9 @@ import {
   normalizeSuperGrokQuota,
   type QuotaSnapshot,
 } from '../src/quota.ts'
+import { GROK_GRPC_CREDITS_URL, GROK_GRPC_EMPTY_FRAME } from '../src/grok-credits.ts'
 import type { XaiOAuthTokenSource } from '../src/token-source.ts'
+import { encodeCreditsGrpcWeb, encodeGrpcStatusTrailer } from './grok-credits-frame.ts'
 
 function jsonBody(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
@@ -44,6 +46,29 @@ function makeFetch(billing: BillingStub, settings: SettingsStub = () => jsonBody
     const url = String(input)
     calls.push({ url, init: init as RequestInit })
     return await (url === GROK_SETTINGS_URL ? settings() : billing())
+  })
+  return { fetcher: fetcher as unknown as typeof fetch, calls }
+}
+
+/** gRPC-web credits response for the fallback probe (GROK-QUOTA-CREDITS-001). */
+function grpcCreditsBody(options: { percent?: number; start?: string; end?: string }): Response {
+  return new Response(encodeCreditsGrpcWeb(options), {
+    status: 200,
+    headers: { 'content-type': 'application/grpc-web+proto', 'grpc-status': '0' },
+  })
+}
+
+/** Three-way fetch stub: REST billing, optional settings, and the gRPC-web credits fallback. */
+function makeFetchWithGrpc(
+  billing: BillingStub,
+  settings: SettingsStub = () => jsonBody(SETTINGS_SUCCESS),
+  grpc: BillingStub = () => new Response('', { status: 502 }),
+) {
+  const calls: FetchCall[] = []
+  const fetcher = vi.fn(async (input: unknown, init?: unknown): Promise<Response> => {
+    const url = String(input)
+    calls.push({ url, init: init as RequestInit })
+    return await (url === GROK_GRPC_CREDITS_URL ? grpc() : url === GROK_SETTINGS_URL ? settings() : billing())
   })
   return { fetcher: fetcher as unknown as typeof fetch, calls }
 }
@@ -656,6 +681,177 @@ describe('SuperGrokQuotaClient.get', () => {
   })
 })
 
+describe('SuperGrokQuotaClient gRPC-web credits fallback (GROK-QUOTA-CREDITS-001)', () => {
+  it('recovers the weekly pool from GetGrokCreditsConfig when the REST credits shape answers 500', async () => {
+    const { fetcher, calls } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      () => jsonBody(SETTINGS_SUCCESS),
+      () => grpcCreditsBody({ percent: 40, start: '2026-10-14T03:32:51Z', end: '2026-10-21T03:32:51Z' }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({
+      state: 'available',
+      usedPercent: 40,
+      remainingPercent: 60,
+      period: 'week',
+      checkedAt: expect.any(String),
+      resetAt: '2026-10-21T03:32:51.000Z',
+      plan: 'SuperGrok',
+    })
+    const grpcCall = calls.find(call => call.url === GROK_GRPC_CREDITS_URL)
+    expect(grpcCall).toBeDefined()
+    expect(grpcCall!.init.method).toBe('POST')
+    expect(grpcCall!.init.redirect).toBe('error')
+    const headers = grpcCall!.init.headers as Record<string, string>
+    expect(headers.accept).toBe('application/grpc-web+proto')
+    expect(headers['content-type']).toBe('application/grpc-web+proto')
+    expect(headers['x-grpc-web']).toBe('1')
+    expect(headers.origin).toBe('https://grok.com')
+    expect(headers.referer).toBe('https://grok.com/?_s=usage')
+    expect(headers.authorization).toBe('Bearer token-1')
+    expect(headers['x-xai-token-auth']).toBe('xai-grok-cli')
+    // Pin the literal bytes: a constant-to-constant comparison would still
+    // pass if the constant itself were corrupted.
+    expect(GROK_GRPC_EMPTY_FRAME).toEqual(new Uint8Array([0, 0, 0, 0, 0]))
+    expect(grpcCall!.init.body).toEqual(new Uint8Array([0, 0, 0, 0, 0]))
+    client.dispose()
+  })
+
+  it('falls back with the rotated bearer after a 401 refresh when the retry still fails', async () => {
+    const refresh = vi.fn(async () => 'token-2')
+    let round = 0
+    const { fetcher, calls } = makeFetchWithGrpc(() => {
+      round += 1
+      return round === 1
+        ? jsonBody({}, 401)
+        : new Response('Failed to serialize billing response', { status: 500 })
+    }, undefined, () => grpcCreditsBody({ percent: 30, start: '2026-10-07T11:18:57Z', end: '2026-10-14T11:18:57Z' }))
+    const client = makeClient({ fetch: fetcher, tokens: makeTokens({ refresh }) })
+    expect(await client.get()).toMatchObject({ state: 'available', usedPercent: 30, remainingPercent: 70 })
+    expect(refresh).toHaveBeenCalledTimes(1)
+    const grpcCall = calls.find(call => call.url === GROK_GRPC_CREDITS_URL)
+    expect((grpcCall!.init.headers as Record<string, string>).authorization).toBe('Bearer token-2')
+    client.dispose()
+  })
+
+  it('reports temporary when both the REST shape and the gRPC fallback fail', async () => {
+    const { fetcher, calls } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      undefined,
+      () => new Response('', { status: 502 }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({ state: 'error', reason: 'temporary' })
+    expect(calls.map(call => call.url)).toEqual([GROK_BILLING_URL, GROK_SETTINGS_URL, GROK_GRPC_CREDITS_URL])
+    client.dispose()
+  })
+
+  it('falls back when the REST probe never answers and keeps the original error when the fallback is dead too', async () => {
+    const networkError = () => Promise.reject(new TypeError('fetch failed'))
+    const recovered = makeFetchWithGrpc(
+      networkError,
+      networkError,
+      () => grpcCreditsBody({ percent: 12.5, start: '2026-10-01T00:00:00Z', end: '2026-11-01T00:00:00Z' }),
+    )
+    expect(await makeClient({ fetch: recovered.fetcher }).get()).toEqual({
+      state: 'available',
+      usedPercent: 12.5,
+      remainingPercent: 87.5,
+      period: 'month',
+      checkedAt: expect.any(String),
+      resetAt: '2026-11-01T00:00:00.000Z',
+    })
+    const dead = makeFetchWithGrpc(networkError, networkError, networkError)
+    expect(await makeClient({ fetch: dead.fetcher }).get()).toEqual({ state: 'error', reason: 'temporary' })
+  })
+
+  it('never masks auth failures as usage data: 403 and 401 skip the fallback', async () => {
+    const restricted = makeFetchWithGrpc(() => jsonBody({}, 403))
+    const restrictedClient = makeClient({ fetch: restricted.fetcher })
+    expect(await restrictedClient.get()).toEqual({ state: 'error', reason: 'restricted' })
+    expect(restricted.calls.map(call => call.url)).not.toContain(GROK_GRPC_CREDITS_URL)
+    restrictedClient.dispose()
+    const auth = makeFetchWithGrpc(() => jsonBody({}, 401))
+    const authClient = makeClient({ fetch: auth.fetcher, tokens: makeTokens({ refresh: async () => 'token-1' }) })
+    expect(await authClient.get()).toEqual({ state: 'error', reason: 'auth' })
+    expect(auth.calls.map(call => call.url)).not.toContain(GROK_GRPC_CREDITS_URL)
+    authClient.dispose()
+  })
+
+  it.each([429, 404])('does not fall back on HTTP %s even when the gRPC probe would succeed', async status => {
+    const { fetcher, calls } = makeFetchWithGrpc(
+      () => jsonBody({}, status),
+      undefined,
+      () => grpcCreditsBody({ percent: 10, start: '2026-10-14T03:32:51Z', end: '2026-10-21T03:32:51Z' }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({ state: 'error', reason: 'temporary' })
+    expect(calls.map(call => call.url)).not.toContain(GROK_GRPC_CREDITS_URL)
+    client.dispose()
+  })
+
+  it('does not cache a data frame whose trailer grpc-status is non-zero', async () => {
+    const body = encodeCreditsGrpcWeb({
+      percent: 40,
+      start: '2026-10-14T03:32:51Z',
+      end: '2026-10-21T03:32:51Z',
+      trailerStatus: 13,
+    })
+    const { fetcher } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      undefined,
+      () => new Response(body, { status: 200, headers: { 'content-type': 'application/grpc-web+proto' } }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({ state: 'error', reason: 'temporary' })
+    client.dispose()
+  })
+
+  it('accepts a trailer grpc-status of 0 when the HTTP header omits it', async () => {
+    const body = Buffer.concat([
+      encodeCreditsGrpcWeb({
+        percent: 18,
+        start: '2026-10-14T03:32:51Z',
+        end: '2026-10-21T03:32:51Z',
+        trailerStatus: 'omit',
+      }),
+      encodeGrpcStatusTrailer(0),
+    ])
+    const { fetcher } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      () => jsonBody(SETTINGS_SUCCESS),
+      () => new Response(body, { status: 200, headers: { 'content-type': 'application/grpc-web+proto' } }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toMatchObject({ state: 'available', usedPercent: 18, remainingPercent: 82, plan: 'SuperGrok' })
+    client.dispose()
+  })
+
+  it('maps an out-of-range gRPC percentage to invalid instead of clamping it', async () => {
+    const { fetcher } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      undefined,
+      () => grpcCreditsBody({ percent: 150, start: '2026-10-14T03:32:51Z', end: '2026-10-21T03:32:51Z' }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    expect(await client.get()).toEqual({ state: 'error', reason: 'invalid' })
+    client.dispose()
+  })
+
+  it('surfaces a percentage-free gRPC window as partial details, never as 0%', async () => {
+    const { fetcher } = makeFetchWithGrpc(
+      () => new Response('Failed to serialize billing response', { status: 500 }),
+      undefined,
+      () => grpcCreditsBody({ start: '2026-10-07T11:18:57Z', end: '2026-10-14T11:18:57Z' }),
+    )
+    const client = makeClient({ fetch: fetcher })
+    const snapshot = await client.get()
+    expect(snapshot).toMatchObject({ state: 'partial', period: 'week', resetAt: '2026-10-14T11:18:57.000Z' })
+    expect(snapshot).not.toHaveProperty('usedPercent')
+    client.dispose()
+  })
+})
+
 describe('quota response cleanup', () => {
   it.each(['deadline', 'caller', 'dispose'] as const)('cancels and unlocks a hanging billing reader on %s without awaiting cancel', async stop => {
     const { response, cancel } = hangingResponse()
@@ -798,7 +994,10 @@ describe('quota response cleanup', () => {
     expect(await pending).toEqual({ state: 'error', reason: 'temporary' })
     expect(cancel).toHaveBeenCalledOnce()
     expect(response.body!.locked).toBe(false)
-    expect(calls).toHaveLength(2)
+    // The transport failure now also probes the gRPC-web fallback (the stub
+    // answers it with the same rejected promise) before the original error
+    // maps to temporary (GROK-QUOTA-CREDITS-001).
+    expect(calls.map(call => call.url)).toEqual([GROK_BILLING_URL, GROK_SETTINGS_URL, GROK_GRPC_CREDITS_URL])
     client.dispose()
   }, 2000)
 })

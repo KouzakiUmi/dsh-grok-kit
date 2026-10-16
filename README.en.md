@@ -42,6 +42,8 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 
 Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the billing response omits the usage percentage, subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
 
+**0.2.6** fixes “Unable to load quota” for some accounts: if the billing service returns a server error or the connection fails, the plugin tries the `grok.com` quota endpoint with the same sign-in credential and configured proxy. Invalid sign-ins, access denials, and rate limits do not trigger this extra fallback request. See [CHANGELOG.md](CHANGELOG.md).
+
 ## Search in the main model turn
 
 The same model id does not guarantee the same experience across integrations. [xAI documents that `grok-4.6` is available in both Grok Build and the public API](https://docs.x.ai/build/overview); the important search difference is whether server-side tools share the main conversation request.
@@ -94,10 +96,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-You can also pin version 0.2.3:
+You can also pin version 0.2.6:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.6
 dsh web
 ```
 
@@ -110,12 +112,12 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.5** fixes Experimental badge layout on the search and media pages and clarifies subscription usage, proxy, and video copy. Sign-in, search, and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.6** fixes quota loading for some accounts by adding a fallback when the billing service fails. Search and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
@@ -187,7 +189,7 @@ Settings split related keys between Search & conversation and Media & tasks. Sav
 - Browser status routes, errors, and diagnostics do not return token values
 - Plugin routes accept only loopback connections and loopback Host names, with browser-origin checks. The desktop `dsh-app://app` page is trusted; local requests without Origin but with Fetch Metadata may also write settings. This marker is not proof of desktop identity or authorization: the plugin does not isolate local processes or the desktop renderer. Do not expose these routes to a LAN or the internet, or share credential directories in an untrusted multi-user environment.
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
-- The proxy uses a global `fetch` hook in the same DSH process, matching `x.ai`, its subdomains, and `cli-chat-proxy.grok.com`. Requests from other components passing through that hook to these hosts are also affected. Other requests pass to the original `fetch` unchanged, not forced to connect directly. The hook is restored on disposal without permanently changing system or process environment variables.
+- The proxy uses a global `fetch` hook in the same DSH process, matching `x.ai`, its subdomains, `cli-chat-proxy.grok.com`, and the exact `grok.com` `GetGrokCreditsConfig` quota-fallback path. Requests from other components passing through that hook to these targets are also affected. Other `grok.com` paths and every other request pass to the original `fetch` unchanged, not forced to connect directly. The hook is restored on disposal without permanently changing system or process environment variables. The quota fallback sends the same OAuth bearer to `grok.com`.
 - On Windows, Node mode bits are not NTFS ACLs. Restrict the directory ACL yourself if the user profile or `$DSH_HOME` is stored in a shared location
 - Writer locks: credential writes delegate to the official `@deepseek-ai/dsh-atomic-write` (lock file `$DSH_HOME/.xai-oauth-auth.json.lock`). On the same host and PID namespace, a contender can take over and reclaim locks left by proven-exited processes using an exclusive claim file plus a second liveness check; locks held by live PIDs, with unclear ownership, malformed content, or empty files keep waiting until timeout (fail-closed). The credential and lock directory must live on a local filesystem within one PID namespace — sharing it across machines or containers desynchronizes PIDs and can break mutual exclusion into concurrent double writes. Replacing credential or lock files by hand while things run defeats these guarantees; stop every related process before cleaning up
 
