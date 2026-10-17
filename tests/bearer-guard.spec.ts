@@ -78,6 +78,20 @@ const REFUSED = [
   'file:///etc/passwd',
 ]
 
+async function expectPrivateHeaderFailure(operation: () => Promise<Response>): Promise<void> {
+  let failure: unknown
+  try {
+    await operation()
+  } catch (error) {
+    failure = error
+  }
+  expect(failure).toBeInstanceOf(TypeError)
+  expect((failure as Error).message).toBe('invalid OAuth request headers')
+  expect((failure as Error).message).not.toContain('fictional-left')
+  expect((failure as Error).message).not.toContain('fictional-right')
+  expect(failure).not.toHaveProperty('cause')
+}
+
 describe('OAuth bearer destinations', () => {
   it('locks the allowlist to the official hosts and the one grok.com path', () => {
     expect([...OAUTH_BEARER_HOSTS]).toEqual(['api.x.ai', 'cli-chat-proxy.grok.com'])
@@ -117,6 +131,32 @@ describe('OAuth bearer destinations', () => {
 })
 
 describe('fetchWithBearer', () => {
+  it.each(['\n', '\r', '\0'])('rejects a token containing %j without exposing it or calling fetch', async control => {
+    const fetchImpl = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      new Headers(init?.headers)
+      return new Response('ok')
+    })
+    await expectPrivateHeaderFailure(() => fetchWithBearer(
+      fetchImpl as typeof fetch, XAI_MODELS_URL, `fictional-left${control}fictional-right`,
+    ))
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('rejects an invalid old Authorization value without exposing it or calling fetch', async () => {
+    const fetchImpl = vi.fn(async () => new Response('ok'))
+    await expectPrivateHeaderFailure(() => fetchWithBearer(fetchImpl as typeof fetch, XAI_MODELS_URL, 'ordinary-token', {
+      headers: { authorization: 'Bearer fictional-left\nfictional-right' },
+    }))
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('keeps valid non-JWT bearer values accepted', async () => {
+    const fetchImpl = vi.fn(async () => new Response('ok'))
+    await fetchWithBearer(fetchImpl as typeof fetch, XAI_MODELS_URL, 'opaque+token/with=padding')
+    const [, init] = fetchImpl.mock.calls[0] as unknown as [unknown, RequestInit]
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer opaque+token/with=padding')
+  })
+
   it('sends the bearer only after the destination is accepted', async () => {
     const fetchImpl = vi.fn(async () => new Response('ok'))
     const signal = new AbortController().signal
@@ -166,6 +206,19 @@ describe('fetchWithBearer', () => {
 
 describe('guardBearerFetch', () => {
   const inner = () => vi.fn(async () => new Response('ok'))
+
+  it.each([
+    ['authorization', 'Bearer fictional-left\nfictional-right'],
+    ['bad header', 'fictional-left-fictional-right'],
+  ])('rejects malformed %s init headers on an allowed host without exposing them', async (name, value) => {
+    const fetchImpl = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      new Headers(init?.headers)
+      return new Response('ok')
+    })
+    const guarded = guardBearerFetch(fetchImpl as typeof fetch)
+    await expectPrivateHeaderFailure(() => guarded(XAI_MODELS_URL, { headers: { [name]: value } }))
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
 
   it('sends an allowlisted bearer with redirect error', async () => {
     const fetchImpl = inner()

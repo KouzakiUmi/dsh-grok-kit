@@ -1,5 +1,14 @@
 # 更新记录 / Changelog
 
+## 0.2.7（2026-10-17）
+
+- 统一检查 OAuth Bearer 请求的目的地：只允许指定的 xAI API、Grok 计费主机和精确的 `grok.com` 额度接口，拒绝向其他地址发送凭据。
+- Centralized destination checks for OAuth bearer requests: credentials are sent only to the designated xAI API and Grok billing hosts, or the exact `grok.com` quota endpoint.
+- 带凭据的请求不再跟随重定向，聊天 SDK 发出的实际请求也经过检查；正常请求端点、代理配置和媒体默认关闭策略不变。
+- Credentialed requests no longer follow redirects, including requests made by the chat SDK. Normal endpoints, proxy settings, and media-off defaults are unchanged.
+- 开发与 CI 增加 lint 检查，帮助发现未处理的 Promise、未使用变量和遗漏的分支；不会新增运行依赖或自动清除现有防御性检查。
+- Added development and CI lint checks for floating promises, unused variables, and missing switch cases, without adding runtime dependencies or removing existing defensive checks.
+
 ## 0.2.6（2026-10-17）
 
 - 修复部分账号因计费接口服务端错误而无法加载额度的问题；服务端错误或连接故障时，使用同一 OAuth 登录凭据回退读取 `grok.com` 的额度接口。

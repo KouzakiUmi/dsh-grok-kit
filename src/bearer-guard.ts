@@ -98,18 +98,30 @@ export function isBearerDestination(input: string | URL): boolean {
   }
 }
 
-function copyHeaders(headers: FetchHeaders | undefined): Record<string, string> {
-  if (headers === undefined) return {}
-  const out: Record<string, string> = {}
-  new Headers(headers).forEach((value, key) => {
-    out[key] = value
-  })
-  return out
+function invalidHeadersError(): TypeError {
+  // Native Headers errors can quote credential values. Do not retain a cause.
+  return new TypeError('invalid OAuth request headers')
+}
+
+function validatedHeaders(headers: FetchHeaders | undefined): Headers {
+  try {
+    return new Headers(headers)
+  } catch {
+    throw invalidHeadersError()
+  }
 }
 
 function headersWithBearer(headers: FetchHeaders | undefined, bearer: string): Record<string, string> {
-  const out = copyHeaders(headers)
-  out.authorization = `Bearer ${bearer}`
+  const normalized = validatedHeaders(headers)
+  try {
+    normalized.set('authorization', `Bearer ${bearer}`)
+  } catch {
+    throw invalidHeadersError()
+  }
+  const out: Record<string, string> = {}
+  normalized.forEach((value, key) => {
+    out[key] = value
+  })
   return out
 }
 
@@ -179,6 +191,7 @@ export function guardBearerFetch(fetchImpl: typeof fetch): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     if (!requestCarriesAuthorization(input, init)) return await fetchImpl(input, init)
     assertBearerDestination(requestDestination(input))
+    if (init?.headers !== undefined) validatedHeaders(init.headers)
     return await fetchImpl(input, { ...init, redirect: 'error' })
   }) as typeof fetch
 }
