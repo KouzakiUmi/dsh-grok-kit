@@ -30,6 +30,7 @@
  * @module dsh-grok-kit/quota
  */
 
+import { fetchWithBearer } from './bearer-guard.ts'
 import { sanitizeDiagnosticMessage } from './capabilities.ts'
 import { GROK_GRPC_CREDITS_URL, GROK_GRPC_EMPTY_FRAME, parseGrokCreditsGrpcWeb } from './grok-credits.ts'
 import type { GrokCreditsBillingBody } from './grok-credits.ts'
@@ -309,30 +310,30 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal, discard?: (value
   })
 }
 
-function quotaRequestInit(bearer: string, signal: AbortSignal): RequestInit {
+function quotaRequestInit(signal: AbortSignal): RequestInit {
   return {
     method: 'GET',
     headers: {
       accept: 'application/json',
-      authorization: `Bearer ${bearer}`,
       'x-xai-token-auth': GROK_TOKEN_AUTH,
       'x-grok-client-version': GROK_CLIENT_VERSION,
     },
-    // A billing proxy must answer directly; following a redirect would send
-    // the bearer somewhere the user never configured.
+    // A billing proxy must answer directly. fetchWithBearer refuses any other
+    // host and forces redirect: 'error', so a 3xx cannot move the bearer.
     redirect: 'error',
     signal,
   }
 }
 
 /**
- * gRPC-web credits probe request: the same OAuth bearer used for
- * cli-chat-proxy is sent to grok.com, plus the gRPC-web envelope (empty
- * request message, grok.com origin — the browser client sends exactly these;
- * GROK-QUOTA-CREDITS-001). Callers with a configured proxy must route this
- * exact URL (see isXaiProxyTarget); other grok.com paths stay direct.
+ * gRPC-web credits probe request. The OAuth bearer is attached by
+ * fetchWithBearer, which accepts only this exact grok.com path. The
+ * gRPC-web envelope (empty request message, grok.com origin) matches the
+ * browser client (GROK-QUOTA-CREDITS-001). Callers with a configured proxy
+ * must route this exact URL (see isXaiProxyTarget); other grok.com paths
+ * stay direct.
  */
-function grpcCreditsRequestInit(bearer: string, signal: AbortSignal): RequestInit {
+function grpcCreditsRequestInit(signal: AbortSignal): RequestInit {
   return {
     method: 'POST',
     headers: {
@@ -341,7 +342,6 @@ function grpcCreditsRequestInit(bearer: string, signal: AbortSignal): RequestIni
       'x-grpc-web': '1',
       origin: 'https://grok.com',
       referer: 'https://grok.com/?_s=usage',
-      authorization: `Bearer ${bearer}`,
       'x-xai-token-auth': GROK_TOKEN_AUTH,
       'x-grok-client-version': GROK_CLIENT_VERSION,
     },
@@ -599,7 +599,9 @@ export class SuperGrokQuotaClient {
   private async probeCreditsGrpc(bearer: string, signal: AbortSignal): Promise<GrokCreditsBillingBody | undefined> {
     try {
       const response = await raceAbort(
-        this.fetcher(GROK_GRPC_CREDITS_URL, grpcCreditsRequestInit(bearer, signal)), signal, discardResponse,
+        fetchWithBearer(this.fetcher, GROK_GRPC_CREDITS_URL, bearer, grpcCreditsRequestInit(signal)),
+        signal,
+        discardResponse,
       )
       if (signal.aborted) { discardResponse(response); signal.throwIfAborted() }
       const grpcStatus = response.headers.get('grpc-status')
@@ -633,7 +635,11 @@ export class SuperGrokQuotaClient {
     roundSignal.addEventListener('abort', discardBilling, { once: true })
     try {
       const [response, settings] = await Promise.all([
-        raceAbort(this.fetcher(GROK_BILLING_URL, quotaRequestInit(bearer, roundSignal)), roundSignal, discardResponse)
+        raceAbort(
+          fetchWithBearer(this.fetcher, GROK_BILLING_URL, bearer, quotaRequestInit(roundSignal)),
+          roundSignal,
+          discardResponse,
+        )
           .then(response => {
             billing = response
             if (roundSignal.aborted) { discardBilling(); roundSignal.throwIfAborted() }
@@ -663,7 +669,9 @@ export class SuperGrokQuotaClient {
     const settingsSignal = AbortSignal.any([wholeSignal, AbortSignal.timeout(settingsBudget)])
     try {
       const response = await raceAbort(
-        this.fetcher(GROK_SETTINGS_URL, quotaRequestInit(bearer, settingsSignal)), settingsSignal, discardResponse,
+        fetchWithBearer(this.fetcher, GROK_SETTINGS_URL, bearer, quotaRequestInit(settingsSignal)),
+        settingsSignal,
+        discardResponse,
       )
       // Fetch may settle just before the abort, with this continuation queued.
       if (settingsSignal.aborted) { discardResponse(response); settingsSignal.throwIfAborted() }

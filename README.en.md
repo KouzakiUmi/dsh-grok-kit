@@ -35,7 +35,7 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 
 Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the billing response omits the usage percentage, subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
 
-**0.2.6** fixes “Unable to load quota” for some accounts: if the billing service returns a server error or the connection fails, the plugin tries the `grok.com` quota endpoint with the same sign-in credential and configured proxy. Invalid sign-ins, access denials, and rate limits do not trigger this extra fallback request. See [CHANGELOG.md](CHANGELOG.md).
+**0.2.7** hardens where OAuth sign-in credentials can be sent: request destinations are checked centrally, and credentialed requests reject redirects. Normal endpoints and proxy settings are unchanged; quota loading keeps the previous release's failure fallback. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Search in the main model turn
 
@@ -89,10 +89,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-You can also pin version 0.2.6:
+You can also pin version 0.2.7:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.6
+dsh plugin --profile web add dsh-grok-kit@0.2.7
 dsh web
 ```
 
@@ -105,12 +105,12 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.6** fixes quota loading for some accounts by adding a fallback when the billing service fails. Search and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.7** adds credential-destination checks, not new features or subscription entitlements. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
@@ -180,6 +180,7 @@ Settings split related keys between Search & conversation and Media & tasks. Sav
 - The live store prefers `~/.grok/auth.json`, sharing the same xAI credential with Grok CLI in place; sign-in and refresh write back to that file instead of performing a one-time import, and signing out in Settings signs Grok CLI out too
 - OAuth refresh tokens rotate; atomic writes, in-process coalescing, and compare-and-write prevent concurrent refreshes from overwriting one another
 - Browser status routes, errors, and diagnostics do not return token values
+- OAuth access tokens are sent only over HTTPS to `api.x.ai`, `cli-chat-proxy.grok.com`, or the exact `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` quota URL. Requests carrying Authorization reject redirects, including actual chat-SDK requests; arbitrary `x.ai` subdomains are not permitted by this check. OAuth device-code/refresh form posts and token-free video downloads retain their separate existing flows.
 - Plugin routes accept only loopback connections and loopback Host names, with browser-origin checks. The desktop `dsh-app://app` page is trusted; local requests without Origin but with Fetch Metadata may also write settings. This marker is not proof of desktop identity or authorization: the plugin does not isolate local processes or the desktop renderer. Do not expose these routes to a LAN or the internet, or share credential directories in an untrusted multi-user environment.
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
 - The proxy uses a global `fetch` hook in the same DSH process, matching `x.ai`, its subdomains, `cli-chat-proxy.grok.com`, and the exact `grok.com` `GetGrokCreditsConfig` quota-fallback path. Requests from other components passing through that hook to these targets are also affected. Other `grok.com` paths and every other request pass to the original `fetch` unchanged, not forced to connect directly. The hook is restored on disposal without permanently changing system or process environment variables. The quota fallback sends the same OAuth bearer to `grok.com`.

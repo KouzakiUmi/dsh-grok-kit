@@ -253,6 +253,7 @@ function featureLabel(t: SettingsTranslate, id: CapabilityFeatureId): string {
     case 'video': return t('featureVideo')
     case 'voice': return t('featureVoice')
     case 'code': return t('featureCode')
+    case 'image-generation': return t('featureImageGeneration')
     default: return t('featureImageGeneration')
   }
 }
@@ -262,6 +263,7 @@ function featureStateLabel(t: SettingsTranslate, state: CapabilityFeatureState):
     case 'available': return t('stateAvailable')
     case 'restricted': return t('stateRestricted')
     case 'temporary-error': return t('stateTemporaryError')
+    case 'unverified': return t('stateUnverified')
     default: return t('stateUnverified')
   }
 }

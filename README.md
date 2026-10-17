@@ -35,7 +35,7 @@
 
 额度使用官方 billing/settings 返回的百分比、周期、套餐及预付余额。接口未返回使用百分比时仍显示订阅详情，已用/剩余保持未知，不冒充 0% 或无限额度。统一计费标记来自接口，不根据套餐名猜测；仅展示当前登录身份，不汇总不同工作区或席位。本插件不提供 Cursor 登录或其他模型、外部 Agent 的接入。
 
-**0.2.6** 修复部分账号的“无法加载配额”：计费接口遇到服务端错误或连接故障时，会用同一登录凭据尝试 `grok.com` 的额度接口，并沿用已配置的代理。登录失效、权限不足或限流时不会因此多发一次回退请求。更多变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.7** 加固 OAuth 登录凭据的发送边界：统一检查请求目的地，带凭据的请求拒绝重定向。正常端点与代理配置不变，额度读取仍沿用上一版的故障回退。更多变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 主循环融合搜索
 
@@ -89,10 +89,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-也可以固定安装 0.2.6：
+也可以固定安装 0.2.7：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.6
+dsh plugin --profile web add dsh-grok-kit@0.2.7
 dsh web
 ```
 
@@ -105,12 +105,12 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.6** 修复部分账号的额度读取，新增计费接口故障时的回退。搜索和媒体功能行为不变；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。宿主支持仍为 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.7** 增加凭据目的地检查，不新增功能或订阅权限；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。宿主支持仍为 DeepSeek Harness `0.2.0-rc.2` 与 `@earendil-works/pi-ai@0.87.1`（Node 22/24），不支持旧 0.1 宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。
@@ -180,6 +180,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675
 - 优先使用 `~/.grok/auth.json`，与 Grok CLI 原地共用同一份 xAI 凭据；登录和刷新都会写回该文件，而不是只做一次性导入；在设置页退出也会让 Grok CLI 退出
 - OAuth 刷新令牌会轮换；插件用原子写入、进程内合并和 compare-and-write 避免并发刷新互相覆盖
 - 浏览器状态接口、错误信息和诊断不会返回 token 值
+- OAuth access token 只发送到 HTTPS 的 `api.x.ai`、`cli-chat-proxy.grok.com`，以及 `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` 这一条额度 URL。带 Authorization 的请求拒绝重定向，包括聊天 SDK 发出的实际请求；此检查不扩展为允许任意 `x.ai` 子域名。OAuth 设备码授权与令牌刷新的表单请求，以及不带 token 的视频下载仍走各自原有流程。
 - 插件接口只接受本机回环连接与回环 Host，并校验浏览器来源。桌面端的 `dsh-app://app` 页面受信任；没有 Origin、但携带 Fetch Metadata 的本机请求也可写入设置。该标记不是桌面身份或权限证明：本插件不隔离本机进程或桌面渲染器。不要将接口暴露到局域网或公网，也不要在不可信的多用户环境共享凭据目录。
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
 - 代理通过同一 DSH 进程的全局 `fetch` hook 按目标分流：匹配 `x.ai`、其子域名、`cli-chat-proxy.grok.com`，以及 `grok.com` 上精确的 `GetGrokCreditsConfig` 额度回退路径。因此也会影响其他组件通过该 hook 发往这些地址的请求。`grok.com` 的其他路径和其他请求交给原有 `fetch` 处理，不强制直连；插件卸载时恢复 hook，不永久修改系统或进程环境变量。同一 OAuth bearer 在额度回退时也会发往 `grok.com`。

@@ -15,6 +15,7 @@ import {
   type SimpleStreamOptions,
   type StreamOptions,
 } from '@earendil-works/pi-ai'
+import { assertBearerDestination, guardBearerFetch } from './bearer-guard.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 import { safeMessage } from './redact.ts'
 import {
@@ -417,7 +418,17 @@ export function wrapXaiResponsesProvider(
         store: options.chainStore as ResponseChainStore,
       }
       : undefined
-    const injected = withPayload(streamOptions, options, continuation)
+    // pi-ai sends the OAuth bearer itself (OpenAI SDK Authorization header).
+    // Refuse a model whose base URL is outside the allowlist before that
+    // request starts, and wrap fetch so the URL the SDK actually calls is
+    // checked again. The wrapper also forces redirect: 'error' whenever the
+    // request carries Authorization. Lookup global fetch at call time so the
+    // proxy hook is the same one the SDK would have used.
+    if (model.baseUrl.length > 0) assertBearerDestination(model.baseUrl)
+    const injected = {
+      ...withPayload(streamOptions, options, continuation),
+      fetch: guardBearerFetch(streamOptions?.fetch ?? ((input, init) => globalThis.fetch(input, init))),
+    }
     const begin = (apiKey?: string) => fn.call(
       provider,
       model,

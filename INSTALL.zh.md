@@ -24,10 +24,10 @@ dsh plugin --profile web add dsh-grok-kit
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-也可以固定安装 0.2.6：
+也可以固定安装 0.2.7：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.6
+dsh plugin --profile web add dsh-grok-kit@0.2.7
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -48,7 +48,7 @@ dsh plugin --profile web add dsh-grok-kit@latest
 需要可复现安装时，可固定到完整 Git 提交（以下命令固定到所示提交，不跟随默认分支滚动）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4bcc4556a279a975ef675040cb4d953bd07129a1
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
 ```
 
 不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 会跟随 `main`，**不是**可复现锚点。
