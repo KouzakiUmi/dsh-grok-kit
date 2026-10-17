@@ -36,6 +36,7 @@
     "build": "npm run typecheck && tsdown && node scripts/wrap-client.mjs",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json",
+    "lint": "eslint .",
     "check": "npm run typecheck && npm run test && npm run build",
     "verify:host-compat": "node scripts/verify-host-compat.mjs"
   },
@@ -195,10 +196,12 @@
     "@deepseek-ai/schemastery": "3.18.4",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
+    "eslint": "^10.13.0",
     "react": "^18.2.0",
     "react-dom": "18.3.1",
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2",
     "vitest": "^4.1.8"
   }
 }

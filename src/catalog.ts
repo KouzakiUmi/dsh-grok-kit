@@ -14,6 +14,7 @@
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { xaiProvider } from '@earendil-works/pi-ai/providers/xai'
+import { fetchWithBearer } from './bearer-guard.ts'
 import { DEFAULT_XAI_OAUTH_MODEL, PREFERRED_XAI_OAUTH_MODEL } from './ids.ts'
 
 export const XAI_MODELS_URL = 'https://api.x.ai/v1/models'
@@ -161,14 +162,13 @@ export async function fetchLiveModelIds(
 ): Promise<string[]> {
   let response: Response
   try {
-    response = await fetch(XAI_MODELS_URL, {
+    response = await fetchWithBearer(fetch, XAI_MODELS_URL, accessToken, {
       headers: {
         accept: 'application/json',
-        authorization: `Bearer ${accessToken}`,
       },
       signal,
     })
-  } catch (error) {
+  } catch {
     if (signal?.aborted) throw new Error('Live model listing was cancelled')
     throw new Error('xAI model listing is unreachable')
   }

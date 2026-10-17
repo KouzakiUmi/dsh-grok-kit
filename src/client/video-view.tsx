@@ -562,6 +562,7 @@ function taskStateLabel(t: VideoTranslate, state: VideoTaskState | undefined): s
     case 'failed': return t('taskStateFailed')
     case 'interrupted': return t('taskStateInterrupted')
     case 'submission-unknown': return t('taskStateSubmissionUnknown')
+    case undefined: return t('videoCardStateUnknown')
     default: return t('videoCardStateUnknown')
   }
 }
@@ -571,6 +572,7 @@ function pendingTitle(t: VideoTranslate, name: VideoToolName): string {
   switch (name) {
     case 'grok_video_status': return t('videoCardPendingStatus')
     case 'grok_video_resume': return t('videoCardPendingResume')
+    case 'grok_video_generate': return t('videoCardPendingGenerate')
     default: return t('videoCardPendingGenerate')
   }
 }

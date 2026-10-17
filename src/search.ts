@@ -15,6 +15,7 @@
  */
 
 import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { fetchWithBearer } from './bearer-guard.ts'
 import { safeMessage } from './redact.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 
@@ -405,11 +406,10 @@ export class XaiOAuthSearchProvider {
     signal?: AbortSignal,
   ): Promise<Response> {
     try {
-      return await this.fetchImpl(XAI_RESPONSES_URL, {
+      return await fetchWithBearer(this.fetchImpl, XAI_RESPONSES_URL, accessToken, {
         method: 'POST',
         redirect: 'error',
         headers: {
-          authorization: `Bearer ${accessToken}`,
           'content-type': 'application/json',
           accept: 'application/json',
           'user-agent': USER_AGENT,

@@ -220,6 +220,7 @@ function sourceBadge(source: CatalogSource | undefined): { text: string; color: 
     case 'live': return { text: 'Live', color: 'var(--dsw-alias-state-success-primary, #22a06b)' }
     case 'cache': return { text: 'Cached', color: 'var(--dsw-alias-brand-primary, #4f6bed)' }
     case 'fallback': return { text: 'Fallback', color: 'var(--dsw-alias-label-tertiary, #81858c)' }
+    case undefined: return { text: '—', color: 'var(--dsw-alias-label-tertiary, #81858c)' }
     default: return { text: '—', color: 'var(--dsw-alias-label-tertiary, #81858c)' }
   }
 }

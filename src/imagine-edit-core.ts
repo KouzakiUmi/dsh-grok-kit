@@ -11,6 +11,7 @@
  */
 
 import { extname } from 'node:path'
+import { fetchWithBearer } from './bearer-guard.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 import { safeMessage } from './redact.ts'
 
@@ -52,6 +53,7 @@ export function sniffEditableImageMediaType(bytes: Uint8Array): 'image/png' | 'i
 export function extensionFor(mediaType: 'image/png' | 'image/jpeg' | 'image/webp'): string {
   switch (mediaType) {
     case 'image/jpeg': return 'jpg'
+    case 'image/png': return 'png'
     case 'image/webp': return 'webp'
     default: return 'png'
   }
@@ -419,11 +421,10 @@ export async function runImageEdit(options: RunImageEditOptions): Promise<EditSa
   if (typeof access !== 'string' || access.length === 0) {
     throw new Error('grok_imagine_edit requires a SuperGrok/X OAuth sign-in (Settings → xAI Grok)')
   }
-  const post = (bearer: string) => doFetch(XAI_IMAGES_EDIT_URL, {
+  const post = (bearer: string) => fetchWithBearer(doFetch, XAI_IMAGES_EDIT_URL, bearer, {
     method: 'POST',
     redirect: 'error',
     headers: {
-      authorization: `Bearer ${bearer}`,
       'content-type': 'application/json',
       accept: 'application/json',
       'user-agent': 'dsh-grok-kit/0.2.6',
