@@ -318,9 +318,8 @@ function quotaRequestInit(signal: AbortSignal): RequestInit {
       'x-xai-token-auth': GROK_TOKEN_AUTH,
       'x-grok-client-version': GROK_CLIENT_VERSION,
     },
-    // A billing proxy must answer directly; following a redirect would send
-    // the bearer somewhere the user never configured. fetchWithBearer also
-    // refuses to attach that bearer to any other host.
+    // A billing proxy must answer directly. fetchWithBearer refuses any other
+    // host and forces redirect: 'error', so a 3xx cannot move the bearer.
     redirect: 'error',
     signal,
   }

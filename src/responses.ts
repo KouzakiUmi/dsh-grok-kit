@@ -421,8 +421,9 @@ export function wrapXaiResponsesProvider(
     // pi-ai sends the OAuth bearer itself (OpenAI SDK Authorization header).
     // Refuse a model whose base URL is outside the allowlist before that
     // request starts, and wrap fetch so the URL the SDK actually calls is
-    // checked again. Lookup global fetch at call time so the proxy hook is
-    // the same one the SDK would have used.
+    // checked again. The wrapper also forces redirect: 'error' whenever the
+    // request carries Authorization. Lookup global fetch at call time so the
+    // proxy hook is the same one the SDK would have used.
     if (model.baseUrl.length > 0) assertBearerDestination(model.baseUrl)
     const injected = {
       ...withPayload(streamOptions, options, continuation),

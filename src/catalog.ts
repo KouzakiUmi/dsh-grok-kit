@@ -166,6 +166,7 @@ export async function fetchLiveModelIds(
       headers: {
         accept: 'application/json',
       },
+      redirect: 'error',
       signal,
     })
   } catch {

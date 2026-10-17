@@ -5,11 +5,19 @@
 /**
  * Fail-closed destination guard for the user's OAuth access token.
  *
- * Every request that would carry `Authorization: Bearer <access token>` goes
- * through this module. Plugin call sites use {@link fetchWithBearer}, which
- * attaches the header only after the destination is accepted. pi-ai chat lets
- * the OpenAI SDK attach the header itself, so that path receives
- * {@link guardBearerFetch} and is refused before the underlying fetch runs.
+ * Every request that would carry an `Authorization` header goes through this
+ * module. Plugin call sites use {@link fetchWithBearer}, which attaches the
+ * bearer only after the destination is accepted. pi-ai chat lets the OpenAI
+ * SDK attach the header itself, so that path receives {@link guardBearerFetch}
+ * and is refused before the underlying fetch runs.
+ *
+ * Any `Authorization` value counts, not only a scheme at the start of the
+ * header. `Headers` joins duplicates into one comma-separated string, so a
+ * leading `Basic` would hide a later `Bearer`. When `init.headers` and a
+ * `Request` both exist, either side carrying the header is enough.
+ *
+ * A credentialed request is sent with `redirect: 'error'`, overriding the
+ * caller, so a 3xx cannot move the token onto another path or host.
  *
  * OAuth login and refresh post a device code or refresh token as a form body
  * to auth.x.ai; they do not send this bearer. Video downloads are token-free
@@ -33,7 +41,6 @@ export const OAUTH_BEARER_EXACT_URL = 'https://grok.com/grok_api_v2.GrokBuildBil
 
 const BEARER_HOSTS = new Set<string>(OAUTH_BEARER_HOSTS)
 const EXACT_GROK_CREDITS = new URL(OAUTH_BEARER_EXACT_URL)
-const BEARER_VALUE = /^bearer\s+\S/iu
 
 /** Node's fetch globals expose `RequestInit` but not the DOM `HeadersInit` / `RequestInfo` aliases. */
 type FetchHeaders = NonNullable<RequestInit['headers']>
@@ -109,7 +116,8 @@ function headersWithBearer(headers: FetchHeaders | undefined, bearer: string): R
 /**
  * Attach the OAuth bearer and perform the request.
  * The header is written only after the destination is accepted, and it
- * replaces any caller-supplied authorization header.
+ * replaces any caller-supplied authorization header. `redirect` is always
+ * `error`, including when the caller asked to follow.
  */
 export function fetchWithBearer(
   fetchImpl: typeof fetch,
@@ -119,28 +127,41 @@ export function fetchWithBearer(
 ): Promise<Response> {
   assertBearerDestination(input)
   const headers = headersWithBearer(init?.headers, bearer)
-  return fetchImpl(input, { ...init, headers })
+  return fetchImpl(input, { ...init, headers, redirect: 'error' })
 }
 
-function readAuthorization(headers: FetchHeaders): string | undefined | 'unreadable' {
+/**
+ * True when `headers` carries `Authorization`, or when the header list cannot
+ * be read. Duplicates count: the WHATWG constructor keeps the name if any
+ * value was appended, including a bearer hidden after another scheme.
+ */
+function headersCarryAuthorization(headers: FetchHeaders): boolean {
   try {
-    return new Headers(headers).get('authorization') ?? undefined
+    return new Headers(headers).has('authorization')
   } catch {
-    return 'unreadable'
+    return true
   }
 }
 
-function requestCarriesBearer(input: FetchInput, init?: RequestInit): boolean {
-  if (init?.headers !== undefined) {
-    const value = readAuthorization(init.headers)
-    if (value === 'unreadable') return true
-    return value !== undefined && BEARER_VALUE.test(value)
+function requestHeadersCarryAuthorization(request: Request): boolean {
+  try {
+    return request.headers.has('authorization')
+  } catch {
+    return true
   }
-  if (typeof Request !== 'undefined' && input instanceof Request) {
-    const value = input.headers.get('authorization')
-    return value !== null && BEARER_VALUE.test(value)
-  }
-  return false
+}
+
+/**
+ * Fail closed if either side carries `Authorization`. `init.headers` replaces
+ * the Request's header list on the wire, so looking at only one side would
+ * miss a bearer the other side still holds.
+ */
+function requestCarriesAuthorization(input: FetchInput, init?: RequestInit): boolean {
+  const fromInit = init?.headers !== undefined && headersCarryAuthorization(init.headers)
+  const fromRequest = typeof Request !== 'undefined'
+    && input instanceof Request
+    && requestHeadersCarryAuthorization(input)
+  return fromInit || fromRequest
 }
 
 function requestDestination(input: FetchInput): string | URL {
@@ -149,13 +170,15 @@ function requestDestination(input: FetchInput): string | URL {
 }
 
 /**
- * Wrap a fetch so a request that already carries an Authorization bearer is
- * refused unless its destination is allowlisted. Requests without that
- * header (OAuth form posts, token-free downloads) are forwarded unchanged.
+ * Wrap a fetch so a request that carries an Authorization header is refused
+ * unless its destination is allowlisted, and is sent with `redirect: 'error'`.
+ * Requests without that header (OAuth form posts, token-free downloads) are
+ * forwarded unchanged, including their redirect mode.
  */
 export function guardBearerFetch(fetchImpl: typeof fetch): typeof fetch {
   return (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
-    if (requestCarriesBearer(input, init)) assertBearerDestination(requestDestination(input))
-    return await fetchImpl(input, init)
+    if (!requestCarriesAuthorization(input, init)) return await fetchImpl(input, init)
+    assertBearerDestination(requestDestination(input))
+    return await fetchImpl(input, { ...init, redirect: 'error' })
   }) as typeof fetch
 }

