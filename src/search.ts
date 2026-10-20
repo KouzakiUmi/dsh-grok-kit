@@ -15,6 +15,7 @@
  */
 
 import { HarnessError } from '@deepseek-ai/dsh-llm'
+import { fetchWithBearer } from './bearer-guard.ts'
 import { safeMessage } from './redact.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 
@@ -28,7 +29,7 @@ export const XAI_RESPONSES_URL = 'https://api.x.ai/v1/responses'
 /** OAuth-friendly Grok Build model; override via config `searchModel`. */
 export const DEFAULT_XAI_SEARCH_MODEL = 'grok-build-0.1'
 
-const USER_AGENT = 'dsh-grok-kit/0.2.5'
+const USER_AGENT = 'dsh-grok-kit/0.2.7'
 const ERROR_BODY_LIMIT = 300
 
 export interface XaiOAuthSearchProviderOptions {
@@ -405,11 +406,10 @@ export class XaiOAuthSearchProvider {
     signal?: AbortSignal,
   ): Promise<Response> {
     try {
-      return await this.fetchImpl(XAI_RESPONSES_URL, {
+      return await fetchWithBearer(this.fetchImpl, XAI_RESPONSES_URL, accessToken, {
         method: 'POST',
         redirect: 'error',
         headers: {
-          authorization: `Bearer ${accessToken}`,
           'content-type': 'application/json',
           accept: 'application/json',
           'user-agent': USER_AGENT,

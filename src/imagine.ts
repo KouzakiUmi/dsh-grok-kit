@@ -7,6 +7,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { AttachmentStore, ImageAttachmentRef, ImageMediaType } from '@deepseek-ai/dsh-attachment'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { fetchWithBearer } from './bearer-guard.ts'
 import type { XaiOAuthSession } from './session.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 import { safeMessage } from './redact.ts'
@@ -15,7 +16,7 @@ import { assertMediaEnabled } from './media-options.ts'
 export const XAI_IMAGES_URL = 'https://api.x.ai/v1/images/generations'
 export const DEFAULT_IMAGINE_MODEL = 'grok-imagine-image-2.0'
 const FALLBACK_IMAGINE_MODEL = 'grok-imagine-image'
-const USER_AGENT = 'dsh-grok-kit/0.2.5'
+const USER_AGENT = 'dsh-grok-kit/0.2.7'
 /** v1 renders exactly one image per call (the API bills per n). */
 const MAX_N = 1
 
@@ -44,6 +45,7 @@ function startsWith(bytes: Uint8Array, prefix: Uint8Array): boolean {
 function extensionFor(mediaType: ImageMediaType): string {
   switch (mediaType) {
     case 'image/jpeg': return 'jpg'
+    case 'image/png': return 'png'
     case 'image/webp': return 'webp'
     case 'image/gif': return 'gif'
     default: return 'png'
@@ -100,11 +102,10 @@ async function requestImage(
   if (access === undefined || access.length === 0) {
     throw new Error('grok_imagine requires a SuperGrok/X OAuth sign-in (Settings → xAI Grok)')
   }
-  const post = (bearer: string) => fetchImpl(XAI_IMAGES_URL, {
+  const post = (bearer: string) => fetchWithBearer(fetchImpl, XAI_IMAGES_URL, bearer, {
     method: 'POST',
     redirect: 'error',
     headers: {
-      authorization: `Bearer ${bearer}`,
       'content-type': 'application/json',
       accept: 'application/json',
       'user-agent': USER_AGENT,

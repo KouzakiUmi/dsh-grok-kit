@@ -4,6 +4,8 @@
 
 给人和其他自动化 agent 用的完整步骤。
 
+> 分支范围：Core `0.2.1-alpha.3` 适配和对话页视频管理尚未发布到 npm。下文 npm 和上游 Git 示例安装的是上游发行版，其宿主要求以对应发行版为准。使用本分支时，请按「开发安装」构建本地检出目录，而不是克隆上游。
+
 ## 先决条件
 
 - PATH 上有 DeepSeek Harness 的 `dsh`，Core 为 **0.2.1-alpha.3**，由宿主提供 `@earendil-works/pi-ai@1.2.0`（Node 22/24；不支持旧宿主线）。宿主必须让插件能够解析 pi-ai；可选 peer 仅避免自动补装，运行时仍然必需
@@ -24,10 +26,10 @@ dsh plugin --profile web add dsh-grok-kit
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-也可以固定安装 0.2.3：
+也可以固定安装 0.2.7：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.7
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -48,7 +50,7 @@ dsh plugin --profile web add dsh-grok-kit@latest
 需要可复现安装时，可固定到完整 Git 提交（以下命令固定到所示提交，不跟随默认分支滚动）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
 ```
 
 不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 会跟随 `main`，**不是**可复现锚点。
@@ -110,7 +112,7 @@ Web UI：
 
 ## 代理
 
-可选。在 设置 → xAI Grok → 网络页的“网络代理（仅 xAI）”里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。代理对 x.ai 与 Grok 官方额度请求生效，包括 `grok.com` 上精确的 `GetGrokCreditsConfig` 回退路径；该主机的其他路径和其余请求不变。
+可选。在 设置 → xAI Grok → 网络页的“网络代理（仅 xAI）”里配置，或通过 dsh 环境 / config 设置 `DSH_XAI_PROXY`（例如 `http://127.0.0.1:8080`）。代理对 x.ai 与 Grok 官方额度请求生效，包括 `grok.com` 上精确的 `GetGrokCreditsConfig` 回退路径。同一 DSH 进程内其他发往这些目标的请求也可能受影响；其他路径和请求沿用原有网络设置，不强制直连。
 
 ## 卸载
 

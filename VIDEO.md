@@ -24,7 +24,7 @@ All image and video switches start off in the new version, ignoring old media en
 1. Call `grok_video_generate` with `prompt` and `image`, optionally `duration` (6 or 10 seconds) and `resolution` (480p or 720p). Tool defaults: 6 seconds, 480p.
 2. Submission returns a plugin `taskId`, not the upstream request ID. Later call `grok_video_status` with `task_id`; each call performs one poll.
 3. Use `grok_video_resume(task_id)` after a local interruption or failed download. It continues polling/downloading, never resubmits generation.
-4. A completed MP4 is a normal DSH file attachment. Results carry its full `attachment={...}` reference. Download through the video card or settings task list.
+4. A completed MP4 is a normal DSH file attachment. Results carry its full `attachment={...}` reference. Download through the video card or the conversation's Generated videos tab.
 
 Image sources may be full session image attachment references, data URIs, or local paths read through host fs permissions. Bare image attachment IDs require an attachment backend that exposes `imageHostPath`; remote backends need a full reference. Remote image URLs are rejected in this first version. The official [image-to-video documentation](https://docs.x.ai/developers/model-capabilities/video/image-to-video) explicitly supports base64 data URIs; one signed-in account has successfully submitted and stored a six-second video requested at the 480p tier using a session image converted to a data URI. This does not establish availability for every account or subscription tier.
 
@@ -53,11 +53,13 @@ GET /plugins/dsh-grok-kit/video/file?taskId=<UUID of a completed task owned by t
 
 It reads saved attachments only, never arbitrary paths or caller-supplied attachment IDs, and follows loopback/Host/same-origin checks. Results are ordinary file attachments. The redesigned card reads and validates the complete file through the same-origin endpoint after a user action; inline playback and download share the same media data. Range requests are not provided. The frontend never receives signed upstream media URLs.
 
-## Capabilities and limits
+## Video management and limits
 
-The panel shows observations from this process only: unverified, available, restricted, or temporary error. Opening it or refreshing the local task list does not generate media or probe upstream permissions.
+The conversation's Generated videos tab lists local tasks for the signed-in account, with playback, download, resume, refresh, Clear finished, and Clear all actions. Settings → Media & tasks keeps only the tool switches. Opening or refreshing the list does not generate media or probe upstream permissions.
 
-The image-generation row refers to the not-yet-integrated server-side Responses feature, not the existing `grok_imagine` tool. Voice and server-side Python are not implemented in this first version.
+Both clear actions require confirmation and remove only the current account's local task records. They do not delete stored attachments, cancel upstream jobs, or stop billing. Clearing all also removes pending task records, so those tasks can no longer be recovered from this list.
+
+The tab does not display the old capability-observation panel. Server-side Responses image generation, voice, and server-side Python remain outside this feature.
 
 Subscription quota lives on the Account page via `GET /plugins/dsh-grok-kit/quota`: used/remaining percentages, the reported period and reset time, and optional plan/prepaid balance. It is read when Account opens, with a 60-second successful-result cache scoped to the current account and no background polling; Refresh still respects that cache. Quota does not prove video or model entitlement, and failed reads never show estimates. Requests reuse OAuth renewal and the existing proxy, additionally covering the exact official billing host `cli-chat-proxy.grok.com` and the exact `grok.com` `GetGrokCreditsConfig` fallback path (not other paths on that host). The fallback sends the same OAuth bearer. Restarting clears in-memory capability observations and quota cache, but preserves tasks.
 

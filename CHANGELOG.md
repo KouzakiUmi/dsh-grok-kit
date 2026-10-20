@@ -4,6 +4,24 @@
 
 - 宿主目标更新为 Core `0.2.1-alpha.3` / pi-ai `1.2.0`；pi-ai 改为宿主提供的可选 peer，开发依赖单独固定，不再作为插件的直接运行时依赖。移除旧 Provider 强转及已被 Core 移除的空 invariants 服务注册。
 - Target Core `0.2.1-alpha.3` / pi-ai `1.2.0`; pi-ai is now a host-provided optional peer with a separately pinned development dependency, not a direct plugin runtime dependency. Removed the legacy Provider cast and empty registration against Core's removed invariants service.
+- 视频维护清单移至对话页顶部「已生成的视频」标签，设置页仅保留媒体开关；支持按当前账号清除已完成或全部本地任务，不删除附件、不取消上游生成。
+- Moved video maintenance to the conversation's Generated videos tab, leaving media switches in Settings. Clear finished or all local tasks for the signed-in account without deleting attachments or cancelling upstream generation.
+
+## 0.2.7（2026-10-17）
+
+- 统一检查 OAuth Bearer 请求的目的地：只允许指定的 xAI API、Grok 计费主机和精确的 `grok.com` 额度接口，拒绝向其他地址发送凭据。
+- Centralized destination checks for OAuth bearer requests: credentials are sent only to the designated xAI API and Grok billing hosts, or the exact `grok.com` quota endpoint.
+- 带凭据的请求不再跟随重定向，聊天 SDK 发出的实际请求也经过检查；正常请求端点、代理配置和媒体默认关闭策略不变。
+- Credentialed requests no longer follow redirects, including requests made by the chat SDK. Normal endpoints, proxy settings, and media-off defaults are unchanged.
+- 开发与 CI 增加 lint 检查，帮助发现未处理的 Promise、未使用变量和遗漏的分支；不会新增运行依赖或自动清除现有防御性检查。
+- Added development and CI lint checks for floating promises, unused variables, and missing switch cases, without adding runtime dependencies or removing existing defensive checks.
+
+## 0.2.6（2026-10-17）
+
+- 修复部分账号因计费接口服务端错误而无法加载额度的问题；服务端错误或连接故障时，使用同一 OAuth 登录凭据回退读取 `grok.com` 的额度接口。
+- Fixed quota loading for some accounts affected by billing-service errors. Server errors or connection failures now fall back to the `grok.com` quota endpoint using the same OAuth sign-in credential.
+- 额度回退沿用已配置的代理；校验响应状态、大小与用量数据，失败时不显示估算额度。登录失效、权限不足和限流不触发额外回退。
+- The quota fallback uses the configured proxy and validates response status, size, and usage data without showing estimates on failure. Invalid sign-ins, access denials, and rate limits do not trigger an extra fallback.
 
 ## 0.2.5（2026-10-15）
 

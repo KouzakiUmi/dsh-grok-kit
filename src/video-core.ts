@@ -27,6 +27,7 @@ import { dirname, join, resolve } from 'node:path'
 import { withFileLock, writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import type { AttachmentStore, FileAttachmentRef } from '@deepseek-ai/dsh-attachment'
+import { fetchWithBearer } from './bearer-guard.ts'
 import type { XaiOAuthTokenSource } from './token-source.ts'
 import { safeMessage } from './redact.ts'
 import { sanitizeDiagnosticMessage } from './capabilities.ts'
@@ -130,11 +131,6 @@ export interface VideoTaskManagerOptions {
 export interface VideoSourceContext {
   cwd?: string
   readFile?: (path: string, signal?: AbortSignal) => Promise<Uint8Array>
-}
-
-interface StoreDocument {
-  version: number
-  tasks: VideoTaskRecord[]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -534,14 +530,13 @@ export class VideoTaskManager {
         throw new Error('grok_video_generate requires a SuperGrok/X OAuth sign-in (Settings → xAI Grok)')
       }
       timed.signal.throwIfAborted()
-      const post = (bearer: string) => this.fetchImpl(XAI_VIDEO_GENERATIONS_URL, {
+      const post = (bearer: string) => fetchWithBearer(this.fetchImpl, XAI_VIDEO_GENERATIONS_URL, bearer, {
         method: 'POST',
         redirect: 'error',
         headers: {
-          authorization: `Bearer ${bearer}`,
           'content-type': 'application/json',
           accept: 'application/json',
-          'user-agent': 'dsh-grok-kit/0.2.5',
+          'user-agent': 'dsh-grok-kit/0.2.7',
         },
         body: JSON.stringify(body),
         signal: timed.signal,
@@ -884,13 +879,12 @@ export class VideoTaskManager {
       if (typeof access !== 'string' || access.length === 0) {
         throw new Error('grok_video_status requires a SuperGrok/X OAuth sign-in (Settings → xAI Grok)')
       }
-      const get = (bearer: string) => this.fetchImpl(xaiVideoStatusUrl(record.requestId as string), {
+      const get = (bearer: string) => fetchWithBearer(this.fetchImpl, xaiVideoStatusUrl(record.requestId as string), bearer, {
         method: 'GET',
         redirect: 'error',
         headers: {
-          authorization: `Bearer ${bearer}`,
           accept: 'application/json',
-          'user-agent': 'dsh-grok-kit/0.2.5',
+          'user-agent': 'dsh-grok-kit/0.2.7',
         },
         signal: pollTimed.signal,
       })
@@ -1025,7 +1019,7 @@ export class VideoTaskManager {
       const response = await this.fetchImpl(remoteUrl, {
         method: 'GET',
         redirect: 'error',
-        headers: { accept: 'video/mp4', 'user-agent': 'dsh-grok-kit/0.2.5' },
+        headers: { accept: 'video/mp4', 'user-agent': 'dsh-grok-kit/0.2.7' },
         signal: timed.signal,
       })
       if (!response.ok) {

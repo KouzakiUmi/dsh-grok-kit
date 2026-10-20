@@ -4,6 +4,8 @@
 
 Idempotent runbook for humans and automation agents.
 
+> Branch scope: the Core `0.2.1-alpha.3` compatibility and conversation video-management changes are not published to npm. The npm and upstream Git examples install upstream releases, which retain their own host requirements. For this branch, build a local checkout as described under Development install rather than cloning upstream.
+
 ## Prerequisites
 
 - DeepSeek Harness `dsh` on PATH with Core **0.2.1-alpha.3** and host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24; older hosts are unsupported). The host must expose pi-ai to the plugin: it is an optional peer to prevent automatic installation, but required at runtime. A source checkout that runs `pnpm dsh` works too
@@ -24,10 +26,10 @@ From a DeepSeek Harness source checkout, prefix the same command with `pnpm`:
 pnpm dsh plugin --profile web add dsh-grok-kit
 ```
 
-Or pin version 0.2.3:
+Or pin version 0.2.7:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.7
 ```
 
 If `dsh` is not on PATH, run via pinned `npx`:
@@ -48,7 +50,7 @@ If the source does not switch, run `dsh plugin --profile web remove dsh-grok-kit
 For a reproducible install, pin a full Git commit (the command below pins the shown commit rather than following the rolling default branch):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
 ```
 
 `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is **not** a reproducible pin.
@@ -110,7 +112,7 @@ Nested `grok_web_search` / `x_search` (a second `grok-build-0.1` hop) are regist
 
 ## Proxy
 
-Optional. Set it from Settings → xAI Grok → Network tab under "Network proxy (xAI only)", or via `DSH_XAI_PROXY` (e.g. `http://127.0.0.1:8080`) in the dsh environment / config. Routes x.ai and official Grok billing requests through this proxy, including the exact `grok.com` `GetGrokCreditsConfig` fallback path; other paths on that host and every other request stay direct.
+Optional. Set it from Settings → xAI Grok → Network tab under "Network proxy (xAI only)", or via `DSH_XAI_PROXY` (e.g. `http://127.0.0.1:8080`) in the dsh environment / config. Routes x.ai and official Grok billing requests through this proxy, including the exact `grok.com` `GetGrokCreditsConfig` fallback path. Other requests to these targets in the same DSH process may also be affected; other paths and traffic retain their existing network settings, rather than being forced to connect directly.
 
 ## Uninstall
 

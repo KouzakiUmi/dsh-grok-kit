@@ -89,7 +89,6 @@ export async function writeStoredProxyUrl(url: string): Promise<void> {
 }
 
 let proxyAgent: ProxyAgent | null = null
-let hookInstalled = false
 
 function urlHref(input: unknown): string {
   if (typeof input === 'string') return input

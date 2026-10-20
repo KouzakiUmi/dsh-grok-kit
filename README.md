@@ -16,13 +16,6 @@
 
 > 通过 OAuth 在 DeepSeek Harness 中使用 Grok：主循环融合网页与 X 搜索、多轮推理衔接、图片生成与编辑、视频生成（实验性），以及仅作用于 xAI 的独立代理。
 
-> [!IMPORTANT]
-> **非官方项目、商标与账户使用声明**
->
-> `dsh-grok-kit` 是由社区独立开发的 DeepSeek Harness 第三方插件，不是 xAI、X、DeepSeek、DeepSeek Harness 或这些项目维护者的官方产品，也不代表它们。本项目不主张已获得上述主体对本插件或其名称的个别许可、背书、赞助或认可。Grok、xAI、X、DeepSeek、DeepSeek Harness 及相关名称与标识归各自权利人所有；本项目仅为准确说明兼容对象而提及这些名称。
->
-> OAuth 可用性可能受订阅档位、地区、xAI 条款、账户资格、速率限制和后续服务变更影响。用户应自行确认其账户与用途获准；本项目不保证持续可用性或兼容性，也不提供 xAI/Grok 账号、订阅或官方支持。
-
 ## 不止于 OAuth 登录
 
 `dsh-grok-kit` 为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 增加独立的 `xai-oauth` 路由。它不要求 `XAI_API_KEY`，也不修改 dsh 源码；重点不只是“能登录”，而是把服务端搜索和连续 reasoning 所需的请求字段接进主聊天路径。
@@ -41,6 +34,8 @@
 账号页的 **登录 Grok / X 订阅**共用官方 Grok OAuth，兼容 X Subscription 与原 SuperGrok / X Premium 订阅；已登录时可重新授权以切换账号，不必先删除共享凭据。账号页也提供[官方订阅管理入口](<https://grok.com/dashboard>)。
 
 额度使用官方 billing/settings 返回的百分比、周期、套餐及预付余额。接口未返回使用百分比时仍显示订阅详情，已用/剩余保持未知，不冒充 0% 或无限额度。统一计费标记来自接口，不根据套餐名猜测；仅展示当前登录身份，不汇总不同工作区或席位。本插件不提供 Cursor 登录或其他模型、外部 Agent 的接入。
+
+**0.2.7** 加固 OAuth 登录凭据的发送边界：统一检查请求目的地，带凭据的请求拒绝重定向。正常端点与代理配置不变，额度读取仍沿用上一版的故障回退。更多变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 主循环融合搜索
 
@@ -87,6 +82,8 @@
 
 ## 安装
 
+> 本分支的 Core `0.2.1-alpha.3` 适配和视频管理改动尚未发布到 npm。以下 npm 与上游 Git 示例安装的是上游发行版，不包含这些分支改动；使用本分支请从本地检出目录构建，参见 [开发安装](INSTALL.zh.md#开发安装)。
+
 推荐从 npm 安装到 Web profile：
 
 ```sh
@@ -94,10 +91,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-也可以固定安装 0.2.3：
+也可以固定安装 0.2.7：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.7
 dsh web
 ```
 
@@ -110,12 +107,12 @@ npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.5** 修复搜索与媒体页的“实验性”徽标布局，并澄清订阅用量、代理和视频说明。登录、搜索和媒体功能行为不变；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。当前宿主目标已更新为 DeepSeek Harness Core `0.2.1-alpha.3` 与宿主提供的 `@earendil-works/pi-ai@1.2.0`（Node 22/24），不支持旧宿主线。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.7** 增加凭据目的地检查，不增加订阅权限；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。本分支保留 DeepSeek Harness Core `0.2.1-alpha.3` 与宿主提供的 `@earendil-works/pi-ai@1.2.0`（Node 22/24）适配，不支持旧宿主线，并将视频维护清单移至对话页顶部「已生成的视频」标签。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。
@@ -144,7 +141,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d3
 
 ### 视频任务（实验性）
 
-提供单图生视频、持久任务恢复与账号隔离下载，对应 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，默认关闭。设置页的「媒体与任务」页会显示本地能力状态和任务列表。开启需要确认风险并重启 DSH；生成会消耗订阅额度，“停止等待”只是不再等待，不会取消已提交的任务。用法、配置及限制见 [视频说明](VIDEO.zh.md)。
+提供单图生视频、持久任务恢复与账号隔离下载，对应 `grok_video_generate` / `grok_video_status` / `grok_video_resume`，默认关闭。设置页的「媒体与任务」页仅保留开关，对话页顶部「已生成的视频」标签提供播放、下载、恢复和本地任务清理。清理不删除附件，也不取消上游生成。开启需要确认风险并重启 DSH；生成会消耗订阅额度，“停止等待”只是不再等待，不会取消已提交的任务。用法、配置及限制见 [视频说明](VIDEO.zh.md)。
 
 ### 媒体工具的开启与风险
 
@@ -185,6 +182,7 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d3
 - 优先使用 `~/.grok/auth.json`，与 Grok CLI 原地共用同一份 xAI 凭据；登录和刷新都会写回该文件，而不是只做一次性导入；在设置页退出也会让 Grok CLI 退出
 - OAuth 刷新令牌会轮换；插件用原子写入、进程内合并和 compare-and-write 避免并发刷新互相覆盖
 - 浏览器状态接口、错误信息和诊断不会返回 token 值
+- OAuth access token 只发送到 HTTPS 的 `api.x.ai`、`cli-chat-proxy.grok.com`，以及 `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` 这一条额度 URL。带 Authorization 的请求拒绝重定向，包括聊天 SDK 发出的实际请求；此检查不扩展为允许任意 `x.ai` 子域名。OAuth 设备码授权与令牌刷新的表单请求，以及不带 token 的视频下载仍走各自原有流程。
 - 插件接口只接受本机回环连接与回环 Host，并校验浏览器来源。桌面端的 `dsh-app://app` 页面受信任；没有 Origin、但携带 Fetch Metadata 的本机请求也可写入设置。该标记不是桌面身份或权限证明：本插件不隔离本机进程或桌面渲染器。不要将接口暴露到局域网或公网，也不要在不可信的多用户环境共享凭据目录。
 - 代理只接受不含用户名/密码的 `http://` 或 `https://` URL；带 userinfo 的旧值会被清理，不会进入状态响应或日志
 - 代理通过同一 DSH 进程的全局 `fetch` hook 按目标分流：匹配 `x.ai`、其子域名、`cli-chat-proxy.grok.com`，以及 `grok.com` 上精确的 `GetGrokCreditsConfig` 额度回退路径。因此也会影响其他组件通过该 hook 发往这些地址的请求。`grok.com` 的其他路径和其他请求交给原有 `fetch` 处理，不强制直连；插件卸载时恢复 hook，不永久修改系统或进程环境变量。同一 OAuth bearer 在额度回退时也会发往 `grok.com`。
@@ -232,3 +230,10 @@ CI 在 Node.js 22 与 24 上执行 frozen install、typecheck、测试、构建�
 ## 许可证与致谢
 
 [Apache-2.0](LICENSE)。部分代码源自 Apache-2.0 许可的 `dsh-xai`，详见 [NOTICE](NOTICE)。特别感谢 [KouzakiUmi](https://github.com/KouzakiUmi) 在图生图（`grok_imagine_edit`）、会话图片交互卡片以及宿主依赖稳定性与兼容性修复方面的贡献。
+
+> [!IMPORTANT]
+> **非官方项目、商标与账户使用声明**
+>
+> `dsh-grok-kit` 是由社区独立开发的 DeepSeek Harness 第三方插件，不是 xAI、X、DeepSeek、DeepSeek Harness 或这些项目维护者的官方产品，也不代表它们。本项目不主张已获得上述主体对本插件或其名称的个别许可、背书、赞助或认可。Grok、xAI、X、DeepSeek、DeepSeek Harness 及相关名称与标识归各自权利人所有；本项目仅为准确说明兼容对象而提及这些名称。
+>
+> OAuth 可用性可能受订阅档位、地区、xAI 条款、账户资格、速率限制和后续服务变更影响。用户应自行确认其账户与用途获准；本项目不保证持续可用性或兼容性，也不提供 xAI/Grok 账号、订阅或官方支持。

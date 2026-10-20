@@ -16,13 +16,6 @@
 
 > Use Grok in DeepSeek Harness through OAuth: fused web/X search in the main model turn, reasoning continuity across turns, image generation and editing, video generation (experimental), and an xAI-only proxy.
 
-> [!IMPORTANT]
-> **Unofficial project, trademark, and account-use notice**
->
-> `dsh-grok-kit` is an independently developed, third-party community plugin for DeepSeek Harness. It is not an official product of, or representative of, xAI, X, DeepSeek, DeepSeek Harness, or their maintainers, and it does not claim product-specific permission, sponsorship, endorsement, or approval from them. Grok, xAI, X, DeepSeek, DeepSeek Harness, and related names and marks belong to their respective owners and are used only to identify compatible services accurately.
->
-> OAuth availability may depend on subscription tier, region, xAI terms, account entitlement, rate limits, and future service changes. Users are responsible for confirming that their account and use are permitted. This project does not guarantee continued access or compatibility and does not provide xAI/Grok accounts, subscriptions, or official support.
-
 ## More than OAuth sign-in
 
 `dsh-grok-kit` adds a separate `xai-oauth` route to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It does not require `XAI_API_KEY` or patch dsh source code. The point is not only to sign in, but to bring server-side search and the fields required for continuous reasoning into the main chat path.
@@ -41,6 +34,8 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 **Sign in with Grok / X Subscription** uses the same official Grok OAuth flow for the X Subscription and legacy SuperGrok / X Premium plans. Signed-in users can reauthorize to switch accounts without first deleting shared credentials. The account page also links to the [official subscription dashboard](<https://grok.com/dashboard>).
 
 Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the billing response omits the usage percentage, subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
+
+**0.2.7** hardens where OAuth sign-in credentials can be sent: request destinations are checked centrally, and credentialed requests reject redirects. Normal endpoints and proxy settings are unchanged; quota loading keeps the previous release's failure fallback. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Search in the main model turn
 
@@ -87,6 +82,8 @@ For domain, account, or date filters, use the standalone `grok_web_search` / `x_
 
 ## Install
 
+> This branch's Core `0.2.1-alpha.3` compatibility and video-management changes are not published to npm. The npm and upstream Git examples below install upstream releases, not these branch changes. Build a local checkout to use this branch; see [Development install](INSTALL.md#development-install).
+
 Install the npm package into the Web profile:
 
 ```sh
@@ -94,10 +91,10 @@ dsh plugin --profile web add dsh-grok-kit
 dsh web
 ```
 
-You can also pin version 0.2.3:
+You can also pin version 0.2.7:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.5
+dsh plugin --profile web add dsh-grok-kit@0.2.7
 dsh web
 ```
 
@@ -110,12 +107,12 @@ npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.5** fixes Experimental badge layout on the search and media pages and clarifies subscription usage, proxy, and video copy. Sign-in, search, and media behavior are unchanged. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. The current host target is DeepSeek Harness Core `0.2.1-alpha.3` with host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24); older host lines are unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.7** adds credential-destination checks, not subscription entitlements. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. This branch retains DeepSeek Harness Core `0.2.1-alpha.3` with host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24), excludes older host lines, and moves video maintenance to the conversation's Generated videos tab. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#8b1766a94f0a64a22a6d34f75bc8561c45eab9fc
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
@@ -144,7 +141,7 @@ The model list comes from the signed-in account's `GET /v1/models` response and 
 
 ### Video tasks (experimental)
 
-Provides image-to-video, durable task recovery, and account-scoped downloads via `grok_video_generate` / `grok_video_status` / `grok_video_resume`, all off by default. The "Media & tasks" settings page shows local capability observations and the task list. Enabling requires the risk confirmation and a DSH restart; generation consumes subscription usage, and stopping the wait only stops waiting — it does not cancel a submitted job. See the [video guide](VIDEO.md) for configuration and limitations.
+Provides image-to-video, durable task recovery, and account-scoped downloads via `grok_video_generate` / `grok_video_status` / `grok_video_resume`, all off by default. Settings → Media & tasks keeps the switches; the conversation's Generated videos tab provides playback, download, resume, and local task cleanup. Clearing tasks neither deletes attachments nor cancels upstream generation. Enabling requires the risk confirmation and a DSH restart; generation consumes subscription usage, and stopping the wait only stops waiting — it does not cancel a submitted job. See the [video guide](VIDEO.md) for configuration and limitations.
 
 ### Enabling media tools and understanding the risks
 
@@ -185,6 +182,7 @@ Settings split related keys between Search & conversation and Media & tasks. Sav
 - The live store prefers `~/.grok/auth.json`, sharing the same xAI credential with Grok CLI in place; sign-in and refresh write back to that file instead of performing a one-time import, and signing out in Settings signs Grok CLI out too
 - OAuth refresh tokens rotate; atomic writes, in-process coalescing, and compare-and-write prevent concurrent refreshes from overwriting one another
 - Browser status routes, errors, and diagnostics do not return token values
+- OAuth access tokens are sent only over HTTPS to `api.x.ai`, `cli-chat-proxy.grok.com`, or the exact `https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig` quota URL. Requests carrying Authorization reject redirects, including actual chat-SDK requests; arbitrary `x.ai` subdomains are not permitted by this check. OAuth device-code/refresh form posts and token-free video downloads retain their separate existing flows.
 - Plugin routes accept only loopback connections and loopback Host names, with browser-origin checks. The desktop `dsh-app://app` page is trusted; local requests without Origin but with Fetch Metadata may also write settings. This marker is not proof of desktop identity or authorization: the plugin does not isolate local processes or the desktop renderer. Do not expose these routes to a LAN or the internet, or share credential directories in an untrusted multi-user environment.
 - Proxy settings accept only `http://` or `https://` URLs without embedded credentials; legacy values containing userinfo are scrubbed and do not reach status responses or logs
 - The proxy uses a global `fetch` hook in the same DSH process, matching `x.ai`, its subdomains, `cli-chat-proxy.grok.com`, and the exact `grok.com` `GetGrokCreditsConfig` quota-fallback path. Requests from other components passing through that hook to these targets are also affected. Other `grok.com` paths and every other request pass to the original `fetch` unchanged, not forced to connect directly. The hook is restored on disposal without permanently changing system or process environment variables. The quota fallback sends the same OAuth bearer to `grok.com`.
@@ -232,3 +230,10 @@ CI runs frozen install, typecheck, tests, and build on Node.js 22 and 24, then c
 ## License and attribution
 
 [Apache-2.0](LICENSE). Some code derives from Apache-2.0-licensed `dsh-xai`; see [NOTICE](NOTICE). Special thanks to [KouzakiUmi](https://github.com/KouzakiUmi) for contributing image-to-image editing (`grok_imagine_edit`), session image interaction cards, and host-dependency stability and compatibility fixes.
+
+> [!IMPORTANT]
+> **Unofficial project, trademark, and account-use notice**
+>
+> `dsh-grok-kit` is an independently developed, third-party community plugin for DeepSeek Harness. It is not an official product of, or representative of, xAI, X, DeepSeek, DeepSeek Harness, or their maintainers, and it does not claim product-specific permission, sponsorship, endorsement, or approval from them. Grok, xAI, X, DeepSeek, DeepSeek Harness, and related names and marks belong to their respective owners and are used only to identify compatible services accurately.
+>
+> OAuth availability may depend on subscription tier, region, xAI terms, account entitlement, rate limits, and future service changes. Users are responsible for confirming that their account and use are permitted. This project does not guarantee continued access or compatibility and does not provide xAI/Grok accounts, subscriptions, or official support.

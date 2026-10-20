@@ -235,7 +235,7 @@ describe('mergeStoredOptionsPatch', () => {
   })
 
   it('POST-save path returns the same sanitized document it persists', async () => {
-    const home = await tempHome()
+    await tempHome()
     // An out-of-range value comes in: the merged doc drops it before write,
     // and the response must match what is on disk (GROK-OPTIONS-001).
     const patched = sanitizeStoredOptions({
