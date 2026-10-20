@@ -981,3 +981,63 @@ describe('maxVideoBytes bounds', () => {
     expect(() => makeHarness({ maxVideoBytes: 0 })).toThrow(/maxVideoBytes/)
   })
 })
+
+describe('clear', () => {
+  const ISO = '2026-01-02T03:04:05.000Z'
+  const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+  function writeStore(storePath: string, rows: ReadonlyArray<{ identity: string; id: number; state: string }>): Promise<void> {
+    const tasks = rows.map(({ identity, id, state }) => ({
+      taskId: uuid(id), identity, state, model: 'grok-imagine-video-1.5',
+      createdAt: ISO, updatedAt: ISO, prompt: 'animate',
+    }))
+    return writeFile(storePath, `${JSON.stringify({ version: 1, tasks }, null, 2)}\n`)
+  }
+
+  it('removes only finished tasks of the current identity and keeps the rest', async () => {
+    const storePath = await newStorePath()
+    await writeStore(storePath, [
+      { identity: 'acc-a', id: 1, state: 'done' },
+      { identity: 'acc-a', id: 2, state: 'pending' },
+      { identity: 'acc-a', id: 3, state: 'failed' },
+      { identity: 'acc-b', id: 9, state: 'done' },
+    ])
+    const harness = makeHarness({ storePath, identity: async () => 'acc-a' })
+    const removed = await harness.manager.clear('done')
+    expect(removed).toBe(1)
+    const list = await harness.manager.list()
+    expect(list.map(task => task.taskId).sort()).toEqual([uuid(2), uuid(3)])
+    const doc = JSON.parse(await readFile(storePath, 'utf8')) as { tasks: Array<{ identity: string; state: string }> }
+    expect(doc.tasks.filter(task => task.identity === 'acc-a').map(task => task.state).sort()).toEqual(['failed', 'pending'])
+    expect(doc.tasks.some(task => task.identity === 'acc-b' && task.state === 'done')).toBe(true)
+  })
+
+  it('clears every task of the current identity when scope is all', async () => {
+    const storePath = await newStorePath()
+    await writeStore(storePath, [
+      { identity: 'acc-a', id: 1, state: 'done' },
+      { identity: 'acc-a', id: 2, state: 'interrupted' },
+      { identity: 'acc-a', id: 3, state: 'pending' },
+      { identity: 'acc-b', id: 9, state: 'done' },
+    ])
+    const harness = makeHarness({ storePath, identity: async () => 'acc-a' })
+    const removed = await harness.manager.clear('all')
+    expect(removed).toBe(3)
+    expect(await harness.manager.list()).toEqual([])
+    const doc = JSON.parse(await readFile(storePath, 'utf8')) as { tasks: Array<{ identity: string }> }
+    expect(doc.tasks.filter(task => task.identity === 'acc-a')).toHaveLength(0)
+    expect(doc.tasks.some(task => task.identity === 'acc-b')).toBe(true)
+  })
+
+  it('returns zero when nothing matches and leaves the store untouched', async () => {
+    const storePath = await newStorePath()
+    await writeStore(storePath, [{ identity: 'acc-a', id: 1, state: 'pending' }])
+    const harness = makeHarness({ storePath, identity: async () => 'acc-a' })
+    expect(await harness.manager.clear('done')).toBe(0)
+    expect((await harness.manager.list()).map(task => task.taskId)).toEqual([uuid(1)])
+  })
+
+  it('fails closed without a stable identity', async () => {
+    const harness = makeHarness({ storePath: await newStorePath(), identity: async () => undefined })
+    await expect(harness.manager.clear('done')).rejects.toThrow(/identity/)
+  })
+})

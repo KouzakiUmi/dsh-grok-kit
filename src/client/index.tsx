@@ -19,6 +19,7 @@ import type { XaiOAuthSettingsKey } from './locales.ts'
 import { decorateSettingsNavIcon } from './nav-icon.ts'
 import { applyImagineViews } from './imagine-view.tsx'
 import { applyVideoViews } from './video-view.tsx'
+import { applyGrokMediaView } from './grok-media-view.tsx'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -86,4 +87,9 @@ export function apply(ctx: Context): void {
   // the former dsh-grok-imagine-ui companion plugin.
   applyImagineViews(ctx)
   applyVideoViews(ctx)
+
+  // Conversation-page "Media & tasks" tab: moves the capability snapshot and
+  // the local video task list (with clear/archive actions) out of the settings
+  // Media page and onto the conversation surface, one click away.
+  applyGrokMediaView(ctx)
 }

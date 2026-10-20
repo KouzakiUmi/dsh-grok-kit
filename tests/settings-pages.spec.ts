@@ -11,7 +11,7 @@
  * stateful fake react (real useState slots, one effect pass per mount) and the
  * element tree is RECURSIVELY EXPANDED, so a page that never renders cannot
  * pass an assertion vacuously. The two account-scoped panels (QuotaView,
- * CapabilitiesView) are expanded as opaque leaves — they own their own hooks
+ * QuotaView) are expanded as opaque leaves — they own their own hooks
  * and their own reads, which the sibling specs already cover.
  *
  * Covered here:
@@ -126,7 +126,6 @@ vi.mock('react/jsx-runtime', () => {
 
 import * as React from 'react'
 import { XaiSettings } from '../src/client/XaiSettings.tsx'
-import { CapabilitiesView } from '../src/client/capabilities-view.tsx'
 import { QuotaView } from '../src/client/quota-view.tsx'
 import { en } from '../src/client/locales.ts'
 
@@ -137,7 +136,7 @@ interface FakeElement {
 }
 
 /** Panels with their own hooks and reads: expanded as opaque leaves. */
-const LEAF = new Set<unknown>([QuotaView, CapabilitiesView])
+const LEAF = new Set<unknown>([QuotaView])
 
 const harness = (React as unknown as {
   __harness: { reset(): void; mount(component: (props: unknown) => unknown, props: unknown): void; tree(): unknown; unmount(): void }
@@ -212,7 +211,7 @@ function find(node: unknown, match: (element: FakeElement) => boolean, out: Fake
   return out
 }
 
-/** Component elements (QuotaView / CapabilitiesView) before expansion. */
+/** Component elements (QuotaView) before expansion. */
 function panels(node: unknown, type: unknown, out: FakeElement[] = []): FakeElement[] {
   if (Array.isArray(node)) {
     for (const child of node) panels(child, type, out)
@@ -418,11 +417,10 @@ describe('five-page settings section', () => {
     expect(buttons.map(one => one.props['aria-current'])).toEqual(['page', undefined, undefined, undefined, undefined])
   })
 
-  it('mounts the quota panel on the account page and the capability panel on the media page', async () => {
+  it('mounts the quota panel on the account page and keeps media switches-only', async () => {
     stubFetch()
     mount()
     expect(panels(now(), QuotaView)).toHaveLength(1)
-    expect(panels(now(), CapabilitiesView)).toHaveLength(0)
     // The panel owns its own read; this spec only checks that it is mounted.
     expect(countOf('/quota')).toBe(0)
     expect(countOf('/capabilities')).toBe(0)
@@ -430,12 +428,11 @@ describe('five-page settings section', () => {
 
     clickPage(en.navMedia)
     expect(panels(now(), QuotaView)).toHaveLength(0)
-    expect(panels(now(), CapabilitiesView)).toHaveLength(1)
-    // The panel is an opaque leaf here: its own reads (and its task list) are
-    // covered by tests/video-view.spec.ts, this spec owns the mounting rule.
+    // The generated-videos list moved to the conversation-page tab; the
+    // settings Media page keeps only the switches and a pointer to that tab.
+    expect(texts(harness.tree()).join(' ')).toContain(en.mediaManageHint)
 
     clickPage(en.navAccount)
-    expect(panels(now(), CapabilitiesView)).toHaveLength(0)
     expect(texts(harness.tree()).join(' ')).toContain(en.unofficialNotice)
   })
 
@@ -523,7 +520,9 @@ describe('five-page settings section', () => {
     mount()
     await vi.waitFor(() => expect(countOf('/auth/options')).toBe(1))
     clickPage(en.navMedia)
-    await vi.waitFor(() => expect(texts(now()).join(' | ')).toContain('1048576'))
+    // Read-only bytes are rendered formatted for humans (formatBytes), not as
+    // the raw number: 1_048_576 → "1.0 MB".
+    await vi.waitFor(() => expect(texts(now()).join(' | ')).toContain('1.0 MB'))
     const rendered = texts(now()).join(' | ')
     expect(rendered).toContain(en.videoModelLabel)
     expect(rendered).toContain(en.videoMaxBytesLabel)
@@ -638,15 +637,14 @@ describe('five-page settings section', () => {
     ;(importButton!.props.onClick as () => void)()
     await vi.waitFor(() => expect(panels(now(), QuotaView)[0]!.key).toBe('signed-in:2'))
     clickPage(en.navMedia)
-    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:2:0')
+    // The media page no longer mounts the capability panel; only the switches
+    // and the pointer remain.
   })
 
   it('hides the outgoing account before sign-out completes, then recovers', async () => {
     stubFetch()
     mount(SIGNED_IN)
     clickPage(en.navMedia)
-    expect(panels(now(), CapabilitiesView)[0]!.key).toBe('signed-in:0:0')
-    expect(panels(now(), CapabilitiesView)[0]!.props.signedIn).toBe(true)
 
     clickPage(en.navAccount)
     const logout = find(now(), element => element.type === 'button' && element.props.children === en.logout)[0]
@@ -657,8 +655,6 @@ describe('five-page settings section', () => {
     expect(panels(now(), QuotaView)[0]!.key).toMatch(/^loading:/)
     expect(panels(now(), QuotaView)[0]!.props.signedIn).toBe(false)
     expect(panels(now(), QuotaView)[0]!.props.accountLoading).toBe(true)
-    clickPage(en.navMedia)
-    expect(panels(now(), CapabilitiesView)[0]!.props.signedIn).toBe(false)
 
     // The account page is the one that owns the quota panel; go back to it.
     clickPage(en.navAccount)

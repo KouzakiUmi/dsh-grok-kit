@@ -1,0 +1,3 @@
+Temporary session artifacts (PR drafts, handoff notes, delivery checklists,
+scratch scripts, packed tarballs) live here and are NOT committed.
+Keep the repo root clean: drop throwaway files into archive/ instead.

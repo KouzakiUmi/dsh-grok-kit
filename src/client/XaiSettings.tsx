@@ -11,9 +11,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { XaiOAuthSettingsKey } from './locales.ts'
-import { CapabilitiesView } from './capabilities-view.tsx'
 import { QuotaView } from './quota-view.tsx'
 import { mediaTogglePatch } from './media-options.ts'
+import { formatBytes } from './video-view.tsx'
 
 const STATUS_PATH = '/plugins/dsh-grok-kit/auth/status'
 const LOGIN_PATH = '/plugins/dsh-grok-kit/auth/login'
@@ -151,12 +151,38 @@ const buttonStyle: CSSProperties = { boxSizing: 'border-box', minHeight: 34, pad
 // label uses the matching foreground token instead of a hardcoded white.
 const primaryButtonStyle: CSSProperties = { ...buttonStyle, borderColor: 'var(--dsw-alias-brand-primary)', background: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-label-primary-foreground, white)' }
 const errorStyle: CSSProperties = { ...bodyStyle, color: 'var(--dsw-alias-state-error-primary)' }
+/* Risk confirmation card: a warning-toned "choice to make", not an error —
+   the user is deciding whether to enable, and the error red would read as a
+   failure. Warning tokens carry fallbacks for hosts without them. */
 const mediaConfirmStyle: CSSProperties = {
-  border: '1px solid var(--dsw-alias-state-error-primary)',
-  borderRadius: 6,
-  padding: '8px 10px',
+  border: '1px solid var(--dsw-alias-state-warning-border, #fedf89)',
+  background: 'var(--dsw-alias-state-warning-bg, #fffaeb)',
+  borderRadius: 10,
+  padding: '12px 14px',
   margin: '6px 0',
 }
+const mediaConfirmTitleStyle: CSSProperties = { margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: 'var(--dsw-alias-state-warning-primary, #b54708)' }
+const mediaConfirmTextStyle: CSSProperties = { ...bodyStyle, margin: '0 0 10px' }
+/* One bordered group per media tool family, so each switch reads as its own
+   unit instead of one undifferentiated list of checkboxes. */
+const mediaGroupStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', border: '1px solid var(--dsw-alias-border-l2)', borderRadius: 10, background: 'var(--dsw-alias-bg-layer-1)' }
+const toggleRowStyle: CSSProperties = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }
+const toggleLabelStyle: CSSProperties = { display: 'flex', alignItems: 'center', gap: 10, flex: '1 1 auto', minWidth: 0, cursor: 'pointer', fontSize: 14, color: 'var(--dsw-alias-label-primary)' }
+/* Switch = a visual skin over the same checkbox contract; the input stays the
+   interactive element (opacity-hidden, on top) so native label activation,
+   focus and the specs' label→input lookup all keep working. */
+const switchWrapStyle: CSSProperties = { position: 'relative', display: 'inline-block', width: 36, height: 20, flex: '0 0 auto', marginLeft: 'auto' }
+const switchInputStyle: CSSProperties = { position: 'absolute', inset: 0, width: '100%', height: '100%', margin: 0, opacity: 0, cursor: 'pointer' }
+const switchTrackBaseStyle: CSSProperties = { position: 'absolute', inset: 0, borderRadius: 999, background: 'var(--dsw-alias-border-l2)', transition: 'background 0.15s' }
+const switchTrackOnStyle: CSSProperties = { ...switchTrackBaseStyle, background: 'var(--dsw-alias-state-success-primary, #22a06b)' }
+const switchKnobBaseStyle: CSSProperties = { position: 'absolute', top: 2, left: 2, width: 16, height: 16, borderRadius: '50%', background: 'white', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.25)', transition: 'transform 0.15s' }
+const switchKnobOnStyle: CSSProperties = { ...switchKnobBaseStyle, transform: 'translateX(16px)' }
+/* Read-only video parameters as a quiet key/value block; raw byte counts are
+   formatted for humans (the label copy drops the "(bytes)" suffix). */
+const mediaParamListStyle: CSSProperties = { display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', border: '1px dashed var(--dsw-alias-border-l2)', borderRadius: 8, marginTop: 2 }
+const mediaParamRowStyle: CSSProperties = { display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', minWidth: 0 }
+const mediaParamLabelStyle: CSSProperties = { flex: '0 0 auto', fontSize: 12, color: 'var(--dsw-alias-label-tertiary, #81858c)' }
+const mediaParamValueStyle: CSSProperties = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace', fontSize: 12, color: 'var(--dsw-alias-label-secondary)', overflowWrap: 'anywhere', minWidth: 0 }
 const experimentalTagStyle: CSSProperties = {
   fontSize: 11,
   lineHeight: '18px',
@@ -302,17 +328,12 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   // switch does not move until the user confirms inside the card.
   const [pendingMediaGroup, setPendingMediaGroup] = useState<'images' | 'video' | null>(null)
   // Bumped by every account-changing action (sign-in, Grok import, sign-out).
-  // Together with the account status it keys <CapabilitiesView/> so the panel
-  // remounts: fresh fetches, aborted in-flight work, revoked blob URLs, and no
-  // task rows or diagnostics carried over from the previous account — even an
-  // A→B import that stays "signed-in" gets a new key.
+  // It keys <QuotaView/> so a previous account's reading never survives a
+  // switch — even an A→B import that stays "signed-in" gets a new key.
   const [accountGeneration, setAccountGeneration] = useState(0)
   // Active page. Only the active page body is mounted; every draft it owns
   // still lives here, so switching pages never discards an unsaved edit.
   const [page, setPage] = useState<SettingsPageId>('account')
-  // A saved video choice/revocation also invalidates the local runtime
-  // capability snapshot, without probing upstream or reloading the account.
-  const [capabilityGeneration, setCapabilityGeneration] = useState(0)
 
   type OptionsPayload = {
     options?: Partial<Record<OptionKey, OptionValue>>
@@ -463,7 +484,6 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       for (const key of keys) remaining.delete(key)
       optionsDirtyRef.current = remaining
       setOptionsFeedback({ page: pageId, state: 'saved' })
-      if (keys.includes('videoTool') || keys.includes('mediaRiskAcknowledged')) setCapabilityGeneration(generation => generation + 1)
     } catch {
       setOptionsFeedback({ page: pageId, state: 'error' })
     } finally {
@@ -488,7 +508,6 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
       for (const key of keys) remaining.delete(key)
       optionsDirtyRef.current = remaining
       setOptionsFeedback({ page: pageId, state: 'saved' })
-      if (pageId === 'media') setCapabilityGeneration(generation => generation + 1)
     } catch {
       setOptionsFeedback({ page: pageId, state: 'error' })
     } finally {
@@ -662,6 +681,10 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const shared = status.status !== 'loading' && status.sharedGrokAuth === true
+  // Effective media switch positions (draft values): one boolean per switch
+  // row, reused by the checkbox contract and the toggle visuals.
+  const imagesToolOn = optBool(options.imagineTool, false) || optBool(options.editTool, false)
+  const videoToolOn = optBool(options.videoTool, false)
   const label = status.status === 'signed-in'
     ? t(shared ? 'signedInShared' : 'signedIn')
     : status.status === 'loading'
@@ -982,45 +1005,74 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
               <div style={cardStyle}>
                 <h3 style={{ ...titleStyle, fontSize: 14 }}>{t('navMedia')}</h3>
                 <p style={bodyStyle}>{t('optionsHint')}</p>
-                <p style={bodyStyle}>{t('mediaRiskHint')}</p>
-                <div style={optionRowStyle}>
-                  <label style={optionRowStyle}>
-                    <input
-                      type="checkbox"
-                      checked={optBool(options.imagineTool, false) || optBool(options.editTool, false)}
-                      disabled={optionsBusy}
-                      onChange={(event) => markMedia('images', event.target.checked)}
-                    />
-                    <span>{t('imagineTool')}</span>
-                  </label>
-                  <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
-                </div>
-                <p style={optionHintStyle}>{t('imagineToolHint')}</p>
-                <p style={optionHintStyle}>{`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}</p>
+                <p style={optionHintStyle}>{t('mediaRiskHint')}</p>
 
-                <div style={optionRowStyle}>
-                  <label style={optionRowStyle}>
-                    <input
-                      type="checkbox"
-                      checked={optBool(options.videoTool, false)}
-                      disabled={optionsBusy}
-                      onChange={(event) => markMedia('video', event.target.checked)}
-                    />
-                    <span>{t('videoTool')}</span>
-                  </label>
-                  <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                {/* Image tools group: one switch gates both tools; the two
+                    effective child states stay visible below. The switch is a
+                    visual skin over the same checkbox contract (checked /
+                    onChange / disabled) — the specs locate the control by
+                    `label text === tool name`, so the visuals carry no text. */}
+                <div style={mediaGroupStyle}>
+                  <div style={toggleRowStyle}>
+                    <label style={toggleLabelStyle}>
+                      <span>{t('imagineTool')}</span>
+                      <span style={{ ...switchWrapStyle, ...optionsBusy ? { opacity: 0.5 } : {} }}>
+                        <span aria-hidden="true" style={imagesToolOn ? switchTrackOnStyle : switchTrackBaseStyle}>
+                          <span style={imagesToolOn ? switchKnobOnStyle : switchKnobBaseStyle} />
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={imagesToolOn}
+                          disabled={optionsBusy}
+                          onChange={(event) => markMedia('images', event.target.checked)}
+                          style={switchInputStyle}
+                        />
+                      </span>
+                    </label>
+                    <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                  </div>
+                  <p style={optionHintStyle}>{t('imagineToolHint')}</p>
+                  <p style={optionHintStyle}>{`${t('imageGenerationSwitch')}: ${t(optBool(options.imagineTool, false) ? 'mediaOn' : 'mediaOff')} · ${t('imageEditingSwitch')}: ${t(optBool(options.editTool, false) ? 'mediaOn' : 'mediaOff')}`}</p>
                 </div>
-                <p style={optionHintStyle}>{t('videoToolHint')}</p>
-                {/* Read-only presentation of the remaining video parameters: the first
-                    version edits videoTool only, so these stay informational. */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
-                  <span style={optionRowStyle}>{`${t('videoModelLabel')}: ${String(options.videoModel ?? '—')}`}</span>
-                  <span style={optionRowStyle}>{`${t('videoMaxBytesLabel')}: ${String(options.videoMaxBytes ?? '—')}`}</span>
+
+                {/* Video tools group: the switch, its hint, and the read-only
+                    host parameters as a quiet key/value block (bytes formatted
+                    for humans — never a raw number). */}
+                <div style={mediaGroupStyle}>
+                  <div style={toggleRowStyle}>
+                    <label style={toggleLabelStyle}>
+                      <span>{t('videoTool')}</span>
+                      <span style={{ ...switchWrapStyle, ...optionsBusy ? { opacity: 0.5 } : {} }}>
+                        <span aria-hidden="true" style={videoToolOn ? switchTrackOnStyle : switchTrackBaseStyle}>
+                          <span style={videoToolOn ? switchKnobOnStyle : switchKnobBaseStyle} />
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={videoToolOn}
+                          disabled={optionsBusy}
+                          onChange={(event) => markMedia('video', event.target.checked)}
+                          style={switchInputStyle}
+                        />
+                      </span>
+                    </label>
+                    <span style={experimentalTagStyle}>{t('experimentalTag')}</span>
+                  </div>
+                  <p style={optionHintStyle}>{t('videoToolHint')}</p>
+                  <div style={mediaParamListStyle}>
+                    <div style={mediaParamRowStyle}>
+                      <span style={mediaParamLabelStyle}>{t('videoModelLabel')}</span>
+                      <span style={mediaParamValueStyle}>{typeof options.videoModel === 'string' && options.videoModel !== '' ? options.videoModel : '—'}</span>
+                    </div>
+                    <div style={mediaParamRowStyle}>
+                      <span style={mediaParamLabelStyle}>{t('videoMaxBytesLabel')}</span>
+                      <span style={mediaParamValueStyle}>{typeof options.videoMaxBytes === 'number' && Number.isFinite(options.videoMaxBytes) ? formatBytes(options.videoMaxBytes) : '—'}</span>
+                    </div>
+                  </div>
                 </div>
                 {pendingMediaGroup !== null ? (
                   <div style={mediaConfirmStyle}>
-                    <p style={{ ...errorStyle, margin: '0 0 4px', fontWeight: 600 }}>{pendingMediaGroup === 'images' ? t('imagineTool') : t('videoTool')}</p>
-                    <p style={{ ...errorStyle, margin: '0 0 6px' }}>{t('mediaConfirmPrompt')}</p>
+                    <p style={mediaConfirmTitleStyle}>{pendingMediaGroup === 'images' ? t('imagineTool') : t('videoTool')}</p>
+                    <p style={mediaConfirmTextStyle}>{t('mediaConfirmPrompt')}</p>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button type="button" style={primaryButtonStyle} disabled={optionsBusy} onClick={confirmPendingMedia}>{t('mediaConfirmYes')}</button>
                       <button type="button" style={buttonStyle} disabled={optionsBusy} onClick={cancelPendingMedia}>{t('mediaConfirmNo')}</button>
@@ -1030,10 +1082,11 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                 {optionActions('media')}
               </div>
 
-              {/* Capability status + local video task list (frozen plugin routes).
-                  The key remounts the panel on every account change, so a previous
-                  account's tasks/diagnostics and blob URLs never survive a switch. */}
-              <CapabilitiesView key={`${accountKey}:${String(capabilityGeneration)}`} t={t} signedIn={status.status === 'signed-in'} />
+              {/* The capability snapshot and the local video task list (with
+                  clear/archive actions) live on the conversation-page
+                  "Media & tasks" tab now, not here — this page keeps only the
+                  switches so enabling/disabling stays next to Save/Reset. */}
+              <p style={bodyStyle}>{t('mediaManageHint')}</p>
             </div>
           )
         : null}

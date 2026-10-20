@@ -31,7 +31,8 @@ vi.mock('react/jsx-runtime', () => {
 
 import { XaiSettings } from '../src/client/XaiSettings.tsx'
 import { en, zh } from '../src/client/locales.ts'
-import { CapabilitiesView, VideoTasksView } from '../src/client/capabilities-view.tsx'
+import { VideoTasksView } from '../src/client/capabilities-view.tsx'
+import { GrokMediaView } from '../src/client/grok-media-view.tsx'
 
 interface Element { type: unknown; props: Record<string, unknown>; key?: unknown }
 function elements(node: unknown, predicate: (value: Element) => boolean): Element[] {
@@ -170,24 +171,6 @@ describe('settings-only media risk confirmation', () => {
     expect(f.hasButton(en.mediaConfirmYes)).toBe(false)
   })
 
-  it('refreshes the local capability panel after a video close or reset, without remounting on unrelated saves', async () => {
-    const f = await fixture({ videoTool: true, mediaRiskAcknowledged: true })
-    const panelKey = () => {
-      f.page(en.navMedia)
-      return elements(f.render(), element => element.type === CapabilitiesView)[0]!.key
-    }
-    const initialKey = panelKey()
-    f.change(en.videoTool, false)
-    await f.save()
-    const closedKey = panelKey()
-    expect(closedKey).not.toBe(initialKey)
-    f.change(en.backendSearch, true)
-    await f.save()
-    expect(panelKey()).toBe(closedKey)
-    ;(f.button(en.optionsReset).props.onClick as () => void)()
-    await vi.waitFor(() => expect(panelKey()).not.toBe(closedKey))
-  })
-
   it('lets the video toggle replace a parked image confirmation, and only the confirmed group lands', async () => {
     const f = await fixture()
     f.change(en.imagineTool, true)
@@ -296,5 +279,106 @@ describe('disabled video task panel', () => {
     expect(hooks.values[0]).toEqual({ kind: 'disabled' })
     expect(elements(f.render(), element => element.type === 'li')).toHaveLength(0)
     f.dispose()
+  })
+})
+
+describe('video task clear buttons', () => {
+  const DONE_TASK = { ...OLD_TASK, taskId: '00000000-0000-4000-8000-000000000001', state: 'done' }
+
+  /** taskFixture render helper, scoped to this describe so it can stub fetch per case. */
+  function clearFixture(tasks: unknown[]) {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ tasks })))
+    vi.stubGlobal('fetch', fetch)
+    const f = taskFixture(true)
+    f.render()
+    return { f, fetch }
+  }
+
+  function buttonLabel(node: unknown): string {
+    return text(node)
+  }
+
+  it('renders Clear finished and Clear all, gated on having finished tasks', async () => {
+    const { f } = clearFixture([OLD_TASK])
+    await vi.waitFor(() => expect(hooks.values[0]).toMatchObject({ kind: 'ready', tasks: [OLD_TASK] }))
+    const buttons = elements(f.render(), element => element.type === 'button')
+    const labels = buttons.map(b => buttonLabel(b.props.children))
+    expect(labels).toContain(en.videoClearDone)
+    expect(labels).toContain(en.videoClearAll)
+    const clearDone = buttons.find(b => buttonLabel(b.props.children) === en.videoClearDone)!
+    const clearAll = buttons.find(b => buttonLabel(b.props.children) === en.videoClearAll)!
+    // Only a pending task → Clear finished is disabled, Clear all is enabled.
+    expect(clearDone.props.disabled).toBe(true)
+    expect(clearAll.props.disabled).toBe(false)
+    f.dispose()
+  })
+
+  it('enables Clear finished when a done task is present', async () => {
+    const { f } = clearFixture([DONE_TASK, OLD_TASK])
+    await vi.waitFor(() => expect(hooks.values[0]).toMatchObject({ kind: 'ready' }))
+    const buttons = elements(f.render(), element => element.type === 'button')
+    const clearDone = buttons.find(b => buttonLabel(b.props.children) === en.videoClearDone)!
+    expect(clearDone.props.disabled).toBe(false)
+    f.dispose()
+  })
+
+  it('keeps both clear buttons disabled while video is off', async () => {
+    const f = taskFixture(false)
+    const disabled = f.render()
+    const buttons = elements(disabled, element => element.type === 'button')
+    const clearDone = buttons.find(b => buttonLabel(b.props.children) === en.videoClearDone)
+    const clearAll = buttons.find(b => buttonLabel(b.props.children) === en.videoClearAll)
+    expect(clearDone?.props.disabled).toBe(true)
+    expect(clearAll?.props.disabled).toBe(true)
+    f.dispose()
+  })
+})
+
+describe('conversation media view', () => {
+  function mediaFetch(status: string, videoEnabled: boolean) {
+    return vi.fn(async (path: string) => {
+      if (path.endsWith('/auth/status')) return new Response(JSON.stringify({ status }))
+      if (path.endsWith('/capabilities')) return new Response(JSON.stringify({ videoEnabled }))
+      if (path.endsWith('/video/tasks')) return new Response(JSON.stringify({ tasks: [] }))
+      return new Response('{}')
+    })
+  }
+
+  function renderMediaView(): unknown {
+    hooks.cursor = 0; hooks.effects = []; hooks.dependencies = []; hooks.collectEffects = true
+    const node = GrokMediaView({ t: key => en[key] })
+    hooks.collectEffects = false
+    return node
+  }
+
+  it('renders the video task list once the signed-in and video gates settle', async () => {
+    const fetch = mediaFetch('signed-in', true)
+    vi.stubGlobal('fetch', fetch)
+    // Initial render: still loading, so the list is not mounted yet.
+    const initial = renderMediaView()
+    expect(elements(initial, element => element.type === VideoTasksView)).toHaveLength(0)
+    for (const effect of hooks.effects) effect()
+    await vi.waitFor(() => expect(hooks.values[0]).toMatchObject({ kind: 'ready', videoEnabled: true }))
+    const settled = renderMediaView()
+    expect(elements(settled, element => element.type === VideoTasksView)).toHaveLength(1)
+  })
+
+  it('shows the sign-in hint instead of the list when signed out', async () => {
+    vi.stubGlobal('fetch', mediaFetch('signed-out', false))
+    renderMediaView()
+    for (const effect of hooks.effects) effect()
+    await vi.waitFor(() => expect(hooks.values[0]).toEqual({ kind: 'unauthenticated' }))
+    const node = renderMediaView()
+    expect(text(node)).toContain(en.mediaViewSignedOut)
+    expect(elements(node, element => element.type === VideoTasksView)).toHaveLength(0)
+  })
+
+  it('treats a failed gate read as signed out (never mounts the task list blind)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 500 })))
+    renderMediaView()
+    for (const effect of hooks.effects) effect()
+    await vi.waitFor(() => expect(hooks.values[0]).toEqual({ kind: 'unauthenticated' }))
+    const node = renderMediaView()
+    expect(elements(node, element => element.type === VideoTasksView)).toHaveLength(0)
   })
 })

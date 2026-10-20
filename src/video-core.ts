@@ -685,6 +685,38 @@ export class VideoTaskManager {
   }
 
   /**
+   * Remove finished tasks (`scope: 'done'`) or every task of the signed-in
+   * identity (`scope: 'all'`) from the local store. Only this account's
+   * records are touched; the remote upstream is never contacted, and the
+   * retention/cancel semantics of in-flight tasks are unchanged — clearing
+   * `all` does not cancel a running generation or stop its billing. Returns
+   * the number of records removed. Fails closed without a stable identity.
+   */
+  async clear(scope: 'done' | 'all'): Promise<number> {
+    this.assertNotDisposed()
+    const identity = await this.requireIdentity()
+    const file = await this.storeFileFor(identity)
+    // withFileLock needs its parent directory to exist before the lock lands.
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+    return withFileLock(file, async () => {
+      const all = await this.readAllRecords(file)
+      const others = all.filter(candidate => candidate.identity !== identity)
+      const mine = all.filter(candidate => candidate.identity === identity)
+      const kept = scope === 'all' ? [] : mine.filter(candidate => candidate.state !== 'done')
+      const removed = mine.length - kept.length
+      const serialized = `${JSON.stringify({ version: STORE_VERSION, tasks: [...others, ...kept] }, null, 2)}\n`
+      if (Buffer.byteLength(serialized, 'utf8') > MAX_STORE_BYTES) {
+        throw new Error(`video task store would exceed the ${String(MAX_STORE_BYTES)}-byte limit`)
+      }
+      await writeFileAtomic(file, serialized, {
+        mode: 0o600,
+        dirMode: 0o700,
+      })
+      return removed
+    }, { waitMs: 10_000 })
+  }
+
+  /**
    * Cancel local operations only. The remote generation is NOT cancelled and
    * may still complete and bill the account; persisted tasks stay for restart.
    */

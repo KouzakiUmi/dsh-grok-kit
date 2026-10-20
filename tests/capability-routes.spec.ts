@@ -11,8 +11,10 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { CapabilityTracker } from '../src/capabilities.ts'
 import {
   GROK_CAPABILITIES_PATH,
+  GROK_VIDEO_CLEAR_PATH,
   GROK_VIDEO_RESUME_PATH,
   GROK_VIDEO_TASKS_PATH,
+  parseClearBody,
   parseResumeBody,
   registerGrokCapabilityRoutes,
   type GrokCapabilityRouteOptions,
@@ -82,10 +84,11 @@ function setup(overrides: Partial<GrokCapabilityRouteOptions> = {}, videoEnabled
   const tracker = new CapabilityTracker()
   const tasks = vi.fn(async () => [TASK])
   const resume = vi.fn(async (_taskId: string, _signal?: AbortSignal) => TASK)
+  const clear = vi.fn(async (_scope: 'done' | 'all') => 1)
   const authenticated = vi.fn(async () => true)
   const { ctx, handlers, disposers } = mockCtx()
-  registerGrokCapabilityRoutes(ctx, { tracker, videoEnabled, authenticated, tasks, resume, ...overrides })
-  return { tracker, tasks, resume, authenticated, handlers, disposers }
+  registerGrokCapabilityRoutes(ctx, { tracker, videoEnabled, authenticated, tasks, resume, clear, ...overrides })
+  return { tracker, tasks, resume, clear, authenticated, handlers, disposers }
 }
 
 async function call(handler: RouteHandler, req: IncomingMessage, res: MockResponse) {
@@ -391,5 +394,90 @@ describe('parseResumeBody', () => {
     expect(parseResumeBody(null)).toBeUndefined()
     expect(parseResumeBody([UUID])).toBeUndefined()
     expect(parseResumeBody('x')).toBeUndefined()
+  })
+})
+
+describe('parseClearBody', () => {
+  it('accepts exactly { scope: "done" | "all" }', () => {
+    expect(parseClearBody({ scope: 'done' })).toEqual({ scope: 'done' })
+    expect(parseClearBody({ scope: 'all' })).toEqual({ scope: 'all' })
+  })
+
+  it('rejects unknown scopes, extra fields, and malformed bodies', () => {
+    expect(parseClearBody({ scope: 'finished' })).toBeUndefined()
+    expect(parseClearBody({ scope: 'done', extra: 1 })).toBeUndefined()
+    expect(parseClearBody({})).toBeUndefined()
+    expect(parseClearBody(null)).toBeUndefined()
+    expect(parseClearBody(['done'])).toBeUndefined()
+    expect(parseClearBody('done')).toBeUndefined()
+  })
+})
+
+describe('POST /video/tasks/clear', () => {
+  it('clears finished tasks and returns the removed count', async () => {
+    const { handlers, clear } = setup()
+    const { status, body } = await call(
+      handlers.get(GROK_VIDEO_CLEAR_PATH)!,
+      mockReq({ method: 'POST', headers: POST_HEADERS, body: JSON.stringify({ scope: 'done' }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(200)
+    expect(body).toEqual({ removed: 1 })
+    expect(clear).toHaveBeenCalledWith('done')
+  })
+
+  it('clears every task when scope is all', async () => {
+    const { handlers, clear } = setup()
+    const { status } = await call(
+      handlers.get(GROK_VIDEO_CLEAR_PATH)!,
+      mockReq({ method: 'POST', headers: POST_HEADERS, body: JSON.stringify({ scope: 'all' }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(200)
+    expect(clear).toHaveBeenCalledWith('all')
+  })
+
+  it('rejects an unknown scope with 400 and never clears', async () => {
+    const { handlers, clear } = setup()
+    const { status } = await call(
+      handlers.get(GROK_VIDEO_CLEAR_PATH)!,
+      mockReq({ method: 'POST', headers: POST_HEADERS, body: JSON.stringify({ scope: 'finished' }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(400)
+    expect(clear).not.toHaveBeenCalled()
+  })
+
+  it('returns 409 while the video feature flag is off', async () => {
+    const { handlers, clear } = setup({}, false)
+    const { status } = await call(
+      handlers.get(GROK_VIDEO_CLEAR_PATH)!,
+      mockReq({ method: 'POST', headers: POST_HEADERS, body: JSON.stringify({ scope: 'all' }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(409)
+    expect(clear).not.toHaveBeenCalled()
+  })
+
+  it('rejects a signed-out viewer with 403 and never clears', async () => {
+    const { handlers, clear } = setup({ authenticated: async () => false })
+    const { status } = await call(
+      handlers.get(GROK_VIDEO_CLEAR_PATH)!,
+      mockReq({ method: 'POST', headers: POST_HEADERS, body: JSON.stringify({ scope: 'done' }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(403)
+    expect(clear).not.toHaveBeenCalled()
+  })
+
+  it('keeps the write gate for browser writes (sec-fetch-site present, no Origin → 403)', async () => {
+    const { handlers, clear } = setup()
+    const { status } = await call(
+      handlers.get(GROK_VIDEO_CLEAR_PATH)!,
+      mockReq({ method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'cross-site' }, body: JSON.stringify({ scope: 'done' }) }),
+      new MockResponse(),
+    )
+    expect(status).toBe(403)
+    expect(clear).not.toHaveBeenCalled()
   })
 })

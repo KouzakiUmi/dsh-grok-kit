@@ -8,6 +8,7 @@ import { sanitizeDiagnosticMessage, type CapabilityTracker } from './capabilitie
 export const GROK_CAPABILITIES_PATH = '/plugins/dsh-grok-kit/capabilities'
 export const GROK_VIDEO_TASKS_PATH = '/plugins/dsh-grok-kit/video/tasks'
 export const GROK_VIDEO_RESUME_PATH = '/plugins/dsh-grok-kit/video/resume'
+export const GROK_VIDEO_CLEAR_PATH = '/plugins/dsh-grok-kit/video/tasks/clear'
 
 export interface GrokCapabilityRouteOptions {
   tracker: CapabilityTracker
@@ -19,6 +20,12 @@ export interface GrokCapabilityRouteOptions {
   tasks: () => Promise<unknown[]>
   /** Queries/downloads one task already owned by the current account, never generates. */
   resume: (taskId: string, signal?: AbortSignal) => Promise<unknown>
+  /**
+   * Removes finished (`scope: 'done'`) or all (`scope: 'all'`) tasks of the
+   * signed-in identity from the local store; never contacts the upstream and
+   * never touches another account's records. Returns the count removed.
+   */
+  clear: (scope: 'done' | 'all') => Promise<number>
 }
 
 function trustedRequest(req: IncomingMessage): boolean {
@@ -55,6 +62,13 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 export function parseResumeBody(body: unknown): { taskId: string } | undefined {
   if (!isRecord(body) || Object.keys(body).length !== 1 || !('taskId' in body)) return undefined
   return typeof body.taskId === 'string' && UUID_PATTERN.test(body.taskId) ? { taskId: body.taskId } : undefined
+}
+
+/** Body of the clear route: exactly `{ scope: 'done' | 'all' }`. */
+export function parseClearBody(body: unknown): { scope: 'done' | 'all' } | undefined {
+  if (!isRecord(body) || Object.keys(body).length !== 1 || !('scope' in body)) return undefined
+  const scope = body.scope
+  return scope === 'done' || scope === 'all' ? { scope } : undefined
 }
 
 /** Defense-in-depth projection: adding internal task fields must never expand the Web response. */
@@ -136,6 +150,28 @@ export function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabili
             res.off('close', onClose)
             resumeAborts.delete(abort)
           }
+        }),
+      }),
+      ctx.webServer.register({
+        kind: 'exact', path: GROK_VIDEO_CLEAR_PATH,
+        handler: guarded(async (req, res) => {
+          if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
+          if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
+          if (!videoEnabled()) return json(res, 409, { error: 'video is disabled by the plugin configuration' })
+          if (!await options.authenticated()) {
+            tracker.reset()
+            return json(res, 403, { error: 'forbidden' })
+          }
+          const parsed = parseClearBody(await readJson(req))
+          if (parsed === undefined) return json(res, 400, { error: 'body must be exactly { scope: "done" | "all" }' })
+          const identity = await options.identity?.()
+          if (!await unchanged(identity)) return json(res, 403, { error: 'account cannot be identified' })
+          // Re-check like resume: config may have changed while the async
+          // identity read was in flight.
+          if (!videoEnabled()) return json(res, 409, { error: 'video is disabled by the plugin configuration' })
+          const removed = await options.clear(parsed.scope)
+          if (!await unchanged(identity)) return json(res, 403, { error: 'account changed' })
+          json(res, 200, { removed })
         }),
       }),
     ]

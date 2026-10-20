@@ -387,6 +387,10 @@ export function apply(ctx: Context, config: Config): void {
       if (video === undefined || !mediaEnabled('videoTool')) return Promise.reject(new Error('video generation is disabled'))
       return video.resume(taskId, signal)
     },
+    clear: (scope) => {
+      if (video === undefined || !mediaEnabled('videoTool')) return Promise.reject(new Error('video generation is disabled'))
+      return video.clear(scope)
+    },
   }))
   ctx.inject(['webServer'], webCtx => registerGrokVideoFileRoute(webCtx, {
     enabled: () => mediaEnabled('videoTool'),

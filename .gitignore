@@ -22,3 +22,9 @@ docs/
 # Live OAuth probes (read local credentials; never commit output)
 scripts/probe-*.mjs
 scripts/probe-*.json
+
+# Temporary session artifacts (PR drafts, handoff notes, delivery checklists,
+# scratch scripts, packed tarballs) are archived here and never committed.
+# Keep the repo root clean: drop throwaway files into archive/ instead.
+archive/*
+!archive/.gitkeep
