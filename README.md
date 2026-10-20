@@ -82,12 +82,27 @@
 
 ## 安装
 
-推荐从 npm 安装到 Web profile：
+桌面客户端和 Web 使用独立的插件安装与启用状态。请选择你实际使用的客户端；装到 Web profile 不会自动装到桌面端。
+
+### 桌面客户端
+
+1. 打开桌面客户端，在侧栏进入 **插件（Plugins）→ 添加插件（Add plugin）**。
+2. 输入 `dsh-grok-kit@latest` 并安装；需要固定本版时输入 `dsh-grok-kit@0.2.7`。
+3. 安装完成后点击 **立即启用（Enable now）**。若提示需要重启，通过应用菜单或托盘的 **Quit / 退出** 完整退出后重新打开；仅关闭窗口可能只是隐藏应用。
+4. 在 **设置 → xAI Grok** 中确认插件入口出现，再按账号资格完成登录。
+
+此方式不需要在 PATH 中配置 `dsh`。终端用户可按 [桌面配套 CLI 的安装步骤](INSTALL.zh.md#桌面端命令行) 操作；npm 全局安装或 `npx` 启动的 CLI 不能管理 `desktop` profile。
+
+### Web / CLI
+
+使用启动该 Web 实例的同一套 DSH CLI，从 npm 安装到 `web` profile：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit
+dsh plugin --profile web add dsh-grok-kit@latest
 dsh web
 ```
+
+如果 Web 进程已经在运行，先停止它，安装后再运行 `dsh web` 并刷新页面。以下命令均用于 Web。
 
 也可以固定安装 0.2.7：
 
@@ -99,7 +114,7 @@ dsh web
 如果 PATH 中没有 `dsh`，可以使用同一个 CLI 包（固定宿主版本）：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.0-rc.2 plugin --profile web add dsh-grok-kit@latest
 npx @deepseek-ai/dsh@0.2.0-rc.2 web
 ```
 
