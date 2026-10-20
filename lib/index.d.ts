@@ -782,6 +782,15 @@ declare class VideoTaskManager {
   /** Local-only listing: reads the store, never the network. */
   list(): Promise<VideoTaskResult[]>;
   /**
+   * Remove finished tasks (`scope: 'done'`) or every task of the signed-in
+   * identity (`scope: 'all'`) from the local store. Only this account's
+   * records are touched; the remote upstream is never contacted, and the
+   * retention/cancel semantics of in-flight tasks are unchanged — clearing
+   * `all` does not cancel a running generation or stop its billing. Returns
+   * the number of records removed. Fails closed without a stable identity.
+   */
+  clear(scope: 'done' | 'all'): Promise<number>;
+  /**
    * Cancel local operations only. The remote generation is NOT cancelled and
    * may still complete and bill the account; persisted tasks stay for restart.
    */
@@ -887,6 +896,12 @@ interface GrokCapabilityRouteOptions {
   tasks: () => Promise<unknown[]>;
   /** Queries/downloads one task already owned by the current account, never generates. */
   resume: (taskId: string, signal?: AbortSignal) => Promise<unknown>;
+  /**
+   * Removes finished (`scope: 'done'`) or all (`scope: 'all'`) tasks of the
+   * signed-in identity from the local store; never contacts the upstream and
+   * never touches another account's records. Returns the count removed.
+   */
+  clear: (scope: 'done' | 'all') => Promise<number>;
 }
 declare function registerGrokCapabilityRoutes(ctx: Context, options: GrokCapabilityRouteOptions): void;
 //#endregion
