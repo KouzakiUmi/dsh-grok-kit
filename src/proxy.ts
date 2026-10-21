@@ -19,13 +19,20 @@
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { ProxyAgent, fetch as undiciFetch } from 'undici'
+import { Agent, ProxyAgent, fetch as undiciFetch } from 'undici'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { GROK_GRPC_CREDITS_URL } from './grok-credits.ts'
+import { GROK_BILLING_URL, GROK_SETTINGS_URL } from './quota.ts'
 
 const PROXY_FILE_VERSION = 1
 const PROXY_FILENAME = '.xai-oauth-proxy.json'
+
+export interface XaiProxySettings {
+  proxyUrl: string
+  /** Opt-in: quota uses a plugin-owned transport instead of global fetch wrappers. */
+  quotaCompatibilityMode: boolean
+}
 
 /** Absolute path of the plugin-owned proxy setting file. */
 export function xaiProxyPath(dshHome?: string): string {
@@ -47,48 +54,59 @@ function cleanupStoredProxy(file: string): void {
  * Read the plugin's own stored proxy URL ('' = off; invalid/userinfo values
  * are dropped AND the disk copy is scrubbed so credentials do not linger).
  */
-function readStoredProxySetting(): string | undefined {
+function readStoredProxySettings(): XaiProxySettings | undefined {
   try {
     const file = xaiProxyPath()
     const doc = JSON.parse(readFileSync(file, 'utf8')) as {
       version?: unknown
       proxyUrl?: unknown
+      quotaCompatibilityMode?: unknown
     }
     if (doc.version !== PROXY_FILE_VERSION) return undefined
     const normalized = validProxyUrl(typeof doc.proxyUrl === 'string' ? doc.proxyUrl.trim() : '')
     if (normalized === undefined) {
       cleanupStoredProxy(file)
-      return ''
+      return { proxyUrl: '', quotaCompatibilityMode: false }
     }
-    return normalized
+    return { proxyUrl: normalized, quotaCompatibilityMode: doc.quotaCompatibilityMode === true }
   } catch {
     return undefined
   }
 }
 
 export function readStoredProxyUrl(): string {
-  return readStoredProxySetting() ?? ''
+  return readStoredProxySettings()?.proxyUrl ?? ''
 }
 
 /**
  * Persist the plugin's own proxy setting. Fail-closed: URLs with embedded
  * credentials or invalid proxies are rejected BEFORE anything hits disk.
  */
-export async function writeStoredProxyUrl(url: string): Promise<void> {
-  const normalized = validProxyUrl(url)
+export async function writeStoredProxySettings(settings: XaiProxySettings): Promise<void> {
+  const normalized = validProxyUrl(settings.proxyUrl)
   if (normalized === undefined) {
     throw new Error('proxyUrl must be a valid http:// or https:// URL without embedded credentials')
   }
   const file = xaiProxyPath()
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
   await writeFileAtomic(file, `${JSON.stringify(
-    { version: PROXY_FILE_VERSION, proxyUrl: normalized },
+    { version: PROXY_FILE_VERSION, proxyUrl: normalized, quotaCompatibilityMode: settings.quotaCompatibilityMode },
     null,
     2,
   )}\n`, { mode: 0o600, dirMode: 0o700 })
 }
 
+/** Legacy URL-only callers must not silently reset the compatibility choice. */
+export async function writeStoredProxyUrl(url: string): Promise<void> {
+  await writeStoredProxySettings({
+    proxyUrl: url,
+    quotaCompatibilityMode: readStoredProxySettings()?.quotaCompatibilityMode ?? false,
+  })
+}
+
 let proxyAgent: ProxyAgent | null = null
+let quotaDirectAgent: Agent | null = null
+let quotaCompatibilityMode = false
 
 function urlHref(input: unknown): string {
   if (typeof input === 'string') return input
@@ -158,6 +176,46 @@ export function setXaiProxyUrl(url: string): boolean {
   return true
 }
 
+const QUOTA_ENDPOINTS = new Set([GROK_BILLING_URL, GROK_SETTINGS_URL, GROK_GRPC_CREDITS_URL])
+
+/** Runtime-only; callers persist the settings before applying a change. */
+export function setQuotaCompatibilityMode(enabled: boolean): void {
+  quotaCompatibilityMode = enabled
+}
+
+/**
+ * Quota-only fetch adapter. Off preserves the current global wrapper chain.
+ * On uses imported Undici plus an explicit current dispatcher (including a
+ * plugin-owned direct Agent when the URL is blank), not the global dispatcher.
+ * The quota client supplies URL inputs and only strings/byte-array bodies;
+ * normalizing headers and wrapping the response stream bridge DOM/Undici types
+ * without buffering away the client's body ceiling or cancellation semantics.
+ */
+export const fetchGrokQuota: typeof fetch = async (input, init) => {
+  if (!quotaCompatibilityMode) return globalThis.fetch(input, init)
+  if (typeof input !== 'string' && !(input instanceof URL)) throw new TypeError('Quota transport requires a URL')
+  // Defense in depth: this bypass is never a general-purpose outbound fetch,
+  // even if a future caller forgets the upstream bearer destination guard.
+  if (!QUOTA_ENDPOINTS.has(new URL(input).href)) throw new TypeError('Quota transport requires an official quota endpoint')
+  const body = init?.body
+  if (body !== undefined && body !== null && typeof body !== 'string' && !(body instanceof Uint8Array)) {
+    throw new TypeError('Quota transport requires a string or byte-array body')
+  }
+  const dispatcher = proxyAgent ?? (quotaDirectAgent ??= new Agent())
+  const response = await undiciFetch(input, {
+    ...init,
+    body,
+    headers: Object.fromEntries(new Headers(init?.headers)),
+    dispatcher,
+    redirect: 'error',
+  })
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: Object.fromEntries(response.headers),
+  })
+}
+
 /**
  * Install a transparent global-fetch hook that routes x.ai origins, the
  * exact official Grok billing host, and the exact GetGrokCreditsConfig path
@@ -198,6 +256,10 @@ export function installXaiFetchHook(): () => void {
     const previous = proxyAgent
     proxyAgent = null
     if (previous !== null) void previous.close().catch(() => undefined)
+    const direct = quotaDirectAgent
+    quotaDirectAgent = null
+    if (direct !== null) void direct.close().catch(() => undefined)
+    quotaCompatibilityMode = false
     installedWrapper = undefined
     originalFetch = undefined
   }
@@ -207,13 +269,18 @@ let hookOwners = 0
 let installedWrapper: typeof fetch | undefined
 let originalFetch: typeof fetch | undefined
 
-/** Effective proxy URL: stored setting > config `proxyUrl` > `DSH_XAI_PROXY`. Invalid/userinfo values resolve to ''. */
-export function resolveXaiProxyUrl(configUrl?: string): string {
-  const stored = readStoredProxySetting()
+/** Effective settings; show config/env fallback so toggling mode cannot clear an unseen proxy. */
+export function readXaiProxySettings(configUrl?: string): XaiProxySettings {
+  const stored = readStoredProxySettings()
   if (stored !== undefined) return stored
   const env = process.env.DSH_XAI_PROXY
   const candidate = nonBlank(configUrl) ? configUrl.trim() : nonBlank(env) ? env.trim() : ''
-  return validProxyUrl(candidate) ?? ''
+  return { proxyUrl: validProxyUrl(candidate) ?? '', quotaCompatibilityMode: false }
+}
+
+/** Effective proxy URL: stored > config > env. Invalid/userinfo values resolve to ''. */
+export function resolveXaiProxyUrl(configUrl?: string): string {
+  return readXaiProxySettings(configUrl).proxyUrl
 }
 
 /**
@@ -222,7 +289,8 @@ export function resolveXaiProxyUrl(configUrl?: string): string {
  * Returns the effective URL, '' when unset/invalid.
  */
 export function applyXaiProxy(configUrl?: string): string {
-  const url = resolveXaiProxyUrl(configUrl)
-  setXaiProxyUrl(url)
-  return url
+  const settings = readXaiProxySettings(configUrl)
+  setXaiProxyUrl(settings.proxyUrl)
+  setQuotaCompatibilityMode(settings.quotaCompatibilityMode)
+  return settings.proxyUrl
 }
