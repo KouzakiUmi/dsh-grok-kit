@@ -18,8 +18,10 @@
  * 5xx or a transport failure falls back to grok.com's gRPC-web
  * GetGrokCreditsConfig on the same bearer. 401/403 never fall back, and 429
  * (or any other non-5xx) stays on the REST error mapping so a rate limit is
- * not amplified (GROK-QUOTA-CREDITS-001, see ./grok-credits.ts). A readable period without a reported percentage
- * yields partial metadata, never a fabricated usage number. Snapshots are cached per OAuth
+ * not amplified (GROK-QUOTA-CREDITS-001, see ./grok-credits.ts). A 200 with
+ * partial period metadata is also verified over gRPC; only a complete active
+ * config can supply the proto3 implicit zero. If verification fails, the REST
+ * metadata stays partial. Snapshots are cached per OAuth
  * account partition for 60s; an unknown or mid-flight-changed identity fails
  * closed and never returns another account's data.
  *
@@ -522,8 +524,8 @@ export class SuperGrokQuotaClient {
   /**
    * Resolve the billing body and its settings companion. The REST credits
    * shape runs first (with at most one 401 refresh on the shared official
-   * chain). HTTP 5xx and transport errors fall back to the gRPC-web credits
-   * probe on the same bearer before the failure is reported
+   * chain). HTTP 5xx, transport errors and partial 200 responses fall back to
+   * the gRPC-web credits probe on the same bearer before the result is reported
    * (GROK-QUOTA-CREDITS-001). 401/403 never fall back, so a revoked login
    * cannot surface as usage data; 429 and other non-5xx statuses stay on the
    * REST mapping so a rate limit is not amplified by a second probe.
@@ -572,7 +574,29 @@ export class SuperGrokQuotaClient {
         : { body: grpcBody, settings: round.settings }
     }
     try {
-      return { body: await readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES, signal), settings: round.settings }
+      const body = await readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES, signal)
+      // A 200 can still omit the implicit proto3 float. Verify missing REST
+      // usage over gRPC, even if the JSON lacks period metadata. JSON alone
+      // never authorizes zero; explicit/legacy readings keep their mapping.
+      const config = isRecord(body) && isRecord(body.config) ? body.config : undefined
+      let verifyMissingPercent = isRecord(body) && (body.config === undefined || config !== undefined)
+        && config?.creditUsagePercent === undefined
+      if (verifyMissingPercent) {
+        try {
+          verifyMissingPercent = normalizeSuperGrokQuota(body, round.settings).usedPercent === undefined
+        } catch {
+          // Do not mask malformed legacy amounts with another usage reading.
+          verifyMissingPercent = config?.monthlyLimit === undefined && config?.used === undefined
+        }
+      }
+      if (verifyMissingPercent && isRecord(body)) {
+        const grpcBody = await this.probeCreditsGrpc(token, signal)
+        const percent = grpcBody?.config.creditUsagePercent
+        if (grpcBody !== undefined && percent !== undefined && percent >= 0 && percent <= 100) {
+          return { body: { ...body, config: { ...config, ...grpcBody.config } }, settings: round.settings }
+        }
+      }
+      return { body, settings: round.settings }
     } catch (error) {
       // Aborts (deadline/disposal/caller) propagate to the state mapping in
       // get(); a readable but unusable body is an invalid response.
@@ -611,7 +635,7 @@ export class SuperGrokQuotaClient {
       if (response.ok && (grpcStatus === null || grpcStatus.trim() === '0')) {
         return parseGrokCreditsGrpcWeb(
           await readBoundedBytes(response, MAX_QUOTA_RESPONSE_BYTES, signal),
-          { headerStatus: grpcStatus },
+          { headerStatus: grpcStatus, now: this.now() },
         )
       }
       discardResponse(response)
