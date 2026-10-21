@@ -70,7 +70,7 @@ If the source does not switch, run `dsh plugin --profile web remove dsh-grok-kit
 For a reproducible install, pin a full Git commit (the command below pins the shown commit rather than following the rolling default branch):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#a1a9685587d7a298d429c63b7e38247ff878d3f2
 ```
 
 `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is **not** a reproducible pin.
