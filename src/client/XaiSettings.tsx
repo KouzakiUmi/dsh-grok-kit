@@ -297,6 +297,8 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   // unknown. Saving then could store an empty URL over a real one, so the
   // save button stays disabled until the read lands. Editing stays allowed.
   const [proxyLoaded, setProxyLoaded] = useState(false)
+  const [proxyLoading, setProxyLoading] = useState(false)
+  const proxyLoadingRef = useRef(false)
   // Each field owns its edit flag: toggling the compatibility mode must not
   // stop a late read from filling in the proxy URL the user never touched.
   const proxyUrlEditedRef = useRef(false)
@@ -531,6 +533,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
    * the user has edited or a baseline a save has already committed.
    */
   const loadProxy = useCallback(async () => {
+    if (proxyLoadingRef.current) return
+    proxyLoadingRef.current = true
+    setProxyLoading(true)
     try {
       const value = await jsonRequest<ProxyPayload>(PROXY_PATH)
       const url = typeof value.proxyUrl === 'string' ? value.proxyUrl : ''
@@ -544,10 +549,14 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
         setSavedProxyUrl(url)
         setSavedQuotaCompatibilityMode(mode)
       }
+      setProxyFeedback(previous => previous === 'loadError' ? 'idle' : previous)
     } catch {
-      // The effective settings are unknown now. Keep the save disabled and
-      // show the error instead of storing a guess.
+      // Unknown settings must not be saved; retry keeps any local edits.
+      setProxyLoaded(false)
       setProxyFeedback('loadError')
+    } finally {
+      proxyLoadingRef.current = false
+      setProxyLoading(false)
     }
   }, [])
 
@@ -558,7 +567,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
    */
   const saveProxy = async (): Promise<void> => {
     // A failed read leaves the effective settings unknown; writing them back
-    // would store guesses. Wait for a refresh instead.
+    // would store guesses. Wait for a successful load/retry instead.
     if (proxyFeedback === 'loadError') return
     setProxyBusy(true)
     try {
@@ -1161,6 +1170,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                   </label>
                 </div>
                 <p style={optionHintStyle}>{t('quotaCompatibilityModeHint')}</p>
+                <p role="note" style={optionHintStyle}>{t('quotaCompatibilityWarning')}</p>
                 {pageHasDraft('network')
                   ? (
                       <p role="status" style={bodyStyle}>
@@ -1176,7 +1186,16 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                   ? <p role="status" style={{ ...bodyStyle, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('proxySaved')}</p>
                   : null}
                 {proxyFeedback === 'error' ? <p role="alert" style={errorStyle}>{t('proxyError')}</p> : null}
-                {proxyFeedback === 'loadError' ? <p role="alert" style={errorStyle}>{t('proxyLoadError')}</p> : null}
+                {proxyFeedback === 'loadError'
+                  ? (
+                      <>
+                        <p role="alert" style={errorStyle}>{t('proxyLoadError')}</p>
+                        <button type="button" style={buttonStyle} disabled={proxyLoading} aria-label={t('proxyRetry')} onClick={() => { void loadProxy() }}>
+                          {proxyLoading ? t('working') : t('proxyRetry')}
+                        </button>
+                      </>
+                    )
+                  : null}
               </div>
             </div>
           )

@@ -619,7 +619,9 @@ export function registerXaiOAuthAuthRoutes(
     return async () => {
       disposed = true
       for (const dispose of routes) dispose()
-      await auth.dispose()
+      // Drain admitted disk writes before a replacement owner can save newer
+      // settings. Cancel auth promptly while waiting for the settled queue.
+      await Promise.all([proxyWrite, auth.dispose()])
     }
   }, 'dsh-grok-kit: Web OAuth routes')
 }

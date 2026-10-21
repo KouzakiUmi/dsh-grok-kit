@@ -23,6 +23,7 @@ import { Agent, ProxyAgent, fetch as undiciFetch } from 'undici'
 import { writeFileAtomic } from '@deepseek-ai/dsh-atomic-write'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { GROK_GRPC_CREDITS_URL } from './grok-credits.ts'
+import { GROK_BILLING_URL, GROK_SETTINGS_URL } from './quota.ts'
 
 const PROXY_FILE_VERSION = 1
 const PROXY_FILENAME = '.xai-oauth-proxy.json'
@@ -175,6 +176,8 @@ export function setXaiProxyUrl(url: string): boolean {
   return true
 }
 
+const QUOTA_ENDPOINTS = new Set([GROK_BILLING_URL, GROK_SETTINGS_URL, GROK_GRPC_CREDITS_URL])
+
 /** Runtime-only; callers persist the settings before applying a change. */
 export function setQuotaCompatibilityMode(enabled: boolean): void {
   quotaCompatibilityMode = enabled
@@ -191,6 +194,9 @@ export function setQuotaCompatibilityMode(enabled: boolean): void {
 export const fetchGrokQuota: typeof fetch = async (input, init) => {
   if (!quotaCompatibilityMode) return globalThis.fetch(input, init)
   if (typeof input !== 'string' && !(input instanceof URL)) throw new TypeError('Quota transport requires a URL')
+  // Defense in depth: this bypass is never a general-purpose outbound fetch,
+  // even if a future caller forgets the upstream bearer destination guard.
+  if (!QUOTA_ENDPOINTS.has(new URL(input).href)) throw new TypeError('Quota transport requires an official quota endpoint')
   const body = init?.body
   if (body !== undefined && body !== null && typeof body !== 'string' && !(body instanceof Uint8Array)) {
     throw new TypeError('Quota transport requires a string or byte-array body')
@@ -201,6 +207,7 @@ export const fetchGrokQuota: typeof fetch = async (input, init) => {
     body,
     headers: Object.fromEntries(new Headers(init?.headers)),
     dispatcher,
+    redirect: 'error',
   })
   return new Response(response.body, {
     status: response.status,

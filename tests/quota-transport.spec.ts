@@ -43,6 +43,37 @@ function client(timeoutMs = 1000) {
 }
 
 describe('quota-owned transport compatibility mode', () => {
+  it.each([
+    'https://api.x.ai/v1/models',
+    'https://grok.com/',
+    `${GROK_GRPC_CREDITS_URL}/extra`,
+    'https://cli-chat-proxy.grok.com.evil.example/v1/settings',
+    'http://cli-chat-proxy.grok.com/v1/settings',
+    `${GROK_BILLING_URL}&extra=1`,
+    'https://synthetic:secret@cli-chat-proxy.grok.com/v1/settings',
+    `${GROK_SETTINGS_URL}#fragment`,
+  ])('refuses non-quota destinations inside the compatibility channel: %s', async url => {
+    setQuotaCompatibilityMode(true)
+    for (const input of [url, new URL(url)]) {
+      await expect(fetchGrokQuota(input, { headers: { authorization: 'Bearer synthetic-bearer' } })).rejects.toThrow('official quota endpoint')
+    }
+    expect(undiciFetch).not.toHaveBeenCalled()
+    expect(legacy).not.toHaveBeenCalled()
+  })
+
+  it('refuses redirects even if a future compatibility caller asks to follow them', async () => {
+    setQuotaCompatibilityMode(true)
+    await fetchGrokQuota(GROK_SETTINGS_URL, { redirect: 'follow' })
+    expect(vi.mocked(undiciFetch).mock.calls[0]?.[1]?.redirect).toBe('error')
+  })
+
+  it('accepts URL objects for exactly the three official quota endpoints', async () => {
+    setQuotaCompatibilityMode(true)
+    for (const url of [GROK_BILLING_URL, GROK_SETTINGS_URL, GROK_GRPC_CREDITS_URL]) await fetchGrokQuota(new URL(url))
+    expect(undiciFetch).toHaveBeenCalledTimes(3)
+    expect(legacy).not.toHaveBeenCalled()
+  })
+
   it('defaults off and reads the latest global wrapper instead of capturing one', async () => {
     const later = vi.fn(async () => new Response('later'))
     vi.stubGlobal('fetch', later)

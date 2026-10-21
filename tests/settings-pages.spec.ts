@@ -1156,6 +1156,65 @@ describe('five-page settings section', () => {
     expect(probe.bodies).toEqual([])
   })
 
+  it('retries a failed settings read without dropping edited URL or mode drafts', async () => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    let reads = 0
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/auth/proxy') && init?.method !== 'POST') {
+        reads += 1
+        return Promise.resolve(new Response(JSON.stringify({ proxyUrl: 'http://127.0.0.1:9090', quotaCompatibilityMode: false }), { status: reads === 1 ? 500 : 200 }))
+      }
+      return originalFetch(url, init)
+    }))
+    mount()
+    clickPage(en.navNetwork)
+    await vi.waitFor(() => expect(texts(now())).toContain(en.proxyLoadError))
+    fire(field(now(), en.proxyTitle), { target: { value: 'http://127.0.0.1:8080' } })
+    fire(field(now(), en.quotaCompatibilityMode), { target: { checked: true } })
+    ;(button(now(), en.proxyRetry).props.onClick as () => void)()
+    await awaitProxyLoaded()
+    expect(reads).toBe(2)
+    expect(texts(now())).not.toContain(en.proxyLoadError)
+    expect(field(now(), en.proxyTitle).props.value).toBe('http://127.0.0.1:8080')
+    expect(field(now(), en.quotaCompatibilityMode).props.checked).toBe(true)
+    expect(texts(now())).toContain(en.unsavedChangesHint)
+    ;(button(now(), en.proxySave).props.onClick as () => void)()
+    await vi.waitFor(() => expect(probe.bodies).toEqual([{ proxyUrl: 'http://127.0.0.1:8080', quotaCompatibilityMode: true }]))
+  })
+
+  it('deduplicates retry clicks and allows another retry after a second failure', async () => {
+    stubFetch()
+    const originalFetch = globalThis.fetch
+    let reads = 0
+    let finish!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith('/auth/proxy') && init?.method !== 'POST') {
+        reads += 1
+        if (reads === 2) return new Promise<Response>(resolve => { finish = resolve })
+        return Promise.resolve(new Response(JSON.stringify({ proxyUrl: '', quotaCompatibilityMode: false }), { status: reads === 1 ? 500 : 200 }))
+      }
+      return originalFetch(url, init)
+    }))
+    mount()
+    clickPage(en.navNetwork)
+    await vi.waitFor(() => expect(texts(now())).toContain(en.proxyLoadError))
+    const retry = button(now(), en.proxyRetry).props.onClick as () => void
+    retry()
+    retry()
+    expect(reads).toBe(2)
+    expect(find(now(), node => node.type === 'button' && node.props['aria-label'] === en.proxyRetry)[0]?.props.disabled).toBe(true)
+    expect(button(now(), en.proxySave).props.disabled).toBe(true)
+    finish(new Response('{}', { status: 500 }))
+    await vi.waitFor(() => expect(button(now(), en.proxyRetry).props.disabled).toBe(false))
+    expect(button(now(), en.proxySave).props.disabled).toBe(true)
+    ;(button(now(), en.proxyRetry).props.onClick as () => void)()
+    await awaitProxyLoaded()
+    expect(reads).toBe(3)
+    expect(texts(now())).not.toContain(en.proxyLoadError)
+    expect(probe.bodies).toEqual([])
+  })
+
   it('keeps the saved pair when a late read arrives after the save commits', async () => {
     stubFetch()
     const originalFetch = globalThis.fetch
@@ -1220,6 +1279,10 @@ describe('five-page settings section', () => {
     expect(en.quotaCompatibilityModeHint).toContain('no restart')
     expect(zh.quotaCompatibilityModeHint).toContain('立即生效')
     expect(zh.quotaCompatibilityModeHint).toContain('无需重启')
+    expect(en.quotaCompatibilityWarning).toContain('Do not enable')
+    expect(en.quotaCompatibilityWarning).toContain('DLP')
+    expect(zh.quotaCompatibilityWarning).toContain('不要开启')
+    expect(zh.quotaCompatibilityWarning).toContain('不能恢复')
 
     stubFetch()
     harness.reset()
@@ -1229,5 +1292,6 @@ describe('five-page settings section', () => {
     const rendered = texts(now()).join(' | ')
     expect(rendered).toContain('配额请求兼容模式')
     expect(rendered).toContain('立即生效')
+    expect(rendered).toContain(zh.quotaCompatibilityWarning)
   })
 })
