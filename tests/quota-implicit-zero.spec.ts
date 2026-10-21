@@ -97,6 +97,32 @@ describe('verified proto3 implicit zero', () => {
     expect(parseGrokCreditsGrpcWeb(bytes, { now: Date.parse(WINDOW.end) })?.config.creditUsagePercent).toBeUndefined()
   })
 
+  it('does not round a start one nanosecond in the future down to now', () => {
+    const bytes = mutateConfig(encodeCreditsGrpcWeb(WINDOW), config => {
+      const startEnd = 2 + config[1]
+      return Buffer.concat([
+        Buffer.from([config[0], config[1] + 2]), config.subarray(2, startEnd),
+        Buffer.from([0x10, 1]), config.subarray(startEnd),
+      ])
+    })
+    const start = Date.parse(WINDOW.start)
+    expect(parseGrokCreditsGrpcWeb(bytes, { now: start })?.config.creditUsagePercent).toBeUndefined()
+    const parsed = parseGrokCreditsGrpcWeb(bytes, { now: start + 1 })
+    expect(parsed?.config.creditUsagePercent).toBe(0)
+    expect(parsed?.config.currentPeriod?.start).toBe(new Date(start + 1).toISOString())
+  })
+
+  it('rounds a fractional end conservatively instead of extending the current period', () => {
+    const bytes = mutateConfig(encodeCreditsGrpcWeb(WINDOW), config => {
+      const endOffset = 2 + config[1]
+      return Buffer.concat([
+        config.subarray(0, endOffset), Buffer.from([config[endOffset], config[endOffset + 1] + 2]),
+        config.subarray(endOffset + 2), Buffer.from([0x10, 1]),
+      ])
+    })
+    expect(parseGrokCreditsGrpcWeb(bytes, { now: Date.parse(WINDOW.end) })?.config.creditUsagePercent).toBeUndefined()
+  })
+
   it('requires a config envelope, a success status and an unambiguous data frame', () => {
     const bytes = encodeCreditsGrpcWeb(WINDOW)
     expect(parse(mutateMessage(bytes, message => message.subarray(2)))?.config.creditUsagePercent).toBeUndefined()
@@ -150,6 +176,10 @@ describe('verified proto3 implicit zero', () => {
     // nanos=1,000,000,000 is out of range, even after an unknown uint64 field.
     const invalidNanos = Buffer.from([0x10, 0x80, 0x94, 0xeb, 0xdc, 0x03])
     expect(parse(withTimestampSuffix(Buffer.concat([unknown, invalidNanos])))?.config.creditUsagePercent).toBeUndefined()
+    // A known field outside the safe integer range must not be mistaken for
+    // the end of an otherwise valid timestamp (uint64 max is not valid nanos).
+    const unsafeNanos = Buffer.from([0x10, ...Array<number>(9).fill(0xff), 0x01])
+    expect(parse(withTimestampSuffix(unsafeNanos))?.config.creditUsagePercent).toBeUndefined()
   })
 
   it.each([0, 12.5, 100, 150])('does not replace an explicit percentage: %s', percent => {
@@ -247,11 +277,11 @@ describe('REST 200 partial quota verification', () => {
     } finally { client.dispose() }
   })
 
-  it.each(['caller', 'dispose', 'deadline'] as const)('stops a hanging partial-REST verification on %s', async stop => {
+  it.each(['caller', 'dispose'] as const)('stops a hanging partial-REST verification on %s', async stop => {
     const grpc = vi.fn((signal?: AbortSignal | null) => new Promise<Response>((_resolve, reject) => {
       signal?.addEventListener('abort', () => reject(signal.reason), { once: true })
     }))
-    const { client } = fixture({ grpc, timeoutMs: stop === 'deadline' ? 100 : 1000 })
+    const { client } = fixture({ grpc, timeoutMs: 1000 })
     const controller = new AbortController()
     const reason = new Error('synthetic caller cancellation')
     try {

@@ -34,6 +34,8 @@ export interface ParseGrokCreditsOptions {
 
 /** The config fragment normalizeSuperGrokQuota consumes as `body.config`. */
 export interface GrokCreditsBillingBody {
+  /** Internal probe provenance, not an upstream JSON field or public snapshot property. */
+  implicitUsagePercent?: true
   config: {
     /** USED percentage (0–100), explicit or the verified proto3 implicit zero. */
     creditUsagePercent?: number
@@ -148,8 +150,8 @@ function readFloatField(message: Uint8Array, fieldNumber: number): number | unde
   return undefined
 }
 
-/** google.protobuf.Timestamp { int64 seconds = 1; } normalized to an ISO string. */
-function readTimestampField(message: Uint8Array, fieldNumber: number): string | undefined {
+/** Timestamp bounds use conservative milliseconds: start rounds up, end rounds down. */
+function readTimestampField(message: Uint8Array, fieldNumber: number, roundUp = false): string | undefined {
   const nested = readLengthDelimitedField(message, fieldNumber)
   if (nested === undefined || !isCompleteMessage(nested, { 1: 0, 2: 0 })) return undefined
   let offset = 0
@@ -157,11 +159,13 @@ function readTimestampField(message: Uint8Array, fieldNumber: number): string | 
   let nanos = 0
   while (offset < nested.length) {
     const tag = readTag(nested, offset)
-    if (tag === undefined) break
+    if (tag === undefined) return undefined
     offset = tag.next
     if (tag.wire === 0 && (tag.field === 1 || tag.field === 2)) {
       const value = readVarint(nested, offset)
-      if (value === undefined) break
+      // A known field that cannot be decoded invalidates the timestamp; do
+      // not keep earlier seconds and accidentally authorize an implicit zero.
+      if (value === undefined) return undefined
       offset = value.next
       if (tag.field === 1) seconds = value.value
       if (tag.field === 2) {
@@ -171,11 +175,14 @@ function readTimestampField(message: Uint8Array, fieldNumber: number): string | 
       continue
     }
     const skipped = skipField(nested, offset, tag.wire)
-    if (skipped === undefined) break
+    if (skipped === undefined) return undefined
     offset = skipped
   }
   if (seconds === undefined) return undefined
-  const date = new Date(seconds * 1000 + nanos / 1_000_000)
+  // Round the fractional part before adding epoch milliseconds: adding a
+  // single nanosecond first would already lose it to floating-point precision.
+  const milliseconds = roundUp ? Math.ceil(nanos / 1_000_000) : Math.floor(nanos / 1_000_000)
+  const date = new Date(seconds * 1000 + milliseconds)
   return Number.isFinite(date.getTime()) ? date.toISOString() : undefined
 }
 
@@ -296,7 +303,7 @@ export function parseGrokCreditsGrpcWeb(
   if (!isCompleteMessage(message, envelope === undefined ? { 1: 5, 4: 2, 5: 2 } : { 1: 2 })
     || !isCompleteMessage(config, { 1: 5, 4: 2, 5: 2 })) return undefined
   let usedPercent = readFloatField(config, 1)
-  const start = readTimestampField(config, 4)
+  const start = readTimestampField(config, 4, true)
   // A missing end stays missing: deriving end = start would invent a reset
   // date at the period start and still yields no decidable period kind.
   const end = readTimestampField(config, 5)
@@ -306,9 +313,10 @@ export function parseGrokCreditsGrpcWeb(
   // active billing window. Missing configs, stale periods and malformed data
   // remain unknown; REST JSON never receives this default on its own.
   const now = options?.now ?? Date.now()
-  if (usedPercent === undefined && envelope !== undefined && !scan.ambiguousData
+  const implicitUsagePercent = usedPercent === undefined && envelope !== undefined && !scan.ambiguousData
     && type !== undefined && start !== undefined && end !== undefined
-    && Date.parse(start) <= now && now < Date.parse(end)) usedPercent = 0
+    && Date.parse(start) <= now && now < Date.parse(end)
+  if (implicitUsagePercent) usedPercent = 0
   const currentPeriod = end !== undefined || start !== undefined
     ? {
         ...type === undefined ? {} : { type },
@@ -323,6 +331,7 @@ export function parseGrokCreditsGrpcWeb(
   if (usedPercent !== undefined && !Number.isFinite(usedPercent)) return undefined
   if (usedPercent === undefined && currentPeriod === undefined) return undefined
   return {
+    ...implicitUsagePercent ? { implicitUsagePercent: true } : {},
     config: {
       ...usedPercent === undefined ? {} : { creditUsagePercent: usedPercent },
       ...currentPeriod === undefined ? {} : { currentPeriod },
