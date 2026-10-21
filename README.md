@@ -55,6 +55,17 @@
 
 ## 界面与效果
 
+### 图片生成与会话卡片
+
+<p align="center">
+  <img src="assets/readme/imagine-result.png" width="900" alt="Grok Imagine 实际生成结果：会话内图片预览，以及查看大图、下载、复制图片、复制提示词和重新生成按钮">
+</p>
+<p align="center"><em>一次实际文生图结果：图片直接显示在会话卡片中，可查看大图、下载、复制图片、复制提示词或重新生成。</em></p>
+
+视频结果沿用同类卡片布局。图片生成、编辑和视频均为实验性能力，默认关闭，需在设置页确认风险后启用；实际可用性取决于账号资格与服务端限制。
+
+<br><br>
+
 ### 账号、模型与代理
 
 <p align="center">
@@ -70,15 +81,6 @@
   <img src="assets/readme/main-loop-search.png" width="760" alt="Grok 在同一轮 Think 中完成网页搜索并回答">
 </p>
 <p align="center"><em>没有另起嵌套搜索工具卡片：网页检索直接发生在同一轮 Think 中，材料随即用于当前回复。截图里的新闻内容只用于展示交互，不作为事实来源。</em></p>
-
-<br><br>
-
-### X 搜索的服务端调用
-
-<p align="center">
-  <img src="assets/readme/x-search.png" width="760" alt="xAI 返回 X 搜索 custom_tool_call 后继续完成回答">
-</p>
-<p align="center"><em>当前版本在开启主循环搜索时会剥掉 <code>x_keyword_search</code> 等收尾桩，正常路径不再把它们转发给 DSH。截图为功能演示，不代表当前界面会露出这些名称。</em></p>
 
 ## 安装
 

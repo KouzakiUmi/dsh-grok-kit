@@ -55,6 +55,17 @@ For domain, account, or date filters, use the standalone `grok_web_search` / `x_
 
 ## Interface and behavior
 
+### Image generation and session cards
+
+<p align="center">
+  <img src="assets/readme/imagine-result.png" width="900" alt="Actual Grok Imagine result: an image preview in a session card with controls to view full size, download, copy the image, copy the prompt, and regenerate">
+</p>
+<p align="center"><em>A real text-to-image result, displayed directly in a session card. View it at full size, download it, copy the image or prompt, or generate it again.</em></p>
+
+Video results use the same card layout. Image generation, editing, and video are experimental and off by default; enable them in Settings after confirming the risks. Availability depends on account eligibility and service-side restrictions.
+
+<br><br>
+
 ### Account, models, and proxy
 
 <p align="center">
@@ -70,15 +81,6 @@ For domain, account, or date filters, use the standalone `grok_web_search` / `x_
   <img src="assets/readme/main-loop-search.png" width="760" alt="Grok completes web search inside the same Think turn">
 </p>
 <p align="center"><em>No nested search-tool card is opened: web lookup occurs inside the same Think turn, and the material is used immediately by the current reply. The news content is illustrative UI data, not a factual reference.</em></p>
-
-<br><br>
-
-### Server-side X search calls
-
-<p align="center">
-  <img src="assets/readme/x-search.png" width="760" alt="xAI returns an X-search custom_tool_call before completing the answer">
-</p>
-<p align="center"><em>Current builds strip <code>x_keyword_search</code> reject stubs when main-turn search is on, so the normal path no longer forwards them to DSH. The screenshot is illustrative and does not mean those names still appear in the UI.</em></p>
 
 ## Install
 
