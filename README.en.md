@@ -55,6 +55,17 @@ For domain, account, or date filters, use the standalone `grok_web_search` / `x_
 
 ## Interface and behavior
 
+### Image generation and session cards
+
+<p align="center">
+  <img src="assets/readme/imagine-result.png" width="900" alt="Actual Grok Imagine result: an image preview in a session card with controls to view full size, download, copy the image, copy the prompt, and regenerate">
+</p>
+<p align="center"><em>A real text-to-image result, displayed directly in a session card. View it at full size, download it, copy the image or prompt, or generate it again.</em></p>
+
+Video results use the same card layout. Image generation, editing, and video are experimental and off by default; enable them in Settings after confirming the risks. Availability depends on account eligibility and service-side restrictions.
+
+<br><br>
+
 ### Account, models, and proxy
 
 <p align="center">
@@ -71,25 +82,31 @@ For domain, account, or date filters, use the standalone `grok_web_search` / `x_
 </p>
 <p align="center"><em>No nested search-tool card is opened: web lookup occurs inside the same Think turn, and the material is used immediately by the current reply. The news content is illustrative UI data, not a factual reference.</em></p>
 
-<br><br>
-
-### Server-side X search calls
-
-<p align="center">
-  <img src="assets/readme/x-search.png" width="760" alt="xAI returns an X-search custom_tool_call before completing the answer">
-</p>
-<p align="center"><em>Current builds strip <code>x_keyword_search</code> reject stubs when main-turn search is on, so the normal path no longer forwards them to DSH. The screenshot is illustrative and does not mean those names still appear in the UI.</em></p>
-
 ## Install
 
 > This branch's Core `0.2.1-alpha.3` compatibility and video-management changes are not published to npm. The npm and upstream Git examples below install upstream releases, not these branch changes. Build a local checkout to use this branch; see [Development install](INSTALL.md#development-install).
 
-Install the npm package into the Web profile:
+Desktop and Web have separate plugin installations and activation states. Choose the client you use; installing into the Web profile does not install the plugin into Desktop.
+
+### Desktop app
+
+1. Open the desktop app and select **Plugins → Add plugin** in the sidebar.
+2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.7` to pin this release.
+3. Click **Enable now** when installation finishes. If prompted to restart, fully quit through the application menu or tray **Quit** action, then reopen the app. Closing the window may only hide it.
+4. Check that **Settings → xAI Grok** is available, then sign in with an eligible account.
+
+This route does not require `dsh` on PATH. For terminal installation, follow the [desktop-bundled CLI steps](INSTALL.md#desktop-cli). An npm-installed or `npx` CLI cannot manage the `desktop` profile.
+
+### Web / CLI
+
+Use the same DSH CLI that starts your Web instance to install into its `web` profile:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit
+dsh plugin --profile web add dsh-grok-kit@latest
 dsh web
 ```
+
+If the Web process is already running, stop it first, then run `dsh web` after installation and refresh the page. The commands below are for Web.
 
 You can also pin version 0.2.7:
 
@@ -101,7 +118,7 @@ dsh web
 If `dsh` is not on PATH, run the same CLI package through `npx` (pinned to the supported host version):
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit@latest
 npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 ```
 

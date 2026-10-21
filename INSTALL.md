@@ -8,22 +8,44 @@ Idempotent runbook for humans and automation agents.
 
 ## Prerequisites
 
-- DeepSeek Harness `dsh` on PATH with Core **0.2.1-alpha.3** and host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24; older hosts are unsupported). The host must expose pi-ai to the plugin: it is an optional peer to prevent automatic installation, but required at runtime. A source checkout that runs `pnpm dsh` works too
+- The DeepSeek Harness desktop app, or the DSH CLI matching your Web host, with Core **0.2.1-alpha.3** and host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24; older hosts are unsupported). The host must expose pi-ai to the plugin: it is an optional peer to prevent automatic installation, but required at runtime. Desktop GUI installation does not require `dsh` on PATH
 - An X Subscription or legacy SuperGrok / X Premium account that xAI allows on the OAuth API
 - A browser you can use to approve the device-code login
 
-## Install into the web profile
+## Desktop app
 
-Install from npm:
+Desktop and Web have separate plugin installations and activation states. A plugin installed in Web must be installed separately in Desktop.
+
+1. Open the desktop app and select **Plugins → Add plugin** in the sidebar.
+2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.7` to pin this release.
+3. Click **Enable now** when installation finishes. Closing the dialog instead keeps the plugin installed but disabled.
+4. If prompted to restart, fully quit through the application menu or tray **Quit** action, then reopen the app. Closing the window may only hide it. Check that **Settings → xAI Grok** is available.
+
+The input also accepts a Git source or an absolute local directory. For a reproducible install, enter the same pinned Git source string shown in the Web section below. See the [official plugin-manager guide](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/packages/client/ui-plugin-manager/README.md#installing-a-bundle) for the GUI flow.
+
+### Desktop CLI
+
+On Windows / macOS, use the desktop application menu **Manage dsh Command… → Install** to register its bundled command. Follow any command-conflict instructions in the dialog, then open a new terminal. Start the desktop app once to initialize its profile, fully quit through **Quit**, then run:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit
+dsh plugin --profile desktop add dsh-grok-kit@latest
+dsh plugin --profile desktop list
+```
+
+Here, `dsh` must come from the desktop app. An npm-installed or `npx` CLI cannot manage the `desktop` profile. Do not use `dsh --profile desktop` to launch Desktop. Reopen the app after the commands finish. See the [official bundled-runtime guide](https://github.com/deepseek-ai/deepseek-harness/blob/dsh-v0.2.0-rc.2/apps/desktop/README.md#bundled-command-runtime).
+
+## Install into the web profile
+
+The following commands are for Web only. Use the same DSH CLI that starts your Web instance, stop any running Web process, then install from npm:
+
+```sh
+dsh plugin --profile web add dsh-grok-kit@latest
 ```
 
 From a DeepSeek Harness source checkout, prefix the same command with `pnpm`:
 
 ```sh
-pnpm dsh plugin --profile web add dsh-grok-kit
+pnpm dsh plugin --profile web add dsh-grok-kit@latest
 ```
 
 Or pin version 0.2.7:
@@ -35,7 +57,7 @@ dsh plugin --profile web add dsh-grok-kit@0.2.7
 If `dsh` is not on PATH, run via pinned `npx`:
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit@latest
 npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 ```
 
@@ -68,9 +90,9 @@ allowBuilds:
   dsh-grok-kit: true
 ```
 
-The file is usually `~/.dsh/profiles/web/pnpm-workspace.yaml` (create it if missing). Do not use `npm dsh` or `pnpm dsh` from your home directory.
+The file is usually `~/.dsh/profiles/web/pnpm-workspace.yaml` (create it if missing). Do not use `npm dsh` or `pnpm dsh` from your home directory. After installation, start `dsh web` again and refresh the page.
 
-## Development install
+## Web development install
 
 ```sh
 git clone https://github.com/MaRi23333/dsh-grok-kit
@@ -86,9 +108,9 @@ Routine development uses `npm ci` (or `npm install`) and `npm run check`. Runnin
 
 > **Unofficial integration:** This is not an official xAI or X product and does not claim product-specific permission or endorsement. OAuth availability depends on account entitlement and current xAI policies. Read the full [unofficial-project, trademark, and account-use notice in the README](README.md) before signing in.
 
-Web UI:
+Desktop and Web use the same settings-page sign-in flow:
 
-1. `dsh web` (or `dsh --profile web`)
+1. Open the desktop app, or start `dsh web` (or `dsh --profile web`) for Web
 2. Settings → xAI Grok → Sign in with Grok / X Subscription (or "Sign in again" to switch accounts when already signed in)
 3. Approve access in the browser
 4. Pick a mainline Grok model under `xai-oauth` in the model picker (for example `grok-4.6`; the preferred model is usually selected automatically)
@@ -99,7 +121,7 @@ After a successful login the plugin calls `GET /v1/models` and caches the accoun
 
 - Both plugins can still read a leftover `$DSH_HOME/.xai-oauth-auth.json`. The live store is `~/.grok/auth.json` when that file exists (same document Grok CLI uses).
 - The proxy setting also carries over (`$DSH_HOME/.xai-oauth-proxy.json`).
-- **Do not keep both installed.** dsh-grok-kit guards its own side (unique plugin id, route/settings-page checks), but the old bundle can still fail the profile boot when it loads second. Remove dsh-xai before adding this bundle:
+- **Do not keep both installed in the same profile.** dsh-grok-kit guards its own side (unique plugin id, route/settings-page checks), but the old bundle can still fail the profile boot when it loads second. In Desktop, uninstall dsh-xai from the Plugins page first. For Web, run:
   `dsh plugin --profile web remove dsh-xai`
 
 ## Search
@@ -115,6 +137,10 @@ Nested `grok_web_search` / `x_search` (a second `grok-build-0.1` hop) are regist
 Optional. Set it from Settings → xAI Grok → Network tab under "Network proxy (xAI only)", or via `DSH_XAI_PROXY` (e.g. `http://127.0.0.1:8080`) in the dsh environment / config. Routes x.ai and official Grok billing requests through this proxy, including the exact `grok.com` `GetGrokCreditsConfig` fallback path. Other requests to these targets in the same DSH process may also be affected; other paths and traffic retain their existing network settings, rather than being forced to connect directly.
 
 ## Uninstall
+
+In Desktop, uninstall `dsh-grok-kit` from the **Plugins** page. To use the desktop-bundled CLI instead, fully quit the app as described above, run `dsh plugin --profile desktop remove dsh-grok-kit`, then reopen it.
+
+For Web:
 
 ```sh
 dsh plugin --profile web remove dsh-grok-kit

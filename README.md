@@ -55,6 +55,17 @@
 
 ## 界面与效果
 
+### 图片生成与会话卡片
+
+<p align="center">
+  <img src="assets/readme/imagine-result.png" width="900" alt="Grok Imagine 实际生成结果：会话内图片预览，以及查看大图、下载、复制图片、复制提示词和重新生成按钮">
+</p>
+<p align="center"><em>一次实际文生图结果：图片直接显示在会话卡片中，可查看大图、下载、复制图片、复制提示词或重新生成。</em></p>
+
+视频结果沿用同类卡片布局。图片生成、编辑和视频均为实验性能力，默认关闭，需在设置页确认风险后启用；实际可用性取决于账号资格与服务端限制。
+
+<br><br>
+
 ### 账号、模型与代理
 
 <p align="center">
@@ -71,25 +82,31 @@
 </p>
 <p align="center"><em>没有另起嵌套搜索工具卡片：网页检索直接发生在同一轮 Think 中，材料随即用于当前回复。截图里的新闻内容只用于展示交互，不作为事实来源。</em></p>
 
-<br><br>
-
-### X 搜索的服务端调用
-
-<p align="center">
-  <img src="assets/readme/x-search.png" width="760" alt="xAI 返回 X 搜索 custom_tool_call 后继续完成回答">
-</p>
-<p align="center"><em>当前版本在开启主循环搜索时会剥掉 <code>x_keyword_search</code> 等收尾桩，正常路径不再把它们转发给 DSH。截图为功能演示，不代表当前界面会露出这些名称。</em></p>
-
 ## 安装
 
 > 本分支的 Core `0.2.1-alpha.3` 适配和视频管理改动尚未发布到 npm。以下 npm 与上游 Git 示例安装的是上游发行版，不包含这些分支改动；使用本分支请从本地检出目录构建，参见 [开发安装](INSTALL.zh.md#开发安装)。
 
-推荐从 npm 安装到 Web profile：
+桌面客户端和 Web 使用独立的插件安装与启用状态。请选择你实际使用的客户端；装到 Web profile 不会自动装到桌面端。
+
+### 桌面客户端
+
+1. 打开桌面客户端，在侧栏进入 **插件（Plugins）→ 添加插件（Add plugin）**。
+2. 输入 `dsh-grok-kit@latest` 并安装；需要固定本版时输入 `dsh-grok-kit@0.2.7`。
+3. 安装完成后点击 **立即启用（Enable now）**。若提示需要重启，通过应用菜单或托盘的 **Quit / 退出** 完整退出后重新打开；仅关闭窗口可能只是隐藏应用。
+4. 在 **设置 → xAI Grok** 中确认插件入口出现，再按账号资格完成登录。
+
+此方式不需要在 PATH 中配置 `dsh`。终端用户可按 [桌面配套 CLI 的安装步骤](INSTALL.zh.md#桌面端命令行) 操作；npm 全局安装或 `npx` 启动的 CLI 不能管理 `desktop` profile。
+
+### Web / CLI
+
+使用启动该 Web 实例的同一套 DSH CLI，从 npm 安装到 `web` profile：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit
+dsh plugin --profile web add dsh-grok-kit@latest
 dsh web
 ```
+
+如果 Web 进程已经在运行，先停止它，安装后再运行 `dsh web` 并刷新页面。以下命令均用于 Web。
 
 也可以固定安装 0.2.7：
 
@@ -101,7 +118,7 @@ dsh web
 如果 PATH 中没有 `dsh`，可以使用同一个 CLI 包（固定宿主版本）：
 
 ```sh
-npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit
+npx @deepseek-ai/dsh@0.2.1-alpha.3 plugin --profile web add dsh-grok-kit@latest
 npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 ```
 
