@@ -18,10 +18,13 @@ import {
   installXaiFetchHook,
   isXaiProxyTarget,
   readStoredProxyUrl,
+  readXaiProxySettings,
   resolveXaiProxyUrl,
+  setQuotaCompatibilityMode,
   setXaiProxyUrl,
   validProxyUrl,
   writeStoredProxyUrl,
+  writeStoredProxySettings,
   xaiProxyPath,
 } from '../src/proxy.ts'
 
@@ -33,6 +36,7 @@ afterEach(async () => {
   restoreEnv('DSH_HOME', originalHome)
   restoreEnv('DSH_XAI_PROXY', originalEnv)
   setXaiProxyUrl('')
+  setQuotaCompatibilityMode(false)
   if (dir !== undefined) await rm(dir, { recursive: true, force: true })
   dir = undefined
 })
@@ -44,6 +48,20 @@ async function tempHome(): Promise<string> {
 }
 
 describe('proxy settings', () => {
+  it('reads old proxy documents with compatibility off and never enables a truthy non-boolean flag', async () => {
+    const home = await tempHome()
+    for (const flag of [undefined, 'true', 1, null]) {
+      await writeFile(xaiProxyPath(home), JSON.stringify({ version: 1, proxyUrl: 'http://127.0.0.1:9', quotaCompatibilityMode: flag }))
+      expect(readXaiProxySettings()).toEqual({ proxyUrl: 'http://127.0.0.1:9', quotaCompatibilityMode: false })
+    }
+  })
+
+  it('keeps the mode in storage when a legacy URL-only writer updates the proxy', async () => {
+    await tempHome()
+    await writeStoredProxySettings({ proxyUrl: 'http://127.0.0.1:9', quotaCompatibilityMode: true })
+    await writeStoredProxyUrl('http://127.0.0.1:10')
+    expect(readXaiProxySettings()).toEqual({ proxyUrl: 'http://127.0.0.1:10', quotaCompatibilityMode: true })
+  })
   it('includes the exact billing host without routing unrelated Grok or lookalike hosts', () => {
     for (const url of [
       'https://api.x.ai/v1/models',

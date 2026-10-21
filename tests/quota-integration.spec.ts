@@ -8,6 +8,7 @@ import { EventEmitter } from 'node:events'
 const captured = vi.hoisted(() => ({
   notify: undefined as (() => void) | undefined,
   authChanged: undefined as (() => void) | undefined,
+  networkChanged: undefined as (() => void) | undefined,
   quota: undefined as SuperGrokQuotaClient | undefined,
   capabilities: undefined as GrokCapabilityRouteOptions | undefined,
   video: undefined as VideoTaskManager | undefined,
@@ -38,7 +39,10 @@ vi.mock('../src/quota-routes.ts', async importOriginal => ({
 }))
 vi.mock('../src/auth-routes.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/auth-routes.ts')>(),
-  registerXaiOAuthAuthRoutes: (_ctx: unknown, _session: unknown, _config: unknown, onAccountChange?: () => void) => { captured.authChanged = onAccountChange },
+  registerXaiOAuthAuthRoutes: (_ctx: unknown, _session: unknown, _config: unknown, onAccountChange?: () => void, onNetworkChange?: () => void) => {
+    captured.authChanged = onAccountChange
+    captured.networkChanged = onNetworkChange
+  },
 }))
 vi.mock('../src/capability-routes.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/capability-routes.ts')>(),
@@ -54,9 +58,17 @@ vi.mock('../src/video-file-route.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/video-file-route.ts')>(),
   registerGrokVideoFileRoute: (_ctx: unknown, options: VideoFileRouteOptions) => { captured.files = options },
 }))
+vi.mock('../src/proxy.ts', async importOriginal => {
+  const original = await importOriginal<typeof import('../src/proxy.ts')>()
+  return { ...original, fetchGrokQuota: vi.fn(original.fetchGrokQuota) }
+})
+import { fetchGrokQuota } from '../src/proxy.ts'
 import { apply } from '../src/index.ts'
 import { XaiOAuthSession } from '../src/session.ts'
-beforeEach(() => { captured.identity = 'account-a'; captured.identityFn = undefined; captured.video = undefined })
+beforeEach(() => {
+  captured.identity = 'account-a'; captured.identityFn = undefined; captured.video = undefined
+  vi.mocked(fetchGrokQuota).mockClear()
+})
 afterEach(async () => { captured.quota?.dispose(); await captured.video?.dispose(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 function fixture(videoTool = false) {
@@ -77,6 +89,19 @@ function fixture(videoTool = false) {
 }
 
 describe('quota account lifecycle integration', () => {
+  it('wires the plugin-owned quota fetch rather than relying on the constructor default', async () => {
+    const { quota } = fixture()
+    expect(await quota.get()).toMatchObject({ state: 'available', usedPercent: 42 })
+    expect(fetchGrokQuota).toHaveBeenCalledTimes(2)
+  })
+
+  it('invalidates cached quota after saving network settings without an account change', async () => {
+    const { quota, fetch } = fixture()
+    const first = await quota.get()
+    captured.networkChanged!()
+    expect(await quota.get()).not.toBe(first)
+    expect(fetch).toHaveBeenCalledTimes(4)
+  })
   it('preserves quota cache on same-account model selection and catalog notifications', async () => {
     const { quota, fetch, ctx } = fixture()
     const cached = await quota.get()

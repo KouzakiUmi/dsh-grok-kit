@@ -15,7 +15,7 @@ import type {} from '@deepseek-ai/dsh-host-webserver'
 import { loginXaiOAuthSession, importXaiOAuthSession, xaiOAuthAuthStatus } from './auth.ts'
 import type { CatalogSource } from './catalog.ts'
 import { probeGrokAuth } from './grok-import.ts'
-import { readStoredProxyUrl, setXaiProxyUrl, validProxyUrl, writeStoredProxyUrl } from './proxy.ts'
+import { readXaiProxySettings, setQuotaCompatibilityMode, setXaiProxyUrl, validProxyUrl, writeStoredProxySettings } from './proxy.ts'
 import { safeMessage } from './redact.ts'
 import { MEDIA_TOOL_KEYS, mediaEnableNeedsConfirmation } from './media-options.ts'
 import {
@@ -436,8 +436,35 @@ export function registerXaiOAuthAuthRoutes(
   session: XaiOAuthSession,
   cordisConfig: Record<string, unknown> = {},
   onAccountChange?: () => void,
+  onNetworkChange?: () => void,
 ): void {
   const auth = new XaiOAuthWebAuth(session, onAccountChange)
+  const configProxyUrl = typeof cordisConfig.proxyUrl === 'string' ? cordisConfig.proxyUrl : undefined
+  // Serialize the persisted pair and apply only after the atomic write succeeds.
+  // URL-only clients preserve the mode selected in another tab.
+  let proxyWrite = Promise.resolve()
+  let disposed = false
+  const networkActive = () => !disposed
+  const saveProxySettings = (proxyUrl: string, mode: boolean | undefined) => {
+    const pending = proxyWrite.then(async () => {
+      if (!networkActive()) throw new Error('Network settings are no longer active')
+      const settings = {
+        proxyUrl,
+        quotaCompatibilityMode: mode ?? readXaiProxySettings(configProxyUrl).quotaCompatibilityMode,
+      }
+      await writeStoredProxySettings(settings)
+      // A write already in progress may finish, but unloading must not let a
+      // late completion recreate a closed agent or mutate a new plugin owner.
+      if (networkActive()) {
+        setXaiProxyUrl(settings.proxyUrl)
+        setQuotaCompatibilityMode(settings.quotaCompatibilityMode)
+        onNetworkChange?.()
+      }
+      return settings
+    })
+    proxyWrite = pending.then(() => undefined, () => undefined)
+    return pending
+  }
   // Keep merge/check/write in order across tabs: a stale unrelated save must
   // not resurrect switches that another request just closed.
   let optionsWrite = Promise.resolve()
@@ -528,7 +555,7 @@ export function registerXaiOAuthAuthRoutes(
         handler: async (req, res) => {
           if (!trustedRequest(req)) return json(res, 403, { error: 'forbidden' })
           if (req.method === 'GET') {
-            return json(res, 200, { proxyUrl: readStoredProxyUrl() })
+            return json(res, 200, readXaiProxySettings(configProxyUrl))
           }
           if (req.method !== 'POST') return json(res, 405, { error: 'method not allowed' })
           try {
@@ -543,9 +570,12 @@ export function registerXaiOAuthAuthRoutes(
             if (normalized === undefined) {
               return json(res, 400, { error: 'proxyUrl must be a valid http:// or https:// URL' })
             }
-            setXaiProxyUrl(proxyUrl)
-            await writeStoredProxyUrl(proxyUrl)
-            json(res, 200, { proxyUrl: normalized })
+            const mode = typeof body === 'object' && body !== null && 'quotaCompatibilityMode' in body
+              ? body.quotaCompatibilityMode : undefined
+            if (mode !== undefined && typeof mode !== 'boolean') {
+              return json(res, 400, { error: 'quotaCompatibilityMode must be a boolean' })
+            }
+            json(res, 200, await saveProxySettings(normalized, mode))
           } catch (error: unknown) {
             json(res, errorStatus(error), { error: safeMessage(error) })
           }
@@ -587,6 +617,7 @@ export function registerXaiOAuthAuthRoutes(
       }),
     ]
     return async () => {
+      disposed = true
       for (const dispose of routes) dispose()
       await auth.dispose()
     }
