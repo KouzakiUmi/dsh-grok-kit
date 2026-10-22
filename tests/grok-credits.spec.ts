@@ -47,11 +47,11 @@ describe('parseGrokCreditsGrpcWeb (GROK-QUOTA-CREDITS-001)', () => {
     expect(undecidable?.config.currentPeriod).not.toHaveProperty('type')
   })
 
-  it('returns period details without inventing a percentage', () => {
+  it('keeps an expired period partial instead of applying an implicit zero', () => {
     const parsed = parseGrokCreditsGrpcWeb(encodeCreditsGrpcWeb({
       start: '2026-10-07T11:18:57Z',
       end: '2026-10-14T11:18:57Z',
-    }))
+    }), { now: Date.parse('2026-10-21T00:00:00Z') })
     expect(parsed).toEqual({
       config: {
         currentPeriod: {

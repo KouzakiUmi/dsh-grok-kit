@@ -33,6 +33,14 @@ describe('account quota presentation', () => {
     expect(nodes(tree).find(node => node.props.role === 'progressbar')?.props['aria-valuenow']).toBe(42)
     expect(text(tree)).not.toContain('synthetic-secret')
   })
+  it('renders a verified zero as available usage with a 0% progress bar and 100% remaining', () => {
+    const parsed = parseQuotaSnapshot({ ...valid, usedPercent: 0, remainingPercent: 100 })
+    const tree = QuotaDetails({ quota: parsed, t })
+    expect(text(tree)).toContain('quotaRemaining : 100%')
+    expect(text(tree)).toContain('quotaUsed : 0%')
+    expect(text(tree)).not.toContain('quotaPartial')
+    expect(nodes(tree).find(node => node.props.role === 'progressbar')?.props['aria-valuenow']).toBe(0)
+  })
   it('shows partial subscription details without a fabricated progress bar or remaining percentage', () => {
     const parsed = parseQuotaSnapshot({ state: 'partial', period: 'week', checkedAt: valid.checkedAt,
       plan: 'Ultra', prepaidBalanceUsd: 0, unifiedBilling: true, resetAt: '2026-10-19T00:00:00Z',

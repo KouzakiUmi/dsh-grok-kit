@@ -1,7 +1,7 @@
 {
   "name": "dsh-grok-kit",
   "description": "Unofficial DeepSeek Harness plugin: Grok OAuth, fused web/X search, Imagine image generation and editing, experimental video generation, and session media cards.",
-  "version": "0.2.7",
+  "version": "0.2.9",
   "publishConfig": {
     "access": "public"
   },
@@ -108,7 +108,7 @@
     "react": "^18.2.0"
   },
   "dependencies": {
-    "undici": "^8.10.0"
+    "undici": "^8.12.3"
   },
   "peerDependenciesMeta": {
     "@earendil-works/pi-ai": {
@@ -192,6 +192,7 @@
     "@deepseek-ai/dsh-timeout": "0.2.1-alpha.3",
     "@deepseek-ai/dsh-tools": "0.2.1-alpha.3",
     "@deepseek-ai/schemastery": "3.18.5-alpha.2",
+    "@earendil-works/pi-ai": ">=1.2.0",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
     "eslint": "^10.13.0",
@@ -200,7 +201,6 @@
     "tsdown": "^0.22.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.71.2",
-    "vitest": "^4.1.8",
-    "@earendil-works/pi-ai": ">=1.2.0"
+    "vitest": "^4.1.8"
   }
 }

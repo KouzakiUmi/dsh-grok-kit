@@ -21,7 +21,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import { createXaiOAuthAdapter } from './adapter.ts'
 import { registerXaiOAuthAuthRoutes } from './auth-routes.ts'
 import { XAI_OAUTH_ROUTE, XAI_PI_PROVIDER } from './ids.ts'
-import { applyXaiProxy, installXaiFetchHook } from './proxy.ts'
+import { applyXaiProxy, fetchGrokQuota, installXaiFetchHook } from './proxy.ts'
 import {
   createXaiOAuthSearchTokenSource,
   DEFAULT_XAI_SEARCH_MODEL,
@@ -313,9 +313,9 @@ export function apply(ctx: Context, config: Config): void {
     config as unknown as Record<string, unknown>,
     readStoredOptions(),
   ))[key]
-  // Proxy hook FIRST: every later x.ai request (OAuth, models, chat, search)
-  // goes through globalThis.fetch and is routed by the hook. Registered as an
-  // effect so the hook is restored and the ProxyAgent closed on dispose.
+  // Proxy lifecycle FIRST: OAuth, models, chat and search retain the global
+  // hook; quota can opt into the same current proxy through an owned transport.
+  // The effect restores our hook and closes both owned dispatchers on dispose.
   ctx.effect(() => {
     const dispose = installXaiFetchHook()
     applyXaiProxy(effectiveConfig.proxyUrl)
@@ -331,7 +331,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => () => session.dispose(), 'dsh-grok-kit: session retry lifecycle')
   const tokens = createXaiOAuthSearchTokenSource(session)
   const capabilities = new CapabilityTracker()
-  const quota = new SuperGrokQuotaClient({ tokens })
+  const quota = new SuperGrokQuotaClient({ tokens, fetch: fetchGrokQuota })
   ctx.effect(() => () => quota.dispose(), 'dsh-grok-kit: quota lifecycle')
   ctx.inject(['webServer'], webCtx => registerGrokQuotaRoute(webCtx, quota))
   let capabilityIdentity: string | undefined
@@ -439,6 +439,7 @@ export function apply(ctx: Context, config: Config): void {
       capabilities.reset()
       capabilityIdentity = undefined
     },
+    () => quota.reset(),
   ))
 
   const searchModel = effectiveConfig.searchModel ?? DEFAULT_XAI_SEARCH_MODEL

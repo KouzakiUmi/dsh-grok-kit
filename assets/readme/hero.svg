@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-labelledby="title desc">
-  <title id="title">dsh-grok-kit</title>
-  <desc id="desc">DeepSeek Harness 的 Grok OAuth 与主循环融合搜索插件</desc>
+  <title id="title">dsh-grok-kit — 对话、搜索与可选媒体工具</title>
+  <desc id="desc">DeepSeek Harness 的第三方 Grok 集成：OAuth 登录、对话推理、网页与 X 搜索、订阅额度，以及可选的图片生成、编辑和视频。媒体默认关闭，实际可用性取决于账号资格。</desc>
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#f8faff"/>
       <stop offset="1" stop-color="#eef2fe"/>
     </linearGradient>
     <filter id="soft-shadow" x="-30%" y="-30%" width="160%" height="160%">
-      <feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#4d6bfe" flood-opacity="0.14"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="7" flood-color="#4d6bfe" flood-opacity="0.10"/>
     </filter>
   </defs>
 
@@ -21,43 +21,41 @@
           fill="#ffffff">g</text>
   </g>
 
-  <text x="248" y="148" font-family="ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace"
+  <text x="248" y="137" font-family="ui-monospace, 'Cascadia Code', Consolas, 'Courier New', monospace"
         font-size="44" font-weight="700" fill="#16204a" letter-spacing="-0.5">dsh-grok-kit</text>
-  <text x="248" y="192" font-family="'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif"
-        font-size="23" fill="#3d4468">DeepSeek Harness 的 Grok OAuth 与融合搜索插件</text>
-  <text x="248" y="228" font-family="'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif"
-        font-size="16" fill="#7c84a8">复用 Grok CLI 登录 · 网页与 X 搜索融合进同一轮 Think · 支持独立网络代理</text>
-  <text x="248" y="254" font-family="'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif"
-        font-size="16" fill="#7c84a8">unofficial community integration for the DSH Web GUI</text>
-
-  <!-- Main-loop search: one answer path, with Web and X folded into Think. -->
-  <g font-family="'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif" filter="url(#soft-shadow)">
-    <rect x="846" y="133" width="108" height="54" rx="16" fill="#ffffff" stroke="#cfd9fb"/>
-    <text x="900" y="166" text-anchor="middle" font-size="17" font-weight="650" fill="#3d4468">提问</text>
-
-    <rect x="1000" y="118" width="118" height="84" rx="22" fill="#4d6bfe"/>
-    <text x="1059" y="154" text-anchor="middle" font-size="18" font-weight="700" fill="#ffffff">Think</text>
-    <text x="1059" y="178" text-anchor="middle" font-size="13" fill="#e8edff">Web · X</text>
+  <g font-family="'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif">
+    <text x="248" y="179" font-size="22" fill="#3d4468">DeepSeek Harness 的 Grok 对话、搜索与媒体工具</text>
+    <text x="248" y="218" font-size="18" fill="#586285">OAuth 登录 · 主循环网页 / X 搜索 · 订阅额度</text>
+    <text x="248" y="247" font-size="18" fill="#586285">图片生成 / 编辑与视频 · 默认关闭，按需启用</text>
+    <text x="248" y="276" font-size="16" fill="#677398">第三方非官方 · Unofficial community integration</text>
   </g>
 
-  <g fill="none" stroke="#4d6bfe" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M954 160h34" stroke-width="3" opacity="0.62"/>
-    <path d="m981 153 8 7-8 7" stroke-width="3" opacity="0.62"/>
-    <path d="M1059 106V84" stroke-width="3" opacity="0.35"/>
-    <path d="M1059 214v22" stroke-width="3" opacity="0.35"/>
-  </g>
-
-  <g font-family="ui-monospace, 'Cascadia Code', Consolas, monospace" font-size="13" font-weight="700" fill="#4d6bfe">
-    <rect x="1023" y="50" width="72" height="34" rx="17" fill="#ffffff" stroke="#cfd9fb"/>
-    <text x="1059" y="72" text-anchor="middle">WEB</text>
-    <rect x="1023" y="236" width="72" height="34" rx="17" fill="#ffffff" stroke="#cfd9fb"/>
-    <text x="1059" y="258" text-anchor="middle">X</text>
-  </g>
-
-  <g transform="translate(1146 160)" fill="none" stroke="#4d6bfe" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M-28 0h14" stroke-width="3" opacity="0.62"/>
-    <path d="m-20-7 8 7-8 7" stroke-width="3" opacity="0.62"/>
-    <rect x="0" y="-22" width="40" height="44" rx="13" stroke-width="3" opacity="0.78"/>
-    <path d="M11-8h18M11 0h14M11 8h10" stroke-width="2.3" opacity="0.78"/>
+  <!-- Four capabilities, rather than a search-only pipeline. -->
+  <g font-family="'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">
+    <text x="1024" y="48" font-size="13" font-weight="650" letter-spacing="2" fill="#677398">GROK IN DSH</text>
+    <g filter="url(#soft-shadow)" fill="#ffffff" stroke="#d4ddf8">
+      <rect x="900" y="66" width="116" height="82" rx="16"/>
+      <rect x="1032" y="66" width="116" height="82" rx="16"/>
+      <rect x="900" y="166" width="116" height="82" rx="16"/>
+      <rect x="1032" y="166" width="116" height="82" rx="16"/>
+    </g>
+    <g fill="none" stroke="#4d6bfe" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M946 85h24a4 4 0 0 1 4 4v15a4 4 0 0 1-4 4h-14l-9 7v-7h-1a4 4 0 0 1-4-4V89a4 4 0 0 1 4-4Z"/>
+      <path d="M950 94h16m-16 7h10"/>
+      <circle cx="1087" cy="96" r="12"/>
+      <path d="m1096 105 9 9m-28-18h20m-10-12c-6 7-6 17 0 24m0-24c6 7 6 17 0 24"/>
+      <rect x="941" y="184" width="34" height="27" rx="4"/>
+      <circle cx="950" cy="192" r="2"/>
+      <path d="m943 208 9-9 6 6 6-8 9 11"/>
+      <rect x="1073" y="184" width="34" height="27" rx="5"/>
+      <path d="m1087 191 9 7-9 7Z"/>
+    </g>
+    <g font-size="15" font-weight="600" fill="#3d4468">
+      <text x="958" y="134">对话 · 推理</text>
+      <text x="1090" y="134">网页 · X 搜索</text>
+      <text x="958" y="234">图片 · 编辑</text>
+      <text x="1090" y="234">视频 · 任务</text>
+    </g>
+    <text x="1024" y="279" font-size="15" fill="#677398">媒体可用性取决于账号资格</text>
   </g>
 </svg>

@@ -332,8 +332,8 @@ describe('normalizeSuperGrokQuota', () => {
 })
 
 describe('SuperGrokQuotaClient.get', () => {
-  it('caches partial unified details without creating any usage numbers', async () => {
-    const { fetcher, calls } = makeFetch(() => jsonBody({ config: {
+  it('caches partial unified details when gRPC cannot verify the missing percentage', async () => {
+    const { fetcher, calls } = makeFetchWithGrpc(() => jsonBody({ config: {
       currentPeriod: { type: 'USAGE_PERIOD_TYPE_WEEKLY', end: '2026-10-19T00:00:00Z' },
       isUnifiedBillingUser: true, prepaidBalance: {},
     } }))
@@ -343,7 +343,7 @@ describe('SuperGrokQuotaClient.get', () => {
     expect(first).not.toHaveProperty('usedPercent')
     expect(first).not.toHaveProperty('remainingPercent')
     expect(await client.get()).toBe(first)
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(3)
     client.dispose()
   })
 
@@ -838,13 +838,13 @@ describe('SuperGrokQuotaClient gRPC-web credits fallback (GROK-QUOTA-CREDITS-001
     client.dispose()
   })
 
-  it('surfaces a percentage-free gRPC window as partial details, never as 0%', async () => {
+  it('keeps an expired percentage-free gRPC window partial', async () => {
     const { fetcher } = makeFetchWithGrpc(
       () => new Response('Failed to serialize billing response', { status: 500 }),
       undefined,
       () => grpcCreditsBody({ start: '2026-10-07T11:18:57Z', end: '2026-10-14T11:18:57Z' }),
     )
-    const client = makeClient({ fetch: fetcher })
+    const client = makeClient({ fetch: fetcher, now: () => Date.parse('2026-10-21T00:00:00Z') })
     const snapshot = await client.get()
     expect(snapshot).toMatchObject({ state: 'partial', period: 'week', resetAt: '2026-10-14T11:18:57.000Z' })
     expect(snapshot).not.toHaveProperty('usedPercent')

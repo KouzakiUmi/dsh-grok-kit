@@ -3,7 +3,7 @@
 **中文** · [English](README.en.md)
 
 <p align="center">
-  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit：DeepSeek Harness 的 Grok OAuth 与融合搜索插件">
+  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit：DeepSeek Harness 的 Grok 对话、网页/X 搜索与可选图片、视频工具；媒体默认关闭">
 </p>
 
 <p align="center">
@@ -33,9 +33,9 @@
 
 账号页的 **登录 Grok / X 订阅**共用官方 Grok OAuth，兼容 X Subscription 与原 SuperGrok / X Premium 订阅；已登录时可重新授权以切换账号，不必先删除共享凭据。账号页也提供[官方订阅管理入口](<https://grok.com/dashboard>)。
 
-额度使用官方 billing/settings 返回的百分比、周期、套餐及预付余额。接口未返回使用百分比时仍显示订阅详情，已用/剩余保持未知，不冒充 0% 或无限额度。统一计费标记来自接口，不根据套餐名猜测；仅展示当前登录身份，不汇总不同工作区或席位。本插件不提供 Cursor 登录或其他模型、外部 Agent 的接入。
+额度使用官方 billing/settings 返回的百分比、周期、套餐及预付余额。REST 缺少使用百分比时会补查一次 gRPC；只有响应完整、状态成功且周期有效时，才按 proto3 隐式零值显示已用 0%／剩余 100%，不能核实时仍保留订阅详情、已用/剩余未知，不冒充无限额度。补查使用独立短超时，失败或补查超时不会抹去已读取的部分数据；整次读取超时、取消和账号校验仍然生效。结果按账号最多缓存 60 秒，已核实用量的缓存不跨有效周期，返回前也会重新校验周期；缺百分比的未缓存读取至多多发一次 gRPC 请求，REST 429 不触发补查。周期有效性依赖本机时钟，时钟偏差可能影响周期判断和隐式零值显示。统一计费标记来自接口，不根据套餐名猜测；仅展示当前登录身份，不汇总不同工作区或席位。本插件不提供 Cursor 登录或其他模型、外部 Agent 的接入。
 
-**0.2.7** 加固 OAuth 登录凭据的发送边界：统一检查请求目的地，带凭据的请求拒绝重定向。正常端点与代理配置不变，额度读取仍沿用上一版的故障回退。更多变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.9** 将网络请求依赖 Undici 升级到 `8.12.3`，包含上游安全修复；功能与配置不变，建议更新并重启 DSH。此前的额度读取与网络设置改进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 主循环融合搜索
 
@@ -91,7 +91,7 @@
 ### 桌面客户端
 
 1. 打开桌面客户端，在侧栏进入 **插件（Plugins）→ 添加插件（Add plugin）**。
-2. 输入 `dsh-grok-kit@latest` 并安装；需要固定本版时输入 `dsh-grok-kit@0.2.7`。
+2. 输入 `dsh-grok-kit@latest` 并安装；需要固定本版时输入 `dsh-grok-kit@0.2.9`。
 3. 安装完成后点击 **立即启用（Enable now）**。若提示需要重启，通过应用菜单或托盘的 **Quit / 退出** 完整退出后重新打开；仅关闭窗口可能只是隐藏应用。
 4. 在 **设置 → xAI Grok** 中确认插件入口出现，再按账号资格完成登录。
 
@@ -108,10 +108,10 @@ dsh web
 
 如果 Web 进程已经在运行，先停止它，安装后再运行 `dsh web` 并刷新页面。以下命令均用于 Web。
 
-也可以固定安装 0.2.7：
+也可以固定安装 0.2.9：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.7
+dsh plugin --profile web add dsh-grok-kit@0.2.9
 dsh web
 ```
 
@@ -124,12 +124,12 @@ npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 
 如果这个 profile 以前安装的是 GitHub 来源，可先尝试 `dsh plugin --profile web add dsh-grok-kit@latest`；若来源没有切换，先移除旧包再重新添加。
 
-**0.2.7** 增加凭据目的地检查，不增加订阅权限；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。本分支保留 DeepSeek Harness Core `0.2.1-alpha.3` 与宿主提供的 `@earendil-works/pi-ai@1.2.0`（Node 22/24）适配，不支持旧宿主线，并将视频维护清单移至对话页顶部「已生成的视频」标签。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+**0.2.9** 为网络依赖安全更新，不改变账号的订阅权限。配额请求兼容模式默认关闭，仅影响额度查询；图片、编辑和视频仍默认关闭，首次开启需确认风险、保存并重启。本分支保留 DeepSeek Harness Core `0.2.1-alpha.3` 与宿主提供的 `@earendil-works/pi-ai@1.2.0`（Node 22/24）适配，不支持旧宿主线，并将视频维护清单移至对话页顶部「已生成的视频」标签。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 需要可复现的 Git 安装时，以下命令固定到审核提交；不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 跟随 `main`，不是可复现锚点：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#0578aad2ac07a60e664ae9b4f185dca477aeb2fd
 ```
 
 完整 SHA 会固定安装结果；npm 安装则默认跟随 `latest` 稳定版本。
@@ -193,6 +193,10 @@ dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ff
 本 bundle 的组合默认值来自 `cordis.patch.yml`。手工拆分或重组配置时，可用 `dsh --profile web --dump-config` 核对最终值。
 
 设置页 → xAI Grok →「搜索与对话」或「媒体与任务」可分别覆盖相关搜索/功能键；保存和重置只影响当前页，切页保留草稿（保存后重启生效；未修改的键继续跟随组合默认值，不会固化）。「网络」页的 `proxyUrl` 保存即生效。路线与后续候选见 [路线文档](ROADMAP.zh.md)。
+
+「网络」页另有默认关闭的 **配额请求兼容模式**。若登录、聊天正常但额度读取因全局 `fetch` 包装链冲突而超时，可开启此项并保存：仅额度请求改用插件专用通道，每次请求动态使用当前 xAI 代理，不影响聊天和登录；代理留空时专用通道明确直连，不跟随宿主的全局 `fetch` 或全局 dispatcher。开关与代理地址一起保存后立即生效，无需重启，并清除旧配额缓存。页面显示实际生效的地址（含配置/环境变量回退），保存会将该地址作为插件存储覆盖，优先于配置/环境变量。凭据目的地、禁止重定向、超时/取消和账号隔离保护不变；此模式不保证解决所有插件组合的网络故障。
+
+**出口控制提醒：依赖宿主级强制出口、DLP 或强制网络包装的环境不要开启兼容模式。** 若只需要固定出口代理，请同时填写插件代理 URL；这不能恢复被绕过的宿主控制。兼容通道只接受三条固定的官方额度端点，不是通用网络出口。网络设置初次加载失败时，可点击“重试加载网络设置”；重试保留未保存草稿，加载成功前仍禁止保存。
 
 ## 登录文件、代理与安全边界
 

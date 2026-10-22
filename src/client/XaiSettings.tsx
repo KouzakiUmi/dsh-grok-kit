@@ -117,6 +117,16 @@ interface LoginChallenge {
   userCode?: string
 }
 
+/**
+ * The proxy route's payload. Both fields are read defensively: an older
+ * service answers without the compatibility flag, and a flag that is not a
+ * real boolean (a truthy string) must never be read as "on".
+ */
+interface ProxyPayload {
+  proxyUrl?: unknown
+  quotaCompatibilityMode?: unknown
+}
+
 export interface XaiOAuthSettingsInjected {
   t: (key: XaiOAuthSettingsKey, params?: Record<string, unknown>) => string
 }
@@ -304,10 +314,25 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   const [busy, setBusy] = useState(false)
   const [proxyUrl, setProxyUrl] = useState('')
   const [savedProxyUrl, setSavedProxyUrl] = useState('')
-  const proxyEditedRef = useRef(false)
+  // Quota request compatibility mode. Off by default, so the existing
+  // behaviour (quota requests follow the host's global fetch) is kept until
+  // the user opts in.
+  const [quotaCompatibilityMode, setQuotaCompatibilityMode] = useState(false)
+  const [savedQuotaCompatibilityMode, setSavedQuotaCompatibilityMode] = useState(false)
+  // The first read has not succeeded yet, so the effective proxy URL is
+  // unknown. Saving then could store an empty URL over a real one, so the
+  // save button stays disabled until the read lands. Editing stays allowed.
+  const [proxyLoaded, setProxyLoaded] = useState(false)
+  const [proxyLoading, setProxyLoading] = useState(false)
+  const proxyLoadingRef = useRef(false)
+  // Each field owns its edit flag: toggling the compatibility mode must not
+  // stop a late read from filling in the proxy URL the user never touched.
+  const proxyUrlEditedRef = useRef(false)
+  const quotaEditedRef = useRef(false)
+  // A committed save owns both baselines: a late read must not roll them back.
   const proxySavedRef = useRef(false)
   const [proxyBusy, setProxyBusy] = useState(false)
-  const [proxyFeedback, setProxyFeedback] = useState<'idle' | 'saved' | 'error'>('idle')
+  const [proxyFeedback, setProxyFeedback] = useState<'idle' | 'saved' | 'error' | 'loadError'>('idle')
   const [popupBlocked, setPopupBlocked] = useState(false)
   const [options, setOptions] = useState<Partial<Record<OptionKey, OptionValue>>>({})
   const [storedOptions, setStoredOptions] = useState<Partial<Record<OptionKey, OptionValue>>>({})
@@ -426,7 +451,8 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
   }
 
   const pageHasDraft = (pageId: SettingsPageId): boolean =>
-    pageId === 'network' ? proxyUrl.trim() !== savedProxyUrl
+    pageId === 'network'
+      ? proxyUrl.trim() !== savedProxyUrl || quotaCompatibilityMode !== savedQuotaCompatibilityMode
       : PAGE_OPTION_KEYS[pageId].some(key => optionsDirty.has(key))
 
   /** Feedback visible on one page: its own, or a page-independent load error. */
@@ -516,31 +542,83 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
     }
   }
 
+  /**
+   * Read the effective proxy settings.
+   *
+   * The URL and the compatibility mode have their own edit flags, so a read
+   * that arrives late still fills in the field the user has not touched
+   * (toggling the mode must not hide the proxy URL, whose empty draft would
+   * otherwise be written back over a real proxy) and never overwrites a field
+   * the user has edited or a baseline a save has already committed.
+   */
   const loadProxy = useCallback(async () => {
+    if (proxyLoadingRef.current) return
+    proxyLoadingRef.current = true
+    setProxyLoading(true)
     try {
-      const value = await jsonRequest<{ proxyUrl: string }>(PROXY_PATH)
-      // Still learn the baseline after an edit, but never replace a newer save.
-      if (!proxySavedRef.current) setSavedProxyUrl(value.proxyUrl ?? '')
-      if (!proxyEditedRef.current) setProxyUrl(value.proxyUrl ?? '')
+      const value = await jsonRequest<ProxyPayload>(PROXY_PATH)
+      const url = typeof value.proxyUrl === 'string' ? value.proxyUrl : ''
+      // An older service has no compatibility flag: the mode is off. A flag
+      // that is not a real boolean is not "on" either.
+      const mode = value.quotaCompatibilityMode === true
+      setProxyLoaded(true)
+      if (!proxyUrlEditedRef.current) setProxyUrl(url)
+      if (!quotaEditedRef.current) setQuotaCompatibilityMode(mode)
+      if (!proxySavedRef.current) {
+        setSavedProxyUrl(url)
+        setSavedQuotaCompatibilityMode(mode)
+      }
+      setProxyFeedback(previous => previous === 'loadError' ? 'idle' : previous)
     } catch {
-      setProxyFeedback('error')
+      // Unknown settings must not be saved; retry keeps any local edits.
+      setProxyLoaded(false)
+      setProxyFeedback('loadError')
+    } finally {
+      proxyLoadingRef.current = false
+      setProxyLoading(false)
     }
   }, [])
 
+  /**
+   * Save the proxy URL and the compatibility mode in one request: the server
+   * needs both, and a half-saved pair would leave the page describing a
+   * state the server never stored.
+   */
   const saveProxy = async (): Promise<void> => {
+    // A failed read leaves the effective settings unknown; writing them back
+    // would store guesses. Wait for a successful load/retry instead.
+    if (proxyFeedback === 'loadError') return
     setProxyBusy(true)
     try {
-      const value = await jsonRequest<{ proxyUrl: string }>(PROXY_PATH, 'POST', { proxyUrl })
-      proxyEditedRef.current = true
+      const value = await jsonRequest<ProxyPayload>(PROXY_PATH, 'POST', {
+        proxyUrl,
+        quotaCompatibilityMode,
+      })
+      const url = typeof value.proxyUrl === 'string' ? value.proxyUrl : proxyUrl
+      // A missing flag means the service did not report the mode: it stays
+      // off instead of being read as "on" from a truthy string.
+      const mode = value.quotaCompatibilityMode === true
+      proxyUrlEditedRef.current = true
+      quotaEditedRef.current = true
       proxySavedRef.current = true
-      setProxyUrl(value.proxyUrl ?? '')
-      setSavedProxyUrl(value.proxyUrl ?? '')
+      setProxyUrl(url)
+      setSavedProxyUrl(url)
+      setQuotaCompatibilityMode(mode)
+      setSavedQuotaCompatibilityMode(mode)
+      setProxyLoaded(true)
       setProxyFeedback('saved')
     } catch {
+      // The save failed, so nothing was stored: keep the draft and the
+      // unsaved marker instead of pretending the pair was committed.
       setProxyFeedback('error')
     } finally {
       setProxyBusy(false)
     }
+  }
+
+  /** A new edit clears a stale save result, but not a failed read. */
+  const resetProxyFeedback = (): void => {
+    setProxyFeedback(previous => previous === 'loadError' ? previous : 'idle')
   }
 
   const refresh = useCallback(async () => {
@@ -1092,7 +1170,7 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
           )
         : null}
 
-      {/* Network page: the xAI-only proxy. */}
+      {/* Network page: the xAI-only proxy and the quota compatibility mode. */}
       {page === 'network'
         ? (
             <div style={pageStyleInner}>
@@ -1106,9 +1184,9 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                     disabled={proxyBusy}
                     aria-label={t('proxyTitle')}
                     onChange={(event) => {
-                      proxyEditedRef.current = true
+                      proxyUrlEditedRef.current = true
                       setProxyUrl(event.target.value)
-                      setProxyFeedback('idle')
+                      resetProxyFeedback()
                     }}
                     style={{
                       flex: '1 1 260px',
@@ -1122,16 +1200,55 @@ export function XaiSettings({ t }: XaiOAuthSettingsProps) {
                       fontSize: 14,
                     }}
                   />
-                  <button type="button" style={buttonStyle} disabled={proxyBusy} onClick={() => { void saveProxy() }}>
+                  <button type="button" style={buttonStyle} disabled={proxyBusy || !proxyLoaded} onClick={() => { void saveProxy() }}>
                     {proxyBusy ? t('working') : t('proxySave')}
                   </button>
                 </div>
                 <p style={bodyStyle}>{t('proxyHint')}</p>
-                {pageHasDraft('network') ? <p role="status" style={bodyStyle}>{t('unsavedChangesHint')}</p> : null}
+                {/* The compatibility mode is saved together with the proxy URL,
+                    so it lives in the same card. */}
+                <div style={optionRowStyle}>
+                  <label style={optionRowStyle}>
+                    <input
+                      type="checkbox"
+                      checked={quotaCompatibilityMode}
+                      disabled={proxyBusy}
+                      onChange={(event) => {
+                        quotaEditedRef.current = true
+                        setQuotaCompatibilityMode(event.target.checked)
+                        resetProxyFeedback()
+                      }}
+                    />
+                    <span>{t('quotaCompatibilityMode')}</span>
+                  </label>
+                </div>
+                <p style={optionHintStyle}>{t('quotaCompatibilityModeHint')}</p>
+                <p role="note" style={optionHintStyle}>{t('quotaCompatibilityWarning')}</p>
+                {pageHasDraft('network')
+                  ? (
+                      <p role="status" style={bodyStyle}>
+                        {t('unsavedChangesHint')}
+                        {' '}
+                        {t('networkUnsavedChangesHint')}
+                        {' '}
+                        {quotaCompatibilityMode !== savedQuotaCompatibilityMode ? t('quotaCompatibilityUnsaved') : ''}
+                      </p>
+                    )
+                  : null}
                 {proxyFeedback === 'saved'
                   ? <p role="status" style={{ ...bodyStyle, color: 'var(--dsw-alias-state-success-primary, #22a06b)' }}>{t('proxySaved')}</p>
                   : null}
                 {proxyFeedback === 'error' ? <p role="alert" style={errorStyle}>{t('proxyError')}</p> : null}
+                {proxyFeedback === 'loadError'
+                  ? (
+                      <>
+                        <p role="alert" style={errorStyle}>{t('proxyLoadError')}</p>
+                        <button type="button" style={buttonStyle} disabled={proxyLoading} aria-label={t('proxyRetry')} onClick={() => { void loadProxy() }}>
+                          {proxyLoading ? t('working') : t('proxyRetry')}
+                        </button>
+                      </>
+                    )
+                  : null}
               </div>
             </div>
           )

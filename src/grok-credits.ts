@@ -13,8 +13,9 @@
  * the same OAuth Bearer and reports credit_usage_percent. This module only
  * parses gRPC-web frames — it sends no network requests. Field numbers and
  * semantics mirror dsh-subusage's grok-credits module so both consumers read
- * the same wire shape. Parsing failures return undefined; no usage number is
- * ever fabricated. A body is usable only when grpc-status is 0, from the
+ * the same wire shape. Parsing failures return undefined. An omitted proto3
+ * float decodes to zero only for a complete config with an active known period.
+ * A body is usable only when grpc-status is 0, from the
  * 0x80 trailer or from an HTTP header the caller supplies (trailers-only).
  * @module dsh-grok-kit/grok-credits
  */
@@ -27,12 +28,16 @@ export const GROK_GRPC_EMPTY_FRAME = new Uint8Array([0, 0, 0, 0, 0])
 /** Optional HTTP `grpc-status`, used when the transport promoted trailers out of the body. */
 export interface ParseGrokCreditsOptions {
   headerStatus?: string | null
+  /** Epoch milliseconds used to verify the active period before applying a proto3 zero. */
+  now?: number
 }
 
 /** The config fragment normalizeSuperGrokQuota consumes as `body.config`. */
 export interface GrokCreditsBillingBody {
+  /** Internal probe provenance, not an upstream JSON field or public snapshot property. */
+  implicitUsagePercent?: true
   config: {
-    /** USED percentage (0–100), only present when the wire reported one. */
+    /** USED percentage (0–100), explicit or the verified proto3 implicit zero. */
     creditUsagePercent?: number
     currentPeriod?: { type?: string; start?: string; end?: string }
   }
@@ -43,21 +48,22 @@ interface Varint {
   next: number
 }
 
-function readVarint(message: Uint8Array, offset: number): Varint | undefined {
+function readVarint(message: Uint8Array, offset: number, skipValue = false): Varint | undefined {
   let result = 0
-  let shift = 0
   let next = offset
-  while (next < message.length && shift <= 35) {
+  for (let index = 0; index < 10 && next < message.length; index += 1) {
     const byte = message[next++]
-    result |= (byte & 0x7f) << shift
-    if ((byte & 0x80) === 0) return { value: result >>> 0, next }
-    shift += 7
+    if (index === 9 && byte > 1) return undefined
+    result += (byte & 0x7f) * 2 ** (7 * index)
+    if ((byte & 0x80) === 0) {
+      return skipValue || Number.isSafeInteger(result) ? { value: result, next } : undefined
+    }
   }
   return undefined
 }
 
 function skipField(message: Uint8Array, offset: number, wire: number): number | undefined {
-  if (wire === 0) return readVarint(message, offset)?.next
+  if (wire === 0) return readVarint(message, offset, true)?.next
   if (wire === 1) return offset + 8 <= message.length ? offset + 8 : undefined
   if (wire === 2) {
     const length = readVarint(message, offset)
@@ -76,8 +82,27 @@ function skipField(message: Uint8Array, offset: number, wire: number): number | 
  */
 function readTag(message: Uint8Array, offset: number): { field: number; wire: number; next: number } | undefined {
   const tag = readVarint(message, offset)
-  if (tag === undefined) return undefined
+  if (tag === undefined || tag.value < 8 || tag.value > 0xffffffff) return undefined
   return { field: tag.value >>> 3, wire: tag.value & 7, next: tag.next }
+}
+
+/** Validate the whole message, not just the prefix before the first known field. */
+function isCompleteMessage(message: Uint8Array, wires: Readonly<Record<number, number>>): boolean {
+  let offset = 0
+  const seen = new Set<number>()
+  while (offset < message.length) {
+    const tag = readTag(message, offset)
+    if (tag === undefined) return false
+    if (Object.hasOwn(wires, tag.field)) {
+      // Ambiguous duplicate singular fields must not authorize an implicit zero.
+      if (tag.wire !== wires[tag.field] || seen.has(tag.field)) return false
+      seen.add(tag.field)
+    }
+    const next = skipField(message, tag.next, tag.wire)
+    if (next === undefined) return false
+    offset = next
+  }
+  return true
 }
 
 function readLengthDelimitedField(message: Uint8Array, fieldNumber: number): Uint8Array | undefined {
@@ -125,29 +150,40 @@ function readFloatField(message: Uint8Array, fieldNumber: number): number | unde
   return undefined
 }
 
-/** google.protobuf.Timestamp { int64 seconds = 1; } normalized to an ISO string. */
-function readTimestampField(message: Uint8Array, fieldNumber: number): string | undefined {
+/** Timestamp bounds use conservative milliseconds: start rounds up, end rounds down. */
+function readTimestampField(message: Uint8Array, fieldNumber: number, roundUp = false): string | undefined {
   const nested = readLengthDelimitedField(message, fieldNumber)
-  if (nested === undefined) return undefined
+  if (nested === undefined || !isCompleteMessage(nested, { 1: 0, 2: 0 })) return undefined
   let offset = 0
   let seconds: number | undefined
+  let nanos = 0
   while (offset < nested.length) {
     const tag = readTag(nested, offset)
-    if (tag === undefined) break
+    if (tag === undefined) return undefined
     offset = tag.next
-    if (tag.wire === 0) {
+    if (tag.wire === 0 && (tag.field === 1 || tag.field === 2)) {
       const value = readVarint(nested, offset)
-      if (value === undefined) break
+      // A known field that cannot be decoded invalidates the timestamp; do
+      // not keep earlier seconds and accidentally authorize an implicit zero.
+      if (value === undefined) return undefined
       offset = value.next
       if (tag.field === 1) seconds = value.value
+      if (tag.field === 2) {
+        if (value.value > 999_999_999) return undefined
+        nanos = value.value
+      }
       continue
     }
     const skipped = skipField(nested, offset, tag.wire)
-    if (skipped === undefined) break
+    if (skipped === undefined) return undefined
     offset = skipped
   }
   if (seconds === undefined) return undefined
-  return new Date(seconds * 1000).toISOString()
+  // Round the fractional part before adding epoch milliseconds: adding a
+  // single nanosecond first would already lose it to floating-point precision.
+  const milliseconds = roundUp ? Math.ceil(nanos / 1_000_000) : Math.floor(nanos / 1_000_000)
+  const date = new Date(seconds * 1000 + milliseconds)
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined
 }
 
 interface GrpcWebScan {
@@ -156,6 +192,8 @@ interface GrpcWebScan {
   trailerStatus?: string
   /** A trailer bit was set but the frame was not a readable uncompressed status. */
   trailerUnreadable: boolean
+  /** Compressed/unknown or multiple data frames cannot prove an implicit zero. */
+  ambiguousData: boolean
 }
 
 /** ASCII header block. Undefined when the frame is not headers; null when headers omit grpc-status. */
@@ -190,6 +228,7 @@ function scanGrpcWeb(bytes: Uint8Array): GrpcWebScan | undefined {
   let message: Uint8Array | undefined
   let trailerStatus: string | undefined
   let trailerUnreadable = false
+  let ambiguousData = false
   while (offset < bytes.length) {
     if (offset + 5 > bytes.length) return undefined
     const flags = bytes[offset]
@@ -214,10 +253,10 @@ function scanGrpcWeb(bytes: Uint8Array): GrpcWebScan | undefined {
       }
       continue
     }
-    if (flags !== 0) continue
-    if (message === undefined) message = frame
+    if (flags !== 0 || message !== undefined) ambiguousData = true
+    if (flags === 0 && message === undefined) message = frame
   }
-  return { message, trailerStatus, trailerUnreadable }
+  return { message, trailerStatus, trailerUnreadable, ambiguousData }
 }
 
 /** grpc-status 0 from the header or the trailer, and no contradictory status. */
@@ -259,13 +298,25 @@ export function parseGrokCreditsGrpcWeb(
   const scan = scanGrpcWeb(bytes)
   if (scan?.message === undefined || !grpcStatusAccepted(scan, options?.headerStatus)) return undefined
   const message = scan.message
-  const config = readLengthDelimitedField(message, 1) ?? message
-  const usedPercent = readFloatField(config, 1)
-  const start = readTimestampField(config, 4)
+  const envelope = readLengthDelimitedField(message, 1)
+  const config = envelope ?? message
+  if (!isCompleteMessage(message, envelope === undefined ? { 1: 5, 4: 2, 5: 2 } : { 1: 2 })
+    || !isCompleteMessage(config, { 1: 5, 4: 2, 5: 2 })) return undefined
+  let usedPercent = readFloatField(config, 1)
+  const start = readTimestampField(config, 4, true)
   // A missing end stays missing: deriving end = start would invent a reset
   // date at the period start and still yields no decidable period kind.
   const end = readTimestampField(config, 5)
   const type = periodType(start, end)
+  // credit_usage_percent is a proto3 non-optional float: absence means zero.
+  // Apply that default only to a complete, unambiguous config with a known
+  // active billing window. Missing configs, stale periods and malformed data
+  // remain unknown; REST JSON never receives this default on its own.
+  const now = options?.now ?? Date.now()
+  const implicitUsagePercent = usedPercent === undefined && envelope !== undefined && !scan.ambiguousData
+    && type !== undefined && start !== undefined && end !== undefined
+    && Date.parse(start) <= now && now < Date.parse(end)
+  if (implicitUsagePercent) usedPercent = 0
   const currentPeriod = end !== undefined || start !== undefined
     ? {
         ...type === undefined ? {} : { type },
@@ -280,6 +331,7 @@ export function parseGrokCreditsGrpcWeb(
   if (usedPercent !== undefined && !Number.isFinite(usedPercent)) return undefined
   if (usedPercent === undefined && currentPeriod === undefined) return undefined
   return {
+    ...implicitUsagePercent ? { implicitUsagePercent: true } : {},
     config: {
       ...usedPercent === undefined ? {} : { creditUsagePercent: usedPercent },
       ...currentPeriod === undefined ? {} : { currentPeriod },

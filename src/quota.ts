@@ -18,9 +18,16 @@
  * 5xx or a transport failure falls back to grok.com's gRPC-web
  * GetGrokCreditsConfig on the same bearer. 401/403 never fall back, and 429
  * (or any other non-5xx) stays on the REST error mapping so a rate limit is
- * not amplified (GROK-QUOTA-CREDITS-001, see ./grok-credits.ts). A readable period without a reported percentage
- * yields partial metadata, never a fabricated usage number. Snapshots are cached per OAuth
- * account partition for 60s; an unknown or mid-flight-changed identity fails
+ * not amplified (GROK-QUOTA-CREDITS-001, see ./grok-credits.ts). A 200 with
+ * partial period metadata is also verified over gRPC; only a complete active
+ * config can supply the proto3 implicit zero. Optional verification has its
+ * own shorter budget; if it fails, REST metadata stays partial. Caller aborts,
+ * disposal and the whole-get deadline still stop the get. Missing percentages
+ * add at most one gRPC call per uncached read (60s cache); REST 429 never does.
+ * Current-period checks use the local wall clock, so clock skew can affect
+ * freshness/implicit-zero decisions. Verified periods are rechecked after
+ * final identity I/O and bound cache validity. Snapshots are cached per OAuth
+ * account partition for at most 60s; an unknown or mid-flight-changed identity fails
  * closed and never returns another account's data.
  *
  * Every await (token resolution, refresh, both reads) races the whole-get
@@ -51,6 +58,8 @@ export const DEFAULT_QUOTA_TIMEOUT_MS = 10_000
 export const QUOTA_CACHE_TTL_MS = 60_000
 /** Independent budget for the optional settings (plan name) read. */
 export const QUOTA_SETTINGS_TIMEOUT_MS = 3_000
+/** Optional REST-200 verification gets at most 2s and half the remaining whole-get budget. */
+export const QUOTA_VERIFICATION_TIMEOUT_MS = 2_000
 /** Upstream response ceiling (same scale as the Web routes' request ceiling). */
 export const MAX_QUOTA_RESPONSE_BYTES = 1024 * 1024
 /** Plan display names are upstream free text: sanitized and length-capped. */
@@ -232,6 +241,36 @@ export function normalizeSuperGrokQuota(
   return percent === undefined ? details : { ...details, usedPercent: percent, remainingPercent: 100 - percent }
 }
 
+/** A current window needs two real bounds; an end alone cannot establish freshness. */
+function activeQuotaPeriod(period: unknown, now: number): period is Record<string, unknown> {
+  if (!isRecord(period)) return false
+  const start = parseResetAt(period.start)
+  const end = parseResetAt(period.end)
+  return start !== undefined && end !== undefined
+    && Date.parse(start) <= now && now < Date.parse(end)
+}
+
+/** Do not attach a gRPC number to a different or partially overwritten REST window. */
+function verifiedCreditsPeriod(
+  restPeriod: unknown,
+  grpcPeriod: GrokCreditsBillingBody['config']['currentPeriod'],
+  now: number,
+): Record<string, unknown> | undefined {
+  if (activeQuotaPeriod(grpcPeriod, now)
+    && (grpcPeriod.type === 'USAGE_PERIOD_TYPE_WEEKLY' || grpcPeriod.type === 'USAGE_PERIOD_TYPE_MONTHLY')) {
+    return grpcPeriod
+  }
+  if (!activeQuotaPeriod(restPeriod, now)) return undefined
+  // An incomplete/untyped gRPC window may corroborate REST, not replace its
+  // type or mix bounds from different billing periods. No window on gRPC is
+  // usable here only because REST supplies the complete current period.
+  for (const bound of ['start', 'end'] as const) {
+    if (grpcPeriod?.[bound] !== undefined
+      && parseResetAt(grpcPeriod[bound]) !== parseResetAt(restPeriod[bound])) return undefined
+  }
+  return restPeriod
+}
+
 /** Release an unread response without letting a broken cancel exceed the budget. */
 function discardResponse(response: Response): void {
   try { void response.body?.cancel().catch(() => undefined) } catch { /* Best effort. */ }
@@ -355,6 +394,14 @@ interface CacheEntry {
   identity: string
   snapshot: AvailableQuotaSnapshot | PartialQuotaSnapshot
   fetchedAt: number
+  /** Internal validity evidence for verified REST readings and implicit zeros. */
+  verifiedPeriod?: Record<string, unknown>
+}
+
+function cacheUsable(entry: CacheEntry, now: number): boolean {
+  const age = now - entry.fetchedAt
+  return age >= 0 && age < QUOTA_CACHE_TTL_MS
+    && (entry.verifiedPeriod === undefined || activeQuotaPeriod(entry.verifiedPeriod, now))
 }
 
 export interface SuperGrokQuotaClientOptions {
@@ -458,6 +505,7 @@ export class SuperGrokQuotaClient {
 
   private async probe(generation: number, signal: AbortSignal | undefined): Promise<QuotaSnapshot> {
     // One hard deadline covering token resolution, the refresh, and both reads.
+    const deadlineAt = performance.now() + this.timeoutMs
     const deadline = AbortSignal.timeout(this.timeoutMs)
     const combined = signal === undefined
       ? AbortSignal.any([deadline, this.disposal.signal])
@@ -478,7 +526,7 @@ export class SuperGrokQuotaClient {
       // survive a A→B→A round-trip, and an in-flight get under the old
       // account must not re-fill the slot.
       this.dropCache()
-    } else if (cached !== undefined && this.now() - cached.fetchedAt < QUOTA_CACHE_TTL_MS) {
+    } else if (cached !== undefined && cacheUsable(cached, this.now())) {
       // Serve from cache only after re-checking that the account partition is
       // still the one this get started with (mirrors the post-fetch check).
       const identityNow = await raceAbort(Promise.resolve(this.tokens.identity?.()), combined)
@@ -486,7 +534,9 @@ export class SuperGrokQuotaClient {
         this.dropCache()
         return { state: 'unavailable' }
       }
-      return cached.snapshot
+      // Identity I/O can cross a period boundary too. An expired entry falls
+      // through to one ordinary read, never a recursive/network retry loop.
+      if (cacheUsable(cached, this.now())) return cached.snapshot
     }
     // Token resolution (getAuth) may ignore its signal: race it so the budget
     // is real, and let the shared disposal abort it mid-flight.
@@ -495,7 +545,7 @@ export class SuperGrokQuotaClient {
       this.dropCache()
       return { state: 'signed-out' }
     }
-    const resolved = await this.resolveBilling(bearer, combined)
+    const resolved = await this.resolveBilling(bearer, combined, deadlineAt)
     if ('state' in resolved) return { state: 'error', reason: resolved.reason }
     let data: NormalizedQuota
     try {
@@ -507,14 +557,26 @@ export class SuperGrokQuotaClient {
     // fetched: a mid-flight account change must neither return nor cache it.
     const identityAfter = await raceAbort(Promise.resolve(this.tokens.identity?.()), combined)
     if (identityAfter !== identity) return { state: 'unavailable' }
-    const checkedAt = new Date(this.now()).toISOString()
+    const checkedNow = this.now()
+    // The evidence can expire while final identity validation is awaiting I/O.
+    // Keep metadata, but remove both numbers rather than publish an expired zero
+    // (or a REST-200 verified number) under a fresh checkedAt.
+    if (resolved.verifiedPeriod !== undefined && !activeQuotaPeriod(resolved.verifiedPeriod, checkedNow)) {
+      const { usedPercent: _usedPercent, remainingPercent: _remainingPercent, ...details } = data
+      data = details
+    }
+    const checkedAt = new Date(checkedNow).toISOString()
     const snapshot: AvailableQuotaSnapshot | PartialQuotaSnapshot = typeof data.usedPercent === 'number' && typeof data.remainingPercent === 'number'
       ? { ...data, state: 'available', usedPercent: data.usedPercent, remainingPercent: data.remainingPercent, checkedAt }
       : { ...data, state: 'partial', checkedAt }
     // A reset()/dispose() since this get started wins: the stale in-flight
     // result is still returned to its own caller, but never re-cached.
     if (generation === this.generation) {
-      this.cache = { identity, snapshot, fetchedAt: this.now() }
+      this.cache = {
+        identity, snapshot, fetchedAt: checkedNow,
+        ...snapshot.state === 'available' && resolved.verifiedPeriod !== undefined
+          ? { verifiedPeriod: resolved.verifiedPeriod } : {},
+      }
     }
     return snapshot
   }
@@ -522,13 +584,13 @@ export class SuperGrokQuotaClient {
   /**
    * Resolve the billing body and its settings companion. The REST credits
    * shape runs first (with at most one 401 refresh on the shared official
-   * chain). HTTP 5xx and transport errors fall back to the gRPC-web credits
-   * probe on the same bearer before the failure is reported
+   * chain). HTTP 5xx, transport errors and partial 200 responses fall back to
+   * the gRPC-web credits probe on the same bearer before the result is reported
    * (GROK-QUOTA-CREDITS-001). 401/403 never fall back, so a revoked login
    * cannot surface as usage data; 429 and other non-5xx statuses stay on the
    * REST mapping so a rate limit is not amplified by a second probe.
    */
-  private async resolveBilling(bearer: string, signal: AbortSignal): Promise<BillingResolution> {
+  private async resolveBilling(bearer: string, signal: AbortSignal, deadlineAt: number): Promise<BillingResolution> {
     let token = bearer
     let round: QuotaRound
     try {
@@ -569,10 +631,40 @@ export class SuperGrokQuotaClient {
       const grpcBody = await this.probeCreditsGrpc(token, signal)
       return grpcBody === undefined
         ? { state: 'error', reason: 'temporary' }
-        : { body: grpcBody, settings: round.settings }
+        : {
+            body: grpcBody, settings: round.settings,
+            ...grpcBody.implicitUsagePercent ? { verifiedPeriod: grpcBody.config.currentPeriod } : {},
+          }
     }
     try {
-      return { body: await readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES, signal), settings: round.settings }
+      const body = await readBoundedJson(round.billing, MAX_QUOTA_RESPONSE_BYTES, signal)
+      // A 200 can still omit the implicit proto3 float. Verify missing REST
+      // usage over gRPC, even if the JSON lacks period metadata. JSON alone
+      // never authorizes zero; explicit/legacy readings keep their mapping.
+      const config = isRecord(body) && isRecord(body.config) ? body.config : undefined
+      let verifyMissingPercent = isRecord(body) && (body.config === undefined || config !== undefined)
+        && config?.creditUsagePercent === undefined
+      if (verifyMissingPercent) {
+        try {
+          verifyMissingPercent = normalizeSuperGrokQuota(body, round.settings).usedPercent === undefined
+        } catch {
+          // Do not mask malformed legacy amounts with another usage reading.
+          verifyMissingPercent = config?.monthlyLimit === undefined && config?.used === undefined
+        }
+      }
+      if (verifyMissingPercent && isRecord(body)) {
+        const grpcBody = await this.verifyCreditsGrpc(token, signal, deadlineAt)
+        const percent = grpcBody?.config.creditUsagePercent
+        const period = verifiedCreditsPeriod(config?.currentPeriod, grpcBody?.config.currentPeriod, this.now())
+        if (grpcBody !== undefined && percent !== undefined && percent >= 0 && percent <= 100 && period !== undefined) {
+          return {
+            body: { ...body, config: { ...config, creditUsagePercent: percent, currentPeriod: period } },
+            settings: round.settings,
+            verifiedPeriod: period,
+          }
+        }
+      }
+      return { body, settings: round.settings }
     } catch (error) {
       // Aborts (deadline/disposal/caller) propagate to the state mapping in
       // get(); a readable but unusable body is an invalid response.
@@ -581,12 +673,33 @@ export class SuperGrokQuotaClient {
     }
   }
 
+  /** Optional verification must leave room to return the already-read REST metadata. */
+  private async verifyCreditsGrpc(bearer: string, signal: AbortSignal, deadlineAt: number): Promise<GrokCreditsBillingBody | undefined> {
+    signal.throwIfAborted()
+    // Monotonic elapsed time avoids wall-clock changes altering the network
+    // budget. Reserve half the remaining time for final account validation.
+    const budget = Math.min(QUOTA_VERIFICATION_TIMEOUT_MS, Math.floor((deadlineAt - performance.now()) / 2))
+    if (budget <= 0) return undefined
+    const verificationSignal = AbortSignal.any([signal, AbortSignal.timeout(budget)])
+    try {
+      return await this.probeCreditsGrpc(bearer, verificationSignal)
+    } catch (error) {
+      // Only the optional timer degrades to the REST result. Caller cancellation,
+      // disposal and the hard whole-get deadline still win over partial data.
+      if (signal.aborted) throw error
+      return undefined
+    }
+  }
+
   /** Transport-failure path: the gRPC-web probe may still answer on this bearer. */
   private async grpcOrRethrow(token: string, signal: AbortSignal, error: unknown): Promise<BillingResolution> {
     if (signal.aborted) throw error
     const grpcBody = await this.probeCreditsGrpc(token, signal)
     if (grpcBody === undefined) throw error
-    return { body: grpcBody, settings: undefined }
+    return {
+      body: grpcBody, settings: undefined,
+      ...grpcBody.implicitUsagePercent ? { verifiedPeriod: grpcBody.config.currentPeriod } : {},
+    }
   }
 
   /**
@@ -611,7 +724,7 @@ export class SuperGrokQuotaClient {
       if (response.ok && (grpcStatus === null || grpcStatus.trim() === '0')) {
         return parseGrokCreditsGrpcWeb(
           await readBoundedBytes(response, MAX_QUOTA_RESPONSE_BYTES, signal),
-          { headerStatus: grpcStatus },
+          { headerStatus: grpcStatus, now: this.now() },
         )
       }
       discardResponse(response)
@@ -694,5 +807,5 @@ interface QuotaRound {
 
 /** A parsed billing body plus the settings companion the plan name comes from. */
 type BillingResolution =
-  | { body: unknown; settings: unknown }
+  | { body: unknown; settings: unknown; verifiedPeriod?: Record<string, unknown> }
   | { state: 'error'; reason: QuotaErrorReason }

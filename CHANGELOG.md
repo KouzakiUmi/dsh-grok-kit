@@ -7,6 +7,28 @@
 - 视频维护清单移至对话页顶部「已生成的视频」标签，设置页仅保留媒体开关；支持按当前账号清除已完成或全部本地任务，不删除附件、不取消上游生成。
 - Moved video maintenance to the conversation's Generated videos tab, leaving media switches in Settings. Clear finished or all local tasks for the signed-in account without deleting attachments or cancelling upstream generation.
 
+## 0.2.9（2026-10-22）
+
+- 更新首页 hero，展示现有的对话、网页/X 搜索及可选图片/视频能力；未新增功能，媒体仍默认关闭。
+- Refreshed the homepage hero to show existing chat, web/X search, and optional image/video capabilities. No features were added; media remains off by default.
+
+- 将网络请求依赖 Undici 升级到 `8.12.3`，包含上游 2026 年 10 月的安全修复；声明下限同步提高到 `^8.12.3`。
+- Updated the HTTP dependency Undici to `8.12.3`, including upstream security fixes from October 2026, and raised the declared minimum to `^8.12.3`.
+- 插件功能、配置格式和支持的 DSH 版本不变；建议更新插件并重启 DSH。
+- Plugin features, configuration format, and supported DSH versions are unchanged; update the plugin and restart DSH.
+
+## 0.2.8（2026-10-21）
+
+- 修复部分账号缺少额度百分比时的显示：结合官方额度接口核实，仅在响应完整、计费周期有效时恢复 0% 已用；无法核实时保留未知或部分信息，不估算用量。
+- Fixed quota display for some accounts with a missing usage percentage. The plugin verifies it against the official quota endpoint and restores 0% used only from a complete response with a valid billing period; otherwise it keeps the result unknown or partial, without estimates.
+- 新增默认关闭的「配额请求兼容模式」：仅额度读取改用插件专用通道，动态使用插件代理；聊天和登录保持原路径。专用通道限于三个固定官方额度端点，并拒绝重定向。
+- Added off-by-default Quota request compatibility mode: quota reads use a plugin-owned channel and the current plugin proxy, while chat and sign-in keep their existing paths. The channel accepts only three fixed official quota endpoints and refuses redirects.
+- 网络设置加载失败时可直接重试，保留未保存的地址和开关；加载成功前禁止保存。卸载时等待已接纳的设置写入完成，避免旧实例覆盖后续实例的保存。
+- Failed network-settings loads can be retried without losing unsaved URL or toggle edits; saving stays disabled until loading succeeds. Unload waits for accepted settings writes so an old instance cannot overwrite a subsequent instance's save.
+- 依赖宿主统一出口、数据防泄漏（DLP）或强制网络包装控制的环境不要开启兼容模式。填写插件代理地址也不会恢复被绕过的宿主控制；现有配置无需迁移，媒体开关与账号权限不变。
+- Do not enable compatibility mode where host-level egress controls, data loss prevention (DLP), or mandatory network wrappers are required. A plugin proxy does not restore bypassed host controls. No configuration migration is required; media switches and account entitlements are unchanged.
+
+
 ## 0.2.7（2026-10-17）
 
 - 统一检查 OAuth Bearer 请求的目的地：只允许指定的 xAI API、Grok 计费主机和精确的 `grok.com` 额度接口，拒绝向其他地址发送凭据。

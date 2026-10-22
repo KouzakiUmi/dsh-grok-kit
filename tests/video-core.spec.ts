@@ -344,16 +344,19 @@ describe('generate', () => {
   it('persists submission-unknown and rethrows when the caller aborts mid-submission', async () => {
     const storePath = await newStorePath()
     const controller = new AbortController()
+    let enteredSubmit!: () => void
+    const submitted = new Promise<void>(resolve => { enteredSubmit = resolve })
     const harness = makeHarness({
       storePath,
       fetchMock: routeFetch({
         submit: init => new Promise<Response>((_resolvePromise, rejectPromise) => {
           init?.signal?.addEventListener('abort', () => rejectPromise((init.signal as AbortSignal).reason))
+          enteredSubmit()
         }),
       }),
     })
     const pending = harness.manager.generate({ prompt: 'p', image: PNG_DATA_URI }, controller.signal)
-    await new Promise(resolvePromise => setTimeout(resolvePromise, 20))
+    await submitted
     controller.abort(new Error('cancelled by user'))
     await expect(pending).rejects.toThrow('cancelled by user')
     const listed = await harness.manager.list()

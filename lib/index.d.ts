@@ -389,7 +389,7 @@ interface LoginChallenge {
   userCode?: string;
 }
 /** Register the plugin-owned OAuth routes when the Web server is composed. */
-declare function registerXaiOAuthAuthRoutes(ctx: Context, session: XaiOAuthSession, cordisConfig?: Record<string, unknown>, onAccountChange?: () => void): void;
+declare function registerXaiOAuthAuthRoutes(ctx: Context, session: XaiOAuthSession, cordisConfig?: Record<string, unknown>, onAccountChange?: () => void, onNetworkChange?: () => void): void;
 //#endregion
 //#region src/grok-import.d.ts
 /** Same client id pi-ai / Grok CLI use for the device-code grant. */
@@ -621,10 +621,7 @@ declare function safeMessage(error: unknown): string;
 /** Absolute path of the plugin-owned proxy setting file. */
 declare function xaiProxyPath(dshHome?: string): string;
 declare function readStoredProxyUrl(): string;
-/**
- * Persist the plugin's own proxy setting. Fail-closed: URLs with embedded
- * credentials or invalid proxies are rejected BEFORE anything hits disk.
- */
+/** Legacy URL-only callers must not silently reset the compatibility choice. */
 declare function writeStoredProxyUrl(url: string): Promise<void>;
 /**
  * Point the xAI-only hook at a proxy URL; '' clears it (xAI goes direct too).
@@ -642,7 +639,7 @@ declare function setXaiProxyUrl(url: string): boolean;
  * (a later component that replaced fetch after us is never clobbered).
  */
 declare function installXaiFetchHook(): () => void;
-/** Effective proxy URL: stored setting > config `proxyUrl` > `DSH_XAI_PROXY`. Invalid/userinfo values resolve to ''. */
+/** Effective proxy URL: stored > config > env. Invalid/userinfo values resolve to ''. */
 declare function resolveXaiProxyUrl(configUrl?: string): string;
 /**
  * Apply the effective proxy URL (stored > config > env) to the already

@@ -3,7 +3,7 @@
 [中文](README.md) · **English**
 
 <p align="center">
-  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit: Grok OAuth and fused search for DeepSeek Harness">
+  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit: Grok chat, web/X search, and optional image and video tools for DeepSeek Harness; media is off by default">
 </p>
 
 <p align="center">
@@ -33,9 +33,9 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 
 **Sign in with Grok / X Subscription** uses the same official Grok OAuth flow for the X Subscription and legacy SuperGrok / X Premium plans. Signed-in users can reauthorize to switch accounts without first deleting shared credentials. The account page also links to the [official subscription dashboard](<https://grok.com/dashboard>).
 
-Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. When the billing response omits the usage percentage, subscription details remain visible while used/remaining usage stays unknown—not fabricated 0% or unlimited usage. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
+Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. A missing REST percentage triggers one gRPC verification. Only a complete, successful response with a valid current period can yield the proto3 implicit zero: 0% used / 100% remaining. Otherwise subscription details remain visible with unknown usage, never unlimited usage. Verification has its own short timeout, so its failure or timeout preserves already-read partial details; the whole-get deadline, cancellation and account checks still apply. Results are cached per account for at most 60 seconds; verified usage does not remain cached beyond its valid period, and the period is rechecked before returning it. An uncached read missing a percentage adds at most one gRPC request, and REST 429 never triggers it. Current-period checks rely on the local clock; clock skew can affect freshness and implicit-zero decisions. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
 
-**0.2.7** hardens where OAuth sign-in credentials can be sent: request destinations are checked centrally, and credentialed requests reject redirects. Normal endpoints and proxy settings are unchanged; quota loading keeps the previous release's failure fallback. See [CHANGELOG.md](CHANGELOG.md).
+**0.2.9** updates the HTTP dependency Undici to `8.12.3`, including upstream security fixes. Features and configuration are unchanged; update the plugin and restart DSH. See [CHANGELOG.md](CHANGELOG.md) for earlier quota-reading and network-settings improvements.
 
 ## Search in the main model turn
 
@@ -91,7 +91,7 @@ Desktop and Web have separate plugin installations and activation states. Choose
 ### Desktop app
 
 1. Open the desktop app and select **Plugins → Add plugin** in the sidebar.
-2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.7` to pin this release.
+2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.9` to pin this release.
 3. Click **Enable now** when installation finishes. If prompted to restart, fully quit through the application menu or tray **Quit** action, then reopen the app. Closing the window may only hide it.
 4. Check that **Settings → xAI Grok** is available, then sign in with an eligible account.
 
@@ -108,10 +108,10 @@ dsh web
 
 If the Web process is already running, stop it first, then run `dsh web` after installation and refresh the page. The commands below are for Web.
 
-You can also pin version 0.2.7:
+You can also pin version 0.2.9:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.7
+dsh plugin --profile web add dsh-grok-kit@0.2.9
 dsh web
 ```
 
@@ -124,12 +124,12 @@ npx @deepseek-ai/dsh@0.2.1-alpha.3 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.7** adds credential-destination checks, not subscription entitlements. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. This branch retains DeepSeek Harness Core `0.2.1-alpha.3` with host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24), excludes older host lines, and moves video maintenance to the conversation's Generated videos tab. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.9** is a security update to the HTTP dependency and does not change subscription entitlements. Quota request compatibility mode is off by default and affects quota reads only. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. This branch retains DeepSeek Harness Core `0.2.1-alpha.3` with host-provided `@earendil-works/pi-ai@1.2.0` (Node 22/24), excludes older host lines, and moves video maintenance to the conversation's Generated videos tab. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#4f23b9181d999de40d3ffb2d23a296f9a84cad8b
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#0578aad2ac07a60e664ae9b4f185dca477aeb2fd
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.
@@ -193,6 +193,10 @@ Legacy media enablement without acknowledgment stays inactive; confirm explicitl
 The bundle defaults come from `cordis.patch.yml`. For a manually reduced or recomposed setup, inspect the final values with `dsh --profile web --dump-config`.
 
 Settings split related keys between Search & conversation and Media & tasks. Saves/resets apply only to the current page and drafts survive page switches (restart to apply; untouched keys still follow the bundle defaults). `proxyUrl` on Network applies immediately on save. See the [roadmap](ROADMAP.zh.md) for delivery status and future candidates.
+
+Network also offers **Quota request compatibility mode**, off by default. If sign-in and chat work but quota reads time out because of a global `fetch` wrapper conflict, enable it and save: only quota requests use a plugin-owned channel, reading the current xAI proxy on every call. Chat and sign-in are unchanged. A blank proxy explicitly connects this channel directly, without the host's global `fetch` or global dispatcher. The mode and URL are saved together, take effect immediately without a restart, and invalidate the old quota cache. The page shows the effective URL, including config/environment fallback; saving persists that address as the plugin's stored override, ahead of config/environment values. Credential destinations, redirect refusal, timeouts/cancellation and account isolation remain enforced. This mode is not a guarantee against every multi-plugin networking conflict.
+
+**Do not enable compatibility mode where host-level egress controls, DLP or mandatory outbound wrappers are required.** If you only need a fixed outbound proxy, also configure the plugin proxy URL; that does not restore the bypassed host controls. The compatibility channel accepts only the three fixed official quota endpoints, not arbitrary destinations. If network settings fail to load, use “Retry loading network settings”; retries preserve unsaved drafts and saving remains disabled until loading succeeds.
 
 ## Sign-in document, proxy, and security boundaries
 
