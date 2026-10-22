@@ -3,7 +3,7 @@
 [中文](README.md) · **English**
 
 <p align="center">
-  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit: Grok OAuth and fused search for DeepSeek Harness">
+  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit: Grok chat, web/X search, and optional image and video tools for DeepSeek Harness; media is off by default">
 </p>
 
 <p align="center">

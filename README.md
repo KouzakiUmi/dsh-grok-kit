@@ -3,7 +3,7 @@
 **中文** · [English](README.en.md)
 
 <p align="center">
-  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit：DeepSeek Harness 的 Grok OAuth 与融合搜索插件">
+  <img src="assets/readme/hero.svg" width="100%" alt="dsh-grok-kit：DeepSeek Harness 的 Grok 对话、网页/X 搜索与可选图片、视频工具；媒体默认关闭">
 </p>
 
 <p align="center">

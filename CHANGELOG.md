@@ -2,6 +2,9 @@
 
 ## 0.2.9（2026-10-22）
 
+- 更新首页 hero，展示现有的对话、网页/X 搜索及可选图片/视频能力；未新增功能，媒体仍默认关闭。
+- Refreshed the homepage hero to show existing chat, web/X search, and optional image/video capabilities. No features were added; media remains off by default.
+
 - 将网络请求依赖 Undici 升级到 `8.12.3`，包含上游 2026 年 10 月的安全修复；声明下限同步提高到 `^8.12.3`。
 - Updated the HTTP dependency Undici to `8.12.3`, including upstream security fixes from October 2026, and raised the declared minimum to `^8.12.3`.
 - 插件功能、配置格式和支持的 DSH 版本不变；建议更新插件并重启 DSH。
