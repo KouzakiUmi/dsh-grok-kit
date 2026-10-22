@@ -35,7 +35,7 @@ Supporting behavior includes an xAI-only proxy, forced refresh and one retry on 
 
 Quota comes from the official billing/settings responses: percentage, period, plan and prepaid balance. A missing REST percentage triggers one gRPC verification. Only a complete, successful response with a valid current period can yield the proto3 implicit zero: 0% used / 100% remaining. Otherwise subscription details remain visible with unknown usage, never unlimited usage. Verification has its own short timeout, so its failure or timeout preserves already-read partial details; the whole-get deadline, cancellation and account checks still apply. Results are cached per account for at most 60 seconds; verified usage does not remain cached beyond its valid period, and the period is rechecked before returning it. An uncached read missing a percentage adds at most one gRPC request, and REST 429 never triggers it. Current-period checks rely on the local clock; clock skew can affect freshness and implicit-zero decisions. Unified billing is identified by the reported flag, not guessed from the plan name. Only the signed-in identity is shown; workspaces and seats are not aggregated. The plugin does not provide Cursor sign-in or integrations for other models or external agents.
 
-**0.2.8** fixes quota display for some accounts with a missing usage percentage and adds an off-by-default **Quota request compatibility mode** for cases where other components' network wrappers interfere with quota reads. Failed network-settings loads can be retried without losing unsaved edits. See [CHANGELOG.md](CHANGELOG.md).
+**0.2.9** updates the HTTP dependency Undici to `8.12.3`, including upstream security fixes. Features and configuration are unchanged; update the plugin and restart DSH. See [CHANGELOG.md](CHANGELOG.md) for earlier quota-reading and network-settings improvements.
 
 ## Search in the main model turn
 
@@ -89,7 +89,7 @@ Desktop and Web have separate plugin installations and activation states. Choose
 ### Desktop app
 
 1. Open the desktop app and select **Plugins → Add plugin** in the sidebar.
-2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.8` to pin this release.
+2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.9` to pin this release.
 3. Click **Enable now** when installation finishes. If prompted to restart, fully quit through the application menu or tray **Quit** action, then reopen the app. Closing the window may only hide it.
 4. Check that **Settings → xAI Grok** is available, then sign in with an eligible account.
 
@@ -106,10 +106,10 @@ dsh web
 
 If the Web process is already running, stop it first, then run `dsh web` after installation and refresh the page. The commands below are for Web.
 
-You can also pin version 0.2.8:
+You can also pin version 0.2.9:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.8
+dsh plugin --profile web add dsh-grok-kit@0.2.9
 dsh web
 ```
 
@@ -122,12 +122,12 @@ npx @deepseek-ai/dsh@0.2.0-rc.2 web
 
 If this profile previously used the GitHub source, first try `dsh plugin --profile web add dsh-grok-kit@latest`. If the source does not switch, remove the old package and add it again.
 
-**0.2.8** updates quota reads and network settings without changing subscription entitlements. Quota request compatibility mode is off by default and affects quota reads only. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
+**0.2.9** is a security update to the HTTP dependency and does not change subscription entitlements. Quota request compatibility mode is off by default and affects quota reads only. Image generation, editing, and video remain off by default; first-time enablement requires risk confirmation, saving, and a restart. Host support remains DeepSeek Harness `0.2.0-rc.2` and `@earendil-works/pi-ai@0.87.1` (Node 22/24); the legacy 0.1 host line is unsupported. See [CHANGELOG.md](CHANGELOG.md) for the full update notes.
 
 For a reproducible Git install, the command below pins a reviewed commit. `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is not a reproducible pin:
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#a1a9685587d7a298d429c63b7e38247ff878d3f2
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#0578aad2ac07a60e664ae9b4f185dca477aeb2fd
 ```
 
 The full SHA fixes the installed source; the npm form follows the stable `latest` release by default.

@@ -15,7 +15,7 @@
 桌面与 Web 的插件安装和启用状态独立；已在 Web 中安装的插件需要另行装到桌面端。
 
 1. 打开桌面客户端，在侧栏进入 **插件（Plugins）→ 添加插件（Add plugin）**。
-2. 输入 `dsh-grok-kit@latest` 并安装，或输入 `dsh-grok-kit@0.2.8` 固定本版。
+2. 输入 `dsh-grok-kit@latest` 并安装，或输入 `dsh-grok-kit@0.2.9` 固定本版。
 3. 安装完成后点击 **立即启用（Enable now）**；直接关闭对话框会保留安装结果，但不会启用插件。
 4. 若界面提示需要重启，通过应用菜单或托盘的 **Quit / 退出** 完整退出后重开；仅关闭窗口可能只是隐藏应用。随后在 **设置 → xAI Grok** 中确认入口出现。
 
@@ -46,10 +46,10 @@ dsh plugin --profile web add dsh-grok-kit@latest
 pnpm dsh plugin --profile web add dsh-grok-kit@latest
 ```
 
-也可以固定安装 0.2.8：
+也可以固定安装 0.2.9：
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.8
+dsh plugin --profile web add dsh-grok-kit@0.2.9
 ```
 
 如果 PATH 中没有 `dsh`，可以使用固定宿主版本的 npx：
@@ -70,7 +70,7 @@ dsh plugin --profile web add dsh-grok-kit@latest
 需要可复现安装时，可固定到完整 Git 提交（以下命令固定到所示提交，不跟随默认分支滚动）：
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#a1a9685587d7a298d429c63b7e38247ff878d3f2
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#0578aad2ac07a60e664ae9b4f185dca477aeb2fd
 ```
 
 不带 SHA 的 `github:MaRi23333/dsh-grok-kit` 会跟随 `main`，**不是**可复现锚点。

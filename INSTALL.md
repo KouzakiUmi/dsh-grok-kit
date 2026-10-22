@@ -15,7 +15,7 @@ Idempotent runbook for humans and automation agents.
 Desktop and Web have separate plugin installations and activation states. A plugin installed in Web must be installed separately in Desktop.
 
 1. Open the desktop app and select **Plugins → Add plugin** in the sidebar.
-2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.8` to pin this release.
+2. Enter `dsh-grok-kit@latest` and install it, or use `dsh-grok-kit@0.2.9` to pin this release.
 3. Click **Enable now** when installation finishes. Closing the dialog instead keeps the plugin installed but disabled.
 4. If prompted to restart, fully quit through the application menu or tray **Quit** action, then reopen the app. Closing the window may only hide it. Check that **Settings → xAI Grok** is available.
 
@@ -46,10 +46,10 @@ From a DeepSeek Harness source checkout, prefix the same command with `pnpm`:
 pnpm dsh plugin --profile web add dsh-grok-kit@latest
 ```
 
-Or pin version 0.2.8:
+Or pin version 0.2.9:
 
 ```sh
-dsh plugin --profile web add dsh-grok-kit@0.2.8
+dsh plugin --profile web add dsh-grok-kit@0.2.9
 ```
 
 If `dsh` is not on PATH, run via pinned `npx`:
@@ -70,7 +70,7 @@ If the source does not switch, run `dsh plugin --profile web remove dsh-grok-kit
 For a reproducible install, pin a full Git commit (the command below pins the shown commit rather than following the rolling default branch):
 
 ```sh
-dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#a1a9685587d7a298d429c63b7e38247ff878d3f2
+dsh plugin --profile web add github:MaRi23333/dsh-grok-kit#0578aad2ac07a60e664ae9b4f185dca477aeb2fd
 ```
 
 `github:MaRi23333/dsh-grok-kit` without a SHA follows `main` and is **not** a reproducible pin.
