@@ -1,5 +1,12 @@
 # 更新记录 / Changelog
 
+## 0.2.9（2026-10-22）
+
+- 将网络请求依赖 Undici 升级到 `8.12.3`，包含上游 2026 年 10 月的安全修复；声明下限同步提高到 `^8.12.3`。
+- Updated the HTTP dependency Undici to `8.12.3`, including upstream security fixes from October 2026, and raised the declared minimum to `^8.12.3`.
+- 插件功能、配置格式和支持的 DSH 版本不变；建议更新插件并重启 DSH。
+- Plugin features, configuration format, and supported DSH versions are unchanged; update the plugin and restart DSH.
+
 ## 0.2.8（2026-10-21）
 
 - 修复部分账号缺少额度百分比时的显示：结合官方额度接口核实，仅在响应完整、计费周期有效时恢复 0% 已用；无法核实时保留未知或部分信息，不估算用量。
