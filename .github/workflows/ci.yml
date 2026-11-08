@@ -69,9 +69,7 @@ jobs:
           version: 11.21.0
 
       - name: Isolated pack-install smoke
-        run: |
-          npm install -g @deepseek-ai/dsh@0.2.1-alpha.3
-          node scripts/pack-install-smoke.mjs
+        run: node scripts/pack-install-smoke.mjs
 
       - name: Host compat probe (dsh-llm-pi-ai 0.2.1-alpha.3)
         run: node scripts/verify-host-compat.mjs 0.2.1-alpha.3

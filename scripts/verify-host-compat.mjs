@@ -19,10 +19,8 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { HOST_SETS } from './host-contract.mjs'
 
-const HOST_SETS = {
-  '0.2.1-alpha.3': { dsh: '0.2.1-alpha.3', piAi: '1.2.0', schemastery: '3.18.5-alpha.2', cordis: '4.0.5-alpha.2' },
-}
 // Freeze the host fixture independently of the plugin's optional peers.
 // pi-ai is pulled by the host adapter, not installed on behalf of the plugin.
 const DSH_FIXTURE_COMPONENTS = [

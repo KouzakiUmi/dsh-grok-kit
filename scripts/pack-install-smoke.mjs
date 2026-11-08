@@ -1,23 +1,25 @@
 #!/usr/bin/env node
 /**
- * Isolated DSH pack-install smoke (DSH 0.2.1-alpha.3): npm pack, `dsh plugin add` into
- * the `web` profile, booted `--help`, and the plugin entry.
+ * Isolated DSH pack-install smoke (DSH 0.2.1-alpha.3): install the declared
+ * host with pi-ai pinned, npm pack, `dsh plugin add` into the `web` profile,
+ * booted `--help`, and the plugin entry.
  * Isolates DSH_HOME / HOME / USERPROFILE and package-manager config/cache.
  * Does not read real user credentials.
  *
- * Requires the selected `dsh` version on PATH (CI installs it). Optional DSH_BIN.
+ * Does not use a preinstalled `dsh`. Published dsh-llm-pi-ai@0.2.1-alpha.3
+ * depends on pi-ai ^1.1.0, so a global install of that DSH release floats
+ * off the tested 1.2.0 pin. The install override is exact, and a mismatched
+ * copy still fails the smoke.
  *
  * Usage: node scripts/pack-install-smoke.mjs [0.2.1-alpha.3]
  */
 import { execFileSync } from 'node:child_process'
-import { accessSync, constants, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { HOST_SETS, declaredHostPackageJson, hostPiAiError, resolveHostPiAiPackageJson } from './host-contract.mjs'
 
-const HOST_SETS = {
-  '0.2.1-alpha.3': { dsh: '0.2.1-alpha.3', piAi: '1.2.0' },
-}
 const requestedDsh = process.argv[2] ?? '0.2.1-alpha.3'
 if (!Object.hasOwn(HOST_SETS, requestedDsh)) {
   console.error(`pack-install-smoke: unknown host version "${requestedDsh}" (known: ${Object.keys(HOST_SETS).join(', ')})`)
@@ -34,45 +36,6 @@ function run(file, args, opts = {}) {
     shell,
     ...opts,
   })
-}
-
-function resolveOnPath(name) {
-  const pathEntries = (process.env.PATH ?? '').split(delimiter)
-  const extensions = process.platform === 'win32'
-    ? (process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean)
-    : ['']
-  const names = extensions.some(extension => name.toLowerCase().endsWith(extension.toLowerCase()))
-    ? [name]
-    : extensions.map(extension => `${name}${extension}`)
-  const candidates = isAbsolute(name)
-    ? names
-    : pathEntries.map(directory => directory || '.').flatMap(directory => names.map(candidate => join(directory, candidate)))
-  return candidates.find(candidate => {
-    try {
-      accessSync(candidate, process.platform === 'win32' ? constants.F_OK : constants.X_OK)
-      return true
-    } catch {
-      return false
-    }
-  })
-}
-
-function resolveDshInstall() {
-  const binName = process.env.DSH_BIN ?? (process.platform === 'win32' ? 'dsh' : 'dsh')
-  const located = resolveOnPath(binName)
-  if (!located) throw new Error(`${binName} is not on PATH`)
-  const npmDir = dirname(located)
-  const candidates = [
-    join(npmDir, 'node_modules', '@deepseek-ai', 'dsh'),
-    join(npmDir, '..', 'node_modules', '@deepseek-ai', 'dsh'),
-    join(npmDir, '..', 'lib', 'node_modules', '@deepseek-ai', 'dsh'),
-    join(run('npm', ['root', '-g'], { env: process.env }).trim(), '@deepseek-ai', 'dsh'),
-  ]
-  const dshDir = candidates.find(candidate => existsSync(join(candidate, 'package.json')))
-  if (dshDir === undefined) {
-    throw new Error(`could not resolve @deepseek-ai/dsh next to ${located}`)
-  }
-  return { bin: located, dshDir }
 }
 
 const work = mkdtempSync(join(tmpdir(), 'dsh-grok-kit-smoke-'))
@@ -105,21 +68,34 @@ const env = {
 
 let tarball
 try {
-  const host = resolveDshInstall()
-  const versionOut = run(host.bin, ['--version'], { env, cwd: work })
+  const hostPrefix = join(work, 'host')
+  mkdirSync(hostPrefix)
+  writeFileSync(join(hostPrefix, 'package.json'), `${JSON.stringify(declaredHostPackageJson(requestedDsh), null, 2)}\n`)
+  run('npm', [
+    'install',
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+    '--loglevel=error',
+  ], { cwd: hostPrefix, env, stdio: 'inherit' })
+  const binName = process.platform === 'win32' ? 'dsh.cmd' : 'dsh'
+  const bin = join(hostPrefix, 'node_modules', '.bin', binName)
+  if (!existsSync(bin)) throw new Error(`declared host install is missing ${bin}`)
+  const dshDir = join(hostPrefix, 'node_modules', '@deepseek-ai', 'dsh')
+  const versionOut = run(bin, ['--version'], { env, cwd: work })
   if (!versionOut.includes(EXPECTED_DSH)) {
     throw new Error(`dsh --version is not ${EXPECTED_DSH}: ${versionOut.trim()}`)
   }
-  const dshPkg = JSON.parse(readFileSync(join(host.dshDir, 'package.json'), 'utf8'))
+  const dshPkg = JSON.parse(readFileSync(join(dshDir, 'package.json'), 'utf8'))
   if (dshPkg.version !== EXPECTED_DSH) {
     throw new Error(`@deepseek-ai/dsh package is ${dshPkg.version}, expected ${EXPECTED_DSH}`)
   }
-  const piPkg = join(host.dshDir, 'node_modules', '@earendil-works', 'pi-ai', 'package.json')
-  if (!existsSync(piPkg)) throw new Error(`host pi-ai not found at ${piPkg}`)
+  const piPkg = resolveHostPiAiPackageJson(dshDir)
+  if (piPkg === undefined) throw new Error(`host pi-ai not found from ${dshDir}`)
   const piVersion = JSON.parse(readFileSync(piPkg, 'utf8')).version
-  if (piVersion !== EXPECTED_PI_AI) {
-    throw new Error(`host pi-ai is ${piVersion}, expected ${EXPECTED_PI_AI}`)
-  }
+  const piError = hostPiAiError(piVersion, EXPECTED_PI_AI)
+  if (piError !== undefined) throw new Error(piError)
+  console.log(`pack-install-smoke: declared host pi-ai ${piVersion} at ${piPkg}`)
 
   const packLines = run('npm', ['pack', '--ignore-scripts', '--silent'], { cwd: root, env }).trim().split(/\r?\n/)
   const packName = packLines.at(-1)
@@ -135,15 +111,15 @@ try {
   mkdirSync(profileDir, { recursive: true })
   writeFileSync(join(profileDir, 'pnpm-workspace.yaml'), "allowBuilds:\n  '@google/genai': false\n  protobufjs: false\n")
 
-  run(host.bin, ['plugin', '--profile', PROFILE, 'add', tarball], { env, cwd: work, stdio: 'inherit' })
+  run(bin, ['plugin', '--profile', PROFILE, 'add', tarball], { env, cwd: work, stdio: 'inherit' })
 
-  const dump = run(host.bin, ['--profile', PROFILE, '--dump-config'], { env, cwd: work })
+  const dump = run(bin, ['--profile', PROFILE, '--dump-config'], { env, cwd: work })
   if (!dump.includes('dsh-grok-kit')) throw new Error('dump-config does not mention dsh-grok-kit')
   if (!/backendSearch:\s*false/.test(dump) && !/"backendSearch":\s*false/.test(dump)) {
     throw new Error(`dump-config does not show backendSearch: false\n${dump.slice(0, 2000)}`)
   }
 
-  const help = run(host.bin, ['--profile', PROFILE, '--help'], {
+  const help = run(bin, ['--profile', PROFILE, '--help'], {
     env,
     cwd: work,
     timeout: 30_000,
